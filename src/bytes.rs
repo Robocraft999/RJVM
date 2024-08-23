@@ -60,6 +60,7 @@ impl Binary for ByteType{
     }
 }
 
+//TODO change to usize
 impl Into<u32> for ByteType{
     fn into(self) -> u32 {
         match self {
