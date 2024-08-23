@@ -68,7 +68,7 @@ fn parse_class_file(path: &str) -> std::io::Result<()> {
                 // string_index
                 info = vec![parse_u2(&mut bytes)?]
             } else {
-                todo!("CPTag {tag} not supported yet");
+                unimplemented!("CPTag {tag} not supported yet");
             }
             constant_pool.push(CPInfo{
                 tag,
