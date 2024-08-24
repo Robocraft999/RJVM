@@ -1,103 +1,85 @@
 mod constants;
 mod bytes;
+mod access_flags;
+mod attribute;
+mod class_file_version;
+mod field_info;
+mod method_info;
 
 use std::fmt::{format, write, Debug, Formatter};
 use std::fs::File;
 use std::io::Read;
 use std::str::FromStr;
+use access_flags::{parse_class_flags, parse_field_flags, parse_method_flags};
+use attribute::{Attribute, Code};
 use bytes::{read_u2, read_u4};
 
+use crate::access_flags::ClassFlags;
 use crate::bytes::{ByteType, parse_u1, parse_u2, parse_u4};
-use crate::bytes::ByteType::{U1, U2, U4};
 use crate::constants::*;
-
-#[derive(Debug)]
-struct CPInfo{
-    tag: Constant,
-    info: Vec<ByteType>
-}
-
-#[derive(Debug)]
-struct MemberInfo{
-    access_flags: ByteType,
-    name_index: ByteType,
-    descriptor_index: ByteType,
-    attributes: Vec<AttributeInfo>
-}
-
-#[derive(Debug)]
-struct AttributeInfo{
-    attribute_name_index: ByteType,
-    info: Vec<ByteType>
-}
+use crate::class_file_version::ClassFileVersion;
+use crate::field_info::FieldInfo;
+use crate::method_info::MethodInfo;
 
 struct ClassFile{
-    magic: ByteType,
-    minor_version: ByteType,
-    major_version: ByteType,
-    constant_pool: Vec<CPInfo>,
-    access_flags: ByteType,
-    this_class: ByteType,
-    super_class: ByteType,
-    interfaces: Vec<ByteType>,
-    fields: Vec<MemberInfo>,
-    methods: Vec<MemberInfo>,
-    attributes: Vec<AttributeInfo>
+    magic: u32,
+    class_file_version: ClassFileVersion,
+    constant_pool: ConstantPool,
+    access_flags: ClassFlags,
+    name: String,
+    super_class: Option<String>,
+    interfaces: Vec<String>,
+    fields: Vec<FieldInfo>,
+    methods: Vec<MethodInfo>,
+    deprecated: bool,
+    source_file: Option<String>
 }
 
 impl Debug for ClassFile{
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ClassFile")
             .field("magic", &format_args!("{:x}", self.magic))
-            .field("minor", &self.minor_version)
-            .field("major", &self.major_version)
+            .field("class_file_version", &self.class_file_version)
             .field("constant_pool", &format_args!("{:#?}", self.constant_pool))
-            .field("access_flags", &format_args!("{:b}", self.access_flags))
-            .field("this_class", &self.this_class)
+            .field("access_flags", &format_args!("{:#?}", self.access_flags))
+            .field("class_name", &self.name)
             .field("super_class", &self.super_class)
             .field("interfaces", &format_args!("{:#?}", self.interfaces))
             .field("fields", &format_args!("{:#?}", self.fields))
             .field("methods", &format_args!("{:#?}", self.methods))
-            .field("attributes", &format_args!("{:#?}", self.attributes))
+            .field("deprecated", &self.deprecated)
+            .field("source_file", &self.source_file)
             .finish()
     }
 }
 
-fn get_constant_printable(constant_pool: &Vec<CPInfo>, index: u32) -> String{
-    let constant = constant_pool.get(index as usize).expect(format!("Constant at index {} not found", index).as_str());
-    match constant.tag{
-        Constant::Utf8 => {
-            let bytes: Vec<u8> = constant.info.iter().map(|&e| if let U1(inner) = e {inner} else {0u8}).collect();
-            String::from_utf8(bytes).expect("String could not be parsed")
+fn get_constant_printable(constant_pool: &ConstantPool, index: u16) -> String{
+    let constant = constant_pool.0.get(index as usize - 1).expect(format!("Constant at index {} not found", index -1).as_str());
+    match constant.clone(){
+        ConstantPoolEntry::Utf8(string) => {
+            string.to_string()
         }
-        Constant::Methodref | Constant::Fieldref => {
-            let class_index: u32 = constant.info.get(0).expect("CONSTANT_Methodref or CONSTANT_Fieldref constant has wrong signature").clone().into();
-            let name_and_type_index: u32 = constant.info.get(1).expect("CONSTANT_Methodref or CONSTANT_Fieldref constant has wrong signature").clone().into();
-            format!("{}.{}", get_constant_printable(constant_pool, class_index-1), get_constant_printable(constant_pool, name_and_type_index-1))
+        ConstantPoolEntry::Methodref(class_index, name_and_type_index) | ConstantPoolEntry::Fieldref(class_index, name_and_type_index) => {
+            format!("{}.{}", get_constant_printable(constant_pool, class_index), get_constant_printable(constant_pool, name_and_type_index))
         }
-        Constant::NameAndType => {
-            let name_index: u32 = constant.info.get(0).expect("CONSTANT_NameAndType constant has wrong signature").clone().into();
-            let descriptor_index: u32 = constant.info.get(1).expect("CONSTANT_NameAndType constant has wrong signature").clone().into();
-            format!("{} {}", get_constant_printable(constant_pool, name_index-1), get_constant_printable(constant_pool, descriptor_index-1))
+        ConstantPoolEntry::NameAndType(name_index, descriptor_index) => {
+            format!("{} {}", get_constant_printable(constant_pool, name_index), get_constant_printable(constant_pool, descriptor_index))
         }
-        Constant::Class => {
-            let name_index: u32 = constant.info.get(0).expect("CONSTANT_Class constant has wrong signature").clone().into();
-            format!("{}", get_constant_printable(constant_pool, name_index-1))
+        ConstantPoolEntry::Class(name_index) => {
+            format!("{}", get_constant_printable(constant_pool, name_index))
         }
-        Constant::String => {
-            let string_index: u32 = constant.info.get(0).expect("CONSTANT_String constant has wrong signature").clone().into();
-            format!("{}", get_constant_printable(constant_pool, string_index-1))
+        ConstantPoolEntry::String(string_index) => {
+            format!("{}", get_constant_printable(constant_pool, string_index))
         }
-        _ => unimplemented!("Constant with type {:?} is not printable", constant.tag)
+        _ => unimplemented!("Constant with type {:?} is not printable", constant)
     }
 }
 
-fn get_attribute_printable(constant_pool: &Vec<CPInfo>, attributes: &Vec<AttributeInfo>, index: u32) -> String{
+fn get_attribute_printable(constant_pool: &ConstantPool, attributes: &Vec<Attribute>, index: u32) -> String{
     let attribute = attributes.get(index as usize).expect(format!("Attribute at index {} not found", index).as_str());
-    let name_index: u32 = attribute.attribute_name_index.into();
-    let attribute_name = get_constant_printable(constant_pool, name_index-1);
+    let attribute_name = &attribute.name;
     match attribute_name.as_str() {
-        "SourceFile" => {
+        /*"SourceFile" => {
             let sourcefile_index: u32 = read_u2(&attribute.info, &mut 0).into();
             format!("{}: {}", attribute_name, get_constant_printable(constant_pool, sourcefile_index-1))
         }
@@ -112,180 +94,247 @@ fn get_attribute_printable(constant_pool: &Vec<CPInfo>, attributes: &Vec<Attribu
                 code.push(format!("{:x}", c));
             }
             format!("Code: {:?}", code)
-        }
-        _ => attribute_name
+        }*/
+        _ => attribute_name.to_string()
     }
 }
 
-fn get_member_printable(constant_pool: &Vec<CPInfo>, members: &Vec<MemberInfo>, index: u32) -> String{
+/*fn get_member_printable(constant_pool: &ConstantPool, members: &Vec<MemberInfo>, index: u16) -> String{
     let member = members.get(index as usize).expect(format!("Member at index {} not found", index).as_str());
-    let name_index: u32 = member.name_index.into();
-    let descriptor_index: u32 = member.descriptor_index.into();
+    let name_index = member.name_index;
+    let descriptor_index = member.descriptor_index;
     let mut attributes = String::new();
     attributes.push_str("\n");
     for i in 0..member.attributes.len(){
         attributes += format!("    [{}] {}\n", i+1, get_attribute_printable(constant_pool, &member.attributes, i as u32)).as_str();
     }
-    format!("{}{} [{}]", get_constant_printable(constant_pool, name_index-1), get_constant_printable(constant_pool, descriptor_index-1), attributes)
-}
+    format!("{}{} [{}]", get_constant_printable(constant_pool, name_index), get_constant_printable(constant_pool, descriptor_index), attributes)
+}*/
 
 fn parse_class_file(path: &str) -> std::io::Result<()> {
     let file = File::open(path)?;
     let mut bytes = file.bytes();
 
     let magic = parse_u4(&mut bytes)?;
-    let minor_version = parse_u2(&mut bytes)?;
+    let _minor_version = parse_u2(&mut bytes)?;
     let major_version = parse_u2(&mut bytes)?;
+    let class_file_version = ClassFileVersion::from_repr(major_version).expect(format!("Could not parse ClassFileVersion {}", major_version).as_str());
     let constant_pool_count: u32 = parse_u2(&mut bytes)?.into();
-    let mut constant_pool = Vec::new();
+    let mut constant_pool_entries = Vec::new();
     for _ in 0..constant_pool_count - 1{
-        if let U1(raw_tag) = parse_u1(&mut bytes)?{
-            let tag = Constant::from_repr(raw_tag).expect(format!("Could not get Constant of type {}", raw_tag).as_str());
-            let info = match tag {
-                Constant::Class => {
-                    // name_index
-                    vec![parse_u2(&mut bytes)?]
+        let tag = ConstantPoolEntry::from_repr(parse_u1(&mut bytes)?).expect("Unknown type of Constant");
+        let constant_pool_entry = match tag {
+            ConstantPoolEntry::Class(_) => {
+                let name_index = parse_u2(&mut bytes)?;
+                ConstantPoolEntry::Class(name_index)
+            }
+            ConstantPoolEntry::Fieldref(_, _) => {
+                let class_index = parse_u2(&mut bytes)?;
+                let name_and_type_index = parse_u2(&mut bytes)?;
+                ConstantPoolEntry::Fieldref(class_index, name_and_type_index)
+            }
+            ConstantPoolEntry::Methodref(_, _) => {
+                let class_index = parse_u2(&mut bytes)?;
+                let name_and_type_index = parse_u2(&mut bytes)?;
+                ConstantPoolEntry::Methodref(class_index, name_and_type_index)
+            }
+            ConstantPoolEntry::InterfaceMethodref(_, _) => {
+                let class_index = parse_u2(&mut bytes)?;
+                let name_and_type_index = parse_u2(&mut bytes)?;
+                ConstantPoolEntry::InterfaceMethodref(class_index, name_and_type_index)
+            }
+            ConstantPoolEntry::NameAndType(_, _) => {
+                let name_index = parse_u2(&mut bytes)?;
+                let descriptor_index = parse_u2(&mut bytes)?;
+                ConstantPoolEntry::NameAndType(name_index, descriptor_index)
+            }
+            ConstantPoolEntry::Utf8(_) => {
+                let length = parse_u2(&mut bytes)?;
+                let mut string_bytes = Vec::new();
+                for _ in 0..length{
+                    string_bytes.push(parse_u1(&mut bytes)?)
                 }
-                Constant::Fieldref | Constant::Methodref | Constant::InterfaceMethodref => {
-                    // class_index, name_and_type_index
-                    vec![parse_u2(&mut bytes)?, parse_u2(&mut bytes)?]
-                }
-                Constant::NameAndType => {
-                    // name_index, descriptor_index
-                    vec![parse_u2(&mut bytes)?, parse_u2(&mut bytes)?]
-                }
-                Constant::Utf8 => {
-                    // name_index, descriptor_index
-                    let mut info = Vec::new();
-                    let length = parse_u2(&mut bytes)?;
-                    //info.push(length);
-                    let length: u32 = length.into();
-                    for _ in 0..length{
-                        info.push(parse_u1(&mut bytes)?)
-                    }
-                    info
-                }
-                Constant::String => {
-                    // string_index
-                    vec![parse_u2(&mut bytes)?]
-                }
-                _ => unimplemented!("CPTag {tag:?} not supported yet")
-            };
-            constant_pool.push(CPInfo{
-                tag,
-                info
-            })
-        } else {
-            panic!("Tag could not be parsed")
-        }
+                ConstantPoolEntry::Utf8(String::from_utf8(string_bytes).expect("String could not be parsed"))
+            }
+            ConstantPoolEntry::String(_) => {
+                let string_index = parse_u2(&mut bytes)?;
+                ConstantPoolEntry::String(string_index)
+            }
+            _ => unimplemented!("CPTag {tag:?} not supported yet")
+        };
+        constant_pool_entries.push(constant_pool_entry);
     }
-    let access_flags = parse_u2(&mut bytes)?;
-    let this_class = parse_u2(&mut bytes)?;
-    let super_class = parse_u2(&mut bytes)?;
-    let interfaces_count: u32 = parse_u2(&mut bytes)?.into();
+    let constant_pool = ConstantPool(constant_pool_entries);
+    let access_flags = parse_class_flags(parse_u2(&mut bytes)?);
+    let name = get_constant_printable(&constant_pool, parse_u2(&mut bytes)?);
+    let super_class = Some(get_constant_printable(&constant_pool, parse_u2(&mut bytes)?));
+    let interfaces_count = parse_u2(&mut bytes)?;
+
     let mut interfaces = Vec::new();
     for _ in 0..interfaces_count{
-        interfaces.push(parse_u2(&mut bytes)?);
+        interfaces.push(get_constant_printable(&constant_pool, parse_u2(&mut bytes)?));
     }
-    let fields_count: u32 = parse_u2(&mut bytes)?.into();
+
+    let fields_count = parse_u2(&mut bytes)?;
     let mut fields = Vec::new();
     for _ in 0..fields_count{
-        let access_flags = parse_u2(&mut bytes)?;
-        let name_index = parse_u2(&mut bytes)?;
-        let descriptor_index = parse_u2(&mut bytes)?;
-        let attributes_count: u32 = parse_u2(&mut bytes)?.into();
+        let flags = parse_field_flags(parse_u2(&mut bytes)?);
+        let name = get_constant_printable(&constant_pool, parse_u2(&mut bytes)?);
+        let descriptor = get_constant_printable(&constant_pool, parse_u2(&mut bytes)?);
+        let attributes_count = parse_u2(&mut bytes)?;
         let mut attributes = Vec::new();
+        let mut deprecated = false;
+        let mut constant_value = None;
         for _ in 0..attributes_count{
-            let attribute_name_index = parse_u2(&mut bytes)?;
-            let attribute_length: u32 = parse_u4(&mut bytes)?.into();
+            let name = get_constant_printable(&constant_pool, parse_u2(&mut bytes)?);
+            let attribute_length = parse_u4(&mut bytes)?;
             let mut info = Vec::new();
             for _ in 0..attribute_length{
                 info.push(parse_u1(&mut bytes)?)
             }
 
-            attributes.push(AttributeInfo{
-                attribute_name_index,
+            attributes.push(Attribute{
+                name,
                 info
             });
         }
-        fields.push(MemberInfo{
-            access_flags,
-            name_index,
-            descriptor_index,
+        fields.push(FieldInfo{
+            flags,
+            name,
+            descriptor,
+            deprecated,
+            constant_value,
             attributes
         });
     }
-    let method_count: u32 = parse_u2(&mut bytes)?.into();
+
+    let method_count = parse_u2(&mut bytes)?;
     let mut methods = Vec::new();
     for _ in 0..method_count{
-        let access_flags = parse_u2(&mut bytes)?;
-        let name_index = parse_u2(&mut bytes)?;
-        let descriptor_index = parse_u2(&mut bytes)?;
-        let attributes_count: u32 = parse_u2(&mut bytes)?.into();
+        let flags = parse_method_flags(parse_u2(&mut bytes)?);
+        let name = get_constant_printable(&constant_pool, parse_u2(&mut bytes)?);
+        let descriptor = get_constant_printable(&constant_pool, parse_u2(&mut bytes)?);
+        let attributes_count = parse_u2(&mut bytes)?;
         let mut attributes = Vec::new();
+        let mut deprecated = false;
+        let mut code = None;
+        dbg!(&flags, &name, &descriptor, &attributes_count);
         for _ in 0..attributes_count{
-            let attribute_name_index = parse_u2(&mut bytes)?;
-            let attribute_length: u32 = parse_u4(&mut bytes)?.into();
-            let mut info = Vec::new();
-            for _ in 0..attribute_length{
-                info.push(parse_u1(&mut bytes)?)
-            }
+            let name = get_constant_printable(&constant_pool, parse_u2(&mut bytes)?);
+            let attribute_length = parse_u4(&mut bytes)?;
+            dbg!(&name, &attribute_length);
 
-            attributes.push(AttributeInfo{
-                attribute_name_index,
-                info
-            });
+            match name.as_str() {
+                "Code" => {
+                    let max_stack = parse_u2(&mut bytes)?;
+                    let max_locals = parse_u2(&mut bytes)?;
+                    let code_length = parse_u4(&mut bytes)?;
+                    let mut code_bytes = Vec::new();
+                    for _ in 0..code_length{
+                        code_bytes.push(parse_u1(&mut bytes)?)
+                    }
+                    let exception_table_length = parse_u2(&mut bytes)?;
+                    for _ in 0..exception_table_length{
+                        let start_pc = parse_u2(&mut bytes)?;
+                        let end_pc = parse_u2(&mut bytes)?;
+                        let handler_pc = parse_u2(&mut bytes)?;
+                        let catch_type = parse_u2(&mut bytes)?;
+                    }
+                    let code_attribute_count = parse_u2(&mut bytes)?;
+                    let mut code_attributes = Vec::new();
+                    for _ in 0..code_attribute_count{
+                        let name = get_constant_printable(&constant_pool, parse_u2(&mut bytes)?);
+                        let attribute_length = parse_u4(&mut bytes)?;
+                        let mut info = Vec::new();
+                        for _ in 0..attribute_length{
+                            info.push(parse_u1(&mut bytes)?)
+                        }
+                        code_attributes.push(Attribute{
+                            name,
+                            info
+                        })
+                    }
+
+                    code = Some(Code{
+                        max_stack,
+                        max_locals,
+                        code: code_bytes,
+                        attributes: code_attributes
+                    });
+                }
+                "Deprecated" => {
+                    deprecated = true
+                }
+                _ => {
+                    let mut info = Vec::new();
+                    for _ in 0..attribute_length{
+                        info.push(parse_u1(&mut bytes)?)
+                    }
+
+                    attributes.push(Attribute{
+                        name,
+                        info
+                    });
+                }
+            }
+            println!("- - - - - - - -");
         }
-        methods.push(MemberInfo{
-            access_flags,
-            name_index,
-            descriptor_index,
-            attributes
+        methods.push(MethodInfo{
+            flags,
+            name,
+            descriptor,
+            deprecated,
+            attributes,
+            code
         });
     }
-    let attributes_count: u32 = parse_u2(&mut bytes)?.into();
-    let mut attributes = Vec::new();
-    for _ in 0..attributes_count{
-        let attribute_name_index = parse_u2(&mut bytes)?;
-        let attribute_length: u32 = parse_u4(&mut bytes)?.into();
-        let mut info = Vec::new();
-        for _ in 0..attribute_length{
-            info.push(parse_u1(&mut bytes)?)
-        }
+    let attributes_count = parse_u2(&mut bytes)?;
+    let mut deprecated = false;
+    let mut source_file = None;
 
-        attributes.push(AttributeInfo{
-            attribute_name_index,
-            info
-        });
+    for _ in 0..attributes_count{
+        let name = get_constant_printable(&constant_pool, parse_u2(&mut bytes)?);
+        let attribute_length = parse_u4(&mut bytes)?;
+
+        match name.as_str() {
+            "SourceFile" => {
+                source_file = Some(get_constant_printable(&constant_pool, parse_u2(&mut bytes)?))
+            }
+            "Deprecated" => {deprecated = true}
+            _ => {
+                let mut info = Vec::new();
+                for _ in 0..attribute_length{
+                    info.push(parse_u1(&mut bytes)?)
+                }
+            }
+        }
     }
 
     let class_file = ClassFile{
         magic,
-        minor_version,
-        major_version,
+        class_file_version,
         constant_pool,
         access_flags,
-        this_class,
+        name,
         super_class,
         interfaces,
         fields,
         methods,
-        attributes
+        deprecated,
+        source_file
     };
 
+    println!("------------------------------------");
+    println!("{:#?}", class_file);
 
-    //println!("{:#?}", class_file);
-    for i in 0..class_file.constant_pool.len(){
-        println!("[{}] {} {:?}", i+1, get_constant_printable(&class_file.constant_pool, i as u32), &class_file.constant_pool.get(i).unwrap().tag);
+    println!("------------------------------------");
+    for i in 0..class_file.constant_pool.0.len(){
+        println!("[{}] {} {:?}", i+1, get_constant_printable(&class_file.constant_pool, i as u16 + 1), &class_file.constant_pool.0.get(i).unwrap());
     }
 
-    for i in 0..class_file.attributes.len(){
-        println!("[{}] {}", i+1, get_attribute_printable(&class_file.constant_pool, &class_file.attributes, i as u32));
-    }
-
-    for i in 0..class_file.methods.len(){
+    /*for i in 0..class_file.methods.len(){
         println!("[{}] {}", i+1, get_member_printable(&class_file.constant_pool, &class_file.methods, i as u32));
-    }
+    }*/
     // ["2a", "b7", "0", "1", "b1"]
     // aload_0
     // invokespecial x0001
@@ -297,9 +346,9 @@ fn parse_class_file(path: &str) -> std::io::Result<()> {
     // invokevirtual x000f
     // return
 
-    for i in 0..class_file.fields.len(){
+    /*for i in 0..class_file.fields.len(){
         println!("[{}] {}", i+1, get_member_printable(&class_file.constant_pool, &class_file.fields, i as u32));
-    }
+    }*/
 
     Ok(())
 }
