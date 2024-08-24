@@ -4,6 +4,9 @@ mod bytes;
 use std::fmt::{format, write, Debug, Formatter};
 use std::fs::File;
 use std::io::Read;
+use std::str::FromStr;
+use bytes::{read_u2, read_u4};
+
 use crate::bytes::{ByteType, parse_u1, parse_u2, parse_u4};
 use crate::bytes::ByteType::{U1, U2, U4};
 use crate::constants::*;
@@ -93,12 +96,37 @@ fn get_attribute_printable(constant_pool: &Vec<CPInfo>, attributes: &Vec<Attribu
     let attribute = attributes.get(index as usize).expect(format!("Attribute at index {} not found", index).as_str());
     let name_index: u32 = attribute.attribute_name_index.into();
     let attribute_name = get_constant_printable(constant_pool, name_index-1);
-    match attribute_name {
-        "\0SourceFile" => {
-            let sourcefile_index: u32 = attribute.info.get(0).expect("SourceFile constant has wrong signature").clone().into();
+    match attribute_name.as_str() {
+        "SourceFile" => {
+            let sourcefile_index: u32 = read_u2(&attribute.info, &mut 0).into();
+            format!("{}: {}", attribute_name, get_constant_printable(constant_pool, sourcefile_index-1))
+        }
+        "Code" => {
+            let mut offset = 0;
+            let _max_stack = read_u2(&attribute.info, &mut offset);
+            let _max_locals = read_u2(&attribute.info, &mut offset);
+            let code_length: u32 = read_u4(&attribute.info, &mut offset).into();
+            let mut code = Vec::new();
+            for i in 0..code_length{
+                let c = attribute.info.get((i  as usize) + offset).expect(format!("Code at index {} ({}) not found", i, i as usize + offset).as_str()).clone();
+                code.push(format!("{:x}", c));
+            }
+            format!("Code: {:?}", code)
         }
         _ => attribute_name
     }
+}
+
+fn get_member_printable(constant_pool: &Vec<CPInfo>, members: &Vec<MemberInfo>, index: u32) -> String{
+    let member = members.get(index as usize).expect(format!("Member at index {} not found", index).as_str());
+    let name_index: u32 = member.name_index.into();
+    let descriptor_index: u32 = member.descriptor_index.into();
+    let mut attributes = String::new();
+    attributes.push_str("\n");
+    for i in 0..member.attributes.len(){
+        attributes += format!("    [{}] {}\n", i+1, get_attribute_printable(constant_pool, &member.attributes, i as u32)).as_str();
+    }
+    format!("{}{} [{}]", get_constant_printable(constant_pool, name_index-1), get_constant_printable(constant_pool, descriptor_index-1), attributes)
 }
 
 fn parse_class_file(path: &str) -> std::io::Result<()> {
@@ -112,7 +140,7 @@ fn parse_class_file(path: &str) -> std::io::Result<()> {
     let mut constant_pool = Vec::new();
     for _ in 0..constant_pool_count - 1{
         if let U1(raw_tag) = parse_u1(&mut bytes)?{
-            let tag = Constant::from(raw_tag);
+            let tag = Constant::from_repr(raw_tag).expect(format!("Could not get Constant of type {}", raw_tag).as_str());
             let info = match tag {
                 Constant::Class => {
                     // name_index
@@ -130,7 +158,7 @@ fn parse_class_file(path: &str) -> std::io::Result<()> {
                     // name_index, descriptor_index
                     let mut info = Vec::new();
                     let length = parse_u2(&mut bytes)?;
-                    info.push(length);
+                    //info.push(length);
                     let length: u32 = length.into();
                     for _ in 0..length{
                         info.push(parse_u1(&mut bytes)?)
@@ -252,7 +280,25 @@ fn parse_class_file(path: &str) -> std::io::Result<()> {
     }
 
     for i in 0..class_file.attributes.len(){
-        println!("[{}] {:?}", i+1, get_attribute_printable(&class_file.constant_pool, &class_file.attributes, i as u32));
+        println!("[{}] {}", i+1, get_attribute_printable(&class_file.constant_pool, &class_file.attributes, i as u32));
+    }
+
+    for i in 0..class_file.methods.len(){
+        println!("[{}] {}", i+1, get_member_printable(&class_file.constant_pool, &class_file.methods, i as u32));
+    }
+    // ["2a", "b7", "0", "1", "b1"]
+    // aload_0
+    // invokespecial x0001
+    // return
+
+    // ["b2", "0", "7", "12", "d", "b6", "0", "f", "b1"]
+    // getstatic x0007
+    // ldc 13
+    // invokevirtual x000f
+    // return
+
+    for i in 0..class_file.fields.len(){
+        println!("[{}] {}", i+1, get_member_printable(&class_file.constant_pool, &class_file.fields, i as u32));
     }
 
     Ok(())

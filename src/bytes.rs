@@ -33,6 +33,45 @@ where I: Iterator<Item=Result<u8, std::io::Error>>
     return Ok(U4(val))
 }
 
+pub fn read_u2(bytes: &Vec<ByteType>, offset: &mut usize) -> ByteType{
+    let byte = bytes.get(*offset).expect(format!("could not read ByteType at index {} (out of range)", offset).as_str()).clone();
+    match byte {
+        U1(val1) => {
+            if let U1(val2) = bytes.get(*offset+1).expect(format!("could not read ByteType at index {} (out of range)", *offset+1).as_str()).clone(){
+                *offset += 2;
+                U2(u16::from_be_bytes([val1, val2]))
+            } else {
+                panic!("Expected two U1 but missing the second")
+            }
+        }
+        U2(_) => {
+            *offset += 1;
+            byte
+        }
+        U4(_) => panic!("Expected U2 or two U1 but found U4")
+    }
+}
+
+pub fn read_u4(bytes: &Vec<ByteType>, offset: &mut usize) -> ByteType{
+    let byte = bytes.get(*offset).expect(format!("could not read ByteType at index {} (out of range)", offset).as_str()).clone();
+    match byte {
+        U1(val1) => {
+            let val2: u32 = bytes.get(*offset+1).expect(format!("could not read ByteType at index {} (out of range)", *offset+1).as_str()).clone().into();
+            let val3: u32 = bytes.get(*offset+2).expect(format!("could not read ByteType at index {} (out of range)", *offset+2).as_str()).clone().into();
+            let val4: u32 = bytes.get(*offset+3).expect(format!("could not read ByteType at index {} (out of range)", *offset+3).as_str()).clone().into();
+            *offset += 4;
+            U4(u32::from_be_bytes([val1, val2 as u8, val3 as u8, val4 as u8]))
+        }
+        U2(_) => {
+            panic!("Expected U4 or four U1 but found U2")
+        }
+        U4(_) => {
+            *offset += 1;
+            byte
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 pub enum ByteType{
     U1(u8),
