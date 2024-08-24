@@ -12,10 +12,9 @@ use std::io::Read;
 use std::str::FromStr;
 use access_flags::{parse_class_flags, parse_field_flags, parse_method_flags};
 use attribute::{Attribute, Code};
-use bytes::{read_u2, read_u4};
 
 use crate::access_flags::ClassFlags;
-use crate::bytes::{ByteType, parse_u1, parse_u2, parse_u4};
+use crate::bytes::{parse_u1, parse_u2, parse_u4};
 use crate::constants::*;
 use crate::class_file_version::ClassFileVersion;
 use crate::field_info::FieldInfo;
@@ -74,42 +73,6 @@ fn get_constant_printable(constant_pool: &ConstantPool, index: u16) -> String{
         _ => unimplemented!("Constant with type {:?} is not printable", constant)
     }
 }
-
-fn get_attribute_printable(constant_pool: &ConstantPool, attributes: &Vec<Attribute>, index: u32) -> String{
-    let attribute = attributes.get(index as usize).expect(format!("Attribute at index {} not found", index).as_str());
-    let attribute_name = &attribute.name;
-    match attribute_name.as_str() {
-        /*"SourceFile" => {
-            let sourcefile_index: u32 = read_u2(&attribute.info, &mut 0).into();
-            format!("{}: {}", attribute_name, get_constant_printable(constant_pool, sourcefile_index-1))
-        }
-        "Code" => {
-            let mut offset = 0;
-            let _max_stack = read_u2(&attribute.info, &mut offset);
-            let _max_locals = read_u2(&attribute.info, &mut offset);
-            let code_length: u32 = read_u4(&attribute.info, &mut offset).into();
-            let mut code = Vec::new();
-            for i in 0..code_length{
-                let c = attribute.info.get((i  as usize) + offset).expect(format!("Code at index {} ({}) not found", i, i as usize + offset).as_str()).clone();
-                code.push(format!("{:x}", c));
-            }
-            format!("Code: {:?}", code)
-        }*/
-        _ => attribute_name.to_string()
-    }
-}
-
-/*fn get_member_printable(constant_pool: &ConstantPool, members: &Vec<MemberInfo>, index: u16) -> String{
-    let member = members.get(index as usize).expect(format!("Member at index {} not found", index).as_str());
-    let name_index = member.name_index;
-    let descriptor_index = member.descriptor_index;
-    let mut attributes = String::new();
-    attributes.push_str("\n");
-    for i in 0..member.attributes.len(){
-        attributes += format!("    [{}] {}\n", i+1, get_attribute_printable(constant_pool, &member.attributes, i as u32)).as_str();
-    }
-    format!("{}{} [{}]", get_constant_printable(constant_pool, name_index), get_constant_printable(constant_pool, descriptor_index), attributes)
-}*/
 
 fn parse_class_file(path: &str) -> std::io::Result<()> {
     let file = File::open(path)?;
@@ -188,15 +151,22 @@ fn parse_class_file(path: &str) -> std::io::Result<()> {
         for _ in 0..attributes_count{
             let name = get_constant_printable(&constant_pool, parse_u2(&mut bytes)?);
             let attribute_length = parse_u4(&mut bytes)?;
-            let mut info = Vec::new();
-            for _ in 0..attribute_length{
-                info.push(parse_u1(&mut bytes)?)
+
+            match name.as_str() {
+                _ => {
+                    let mut info = Vec::new();
+                    for _ in 0..attribute_length{
+                        info.push(parse_u1(&mut bytes)?)
+                    }
+
+                    attributes.push(Attribute{
+                        name,
+                        info
+                    });
+                }
             }
 
-            attributes.push(Attribute{
-                name,
-                info
-            });
+            
         }
         fields.push(FieldInfo{
             flags,
@@ -218,11 +188,9 @@ fn parse_class_file(path: &str) -> std::io::Result<()> {
         let mut attributes = Vec::new();
         let mut deprecated = false;
         let mut code = None;
-        dbg!(&flags, &name, &descriptor, &attributes_count);
         for _ in 0..attributes_count{
             let name = get_constant_printable(&constant_pool, parse_u2(&mut bytes)?);
             let attribute_length = parse_u4(&mut bytes)?;
-            dbg!(&name, &attribute_length);
 
             match name.as_str() {
                 "Code" => {
