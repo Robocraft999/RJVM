@@ -1,4 +1,5 @@
 use std::fmt::Debug;
+
 use strum_macros::FromRepr;
 
 #[derive(Debug, FromRepr, PartialEq, Clone)]
@@ -17,7 +18,8 @@ pub enum ConstantPoolEntry{
     Utf8(String) = 1,
     MethodHandle = 15,
     MethodType = 16,
-    InvokeDynamic = 18
+    InvokeDynamic = 18,
+    Dummy = 255,
 }
 
 #[derive(Debug)]

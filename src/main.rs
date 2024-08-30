@@ -1,3 +1,23 @@
+use std::fmt::{Debug, Formatter};
+use std::io::Read;
+use std::str::FromStr;
+
+use access_flags::{parse_class_flags, parse_field_flags, parse_method_flags};
+use attribute::{Attribute, Code};
+use vm::class_path::ClassPath;
+
+use crate::access_flags::ClassFlags;
+use crate::attribute::{ConstantValue, LineNumber, LineNumberTable, LineNumberTableEntry, ProgramCounter};
+use crate::bytecode::instructions_from_bytes;
+use crate::bytes::{parse_u1, parse_u2, parse_u4, parse_u8};
+use crate::class_file_version::ClassFileVersion;
+use crate::constants::*;
+use crate::error::ClassParseError;
+use crate::field_info::FieldInfo;
+use crate::method_info::{MethodDescriptor, MethodInfo};
+use crate::vm::{VM, VmError};
+use crate::vm::value::Value;
+
 mod constants;
 mod bytes;
 mod access_flags;
@@ -5,20 +25,9 @@ mod attribute;
 mod class_file_version;
 mod field_info;
 mod method_info;
-
-use std::fmt::{format, write, Debug, Formatter};
-use std::fs::File;
-use std::io::Read;
-use std::str::FromStr;
-use access_flags::{parse_class_flags, parse_field_flags, parse_method_flags};
-use attribute::{Attribute, Code};
-
-use crate::access_flags::ClassFlags;
-use crate::bytes::{parse_u1, parse_u2, parse_u4};
-use crate::constants::*;
-use crate::class_file_version::ClassFileVersion;
-use crate::field_info::FieldInfo;
-use crate::method_info::MethodInfo;
+mod vm;
+mod error;
+mod bytecode;
 
 struct ClassFile{
     magic: u32,
@@ -52,13 +61,13 @@ impl Debug for ClassFile{
     }
 }
 
-fn get_constant_printable(constant_pool: &ConstantPool, index: u16) -> String{
+pub fn get_constant_printable(constant_pool: &ConstantPool, index: u16) -> String{
     let constant = constant_pool.0.get(index as usize - 1).expect(format!("Constant at index {} not found", index -1).as_str());
     match constant.clone(){
         ConstantPoolEntry::Utf8(string) => {
             string.to_string()
         }
-        ConstantPoolEntry::Methodref(class_index, name_and_type_index) | ConstantPoolEntry::Fieldref(class_index, name_and_type_index) => {
+        ConstantPoolEntry::Methodref(class_index, name_and_type_index) | ConstantPoolEntry::Fieldref(class_index, name_and_type_index) | ConstantPoolEntry::InterfaceMethodref(class_index, name_and_type_index)=> {
             format!("{}.{}", get_constant_printable(constant_pool, class_index), get_constant_printable(constant_pool, name_and_type_index))
         }
         ConstantPoolEntry::NameAndType(name_index, descriptor_index) => {
@@ -70,13 +79,20 @@ fn get_constant_printable(constant_pool: &ConstantPool, index: u16) -> String{
         ConstantPoolEntry::String(string_index) => {
             format!("{}", get_constant_printable(constant_pool, string_index))
         }
+        ConstantPoolEntry::Integer(value) => {
+            format!("{}", value)
+        }
+        ConstantPoolEntry::Double(value) => {
+            format!("{}", value)
+        }
+        ConstantPoolEntry::Dummy => {String::new()}
         _ => unimplemented!("Constant with type {:?} is not printable", constant)
     }
 }
 
-fn parse_class_file(path: &str) -> std::io::Result<()> {
-    let file = File::open(path)?;
-    let mut bytes = file.bytes();
+fn parse_class_file(class_path: &ClassPath, class_name: &str) -> Result<ClassFile, ClassParseError> {
+    //TODO error handling
+    let mut bytes = class_path.resolve(class_name)?.expect("Could not load class").into_iter();
 
     let magic = parse_u4(&mut bytes)?;
     let _minor_version = parse_u2(&mut bytes)?;
@@ -84,7 +100,10 @@ fn parse_class_file(path: &str) -> std::io::Result<()> {
     let class_file_version = ClassFileVersion::from_repr(major_version).expect(format!("Could not parse ClassFileVersion {}", major_version).as_str());
     let constant_pool_count: u32 = parse_u2(&mut bytes)?.into();
     let mut constant_pool_entries = Vec::new();
-    for _ in 0..constant_pool_count - 1{
+    let mut i = 0;
+    let mut double_spaced = false;
+    while i < constant_pool_count - 1{
+        double_spaced = false;
         let tag = ConstantPoolEntry::from_repr(parse_u1(&mut bytes)?).expect("Unknown type of Constant");
         let constant_pool_entry = match tag {
             ConstantPoolEntry::Class(_) => {
@@ -123,14 +142,36 @@ fn parse_class_file(path: &str) -> std::io::Result<()> {
                 let string_index = parse_u2(&mut bytes)?;
                 ConstantPoolEntry::String(string_index)
             }
+            ConstantPoolEntry::Integer(_) => {
+                let integer_bytes = parse_u4(&mut bytes)?;
+                ConstantPoolEntry::Integer(integer_bytes as i32)
+            }
+            ConstantPoolEntry::Double(_) => {
+                let bytes = parse_u8(&mut bytes)?;
+                //println!("DOUBLE {:?} {:?}, {:?}, {:?}, {:?}", bytes.to_be_bytes(), bytes as f64, 13.5f64.to_be_bytes(), parse_u8(&mut 13.5f64.to_be_bytes().to_vec().into_iter()).unwrap() as f64, f64::from_bits(bytes));
+                double_spaced = true;
+                ConstantPoolEntry::Double(f64::from_bits(bytes))
+            }
             _ => unimplemented!("CPTag {tag:?} not supported yet")
         };
         constant_pool_entries.push(constant_pool_entry);
+        if double_spaced{
+            i += 1;
+            constant_pool_entries.push(ConstantPoolEntry::Dummy);
+        }
+        i += 1;
     }
     let constant_pool = ConstantPool(constant_pool_entries);
     let access_flags = parse_class_flags(parse_u2(&mut bytes)?);
     let name = get_constant_printable(&constant_pool, parse_u2(&mut bytes)?);
-    let super_class = Some(get_constant_printable(&constant_pool, parse_u2(&mut bytes)?));
+    println!("Class name: {}", &name);
+    let super_class_index = parse_u2(&mut bytes)?;
+    let super_class = if super_class_index > 0{
+        Some(get_constant_printable(&constant_pool, super_class_index))
+    } else {
+        None
+    };
+
     let interfaces_count = parse_u2(&mut bytes)?;
 
     let mut interfaces = Vec::new();
@@ -153,6 +194,12 @@ fn parse_class_file(path: &str) -> std::io::Result<()> {
             let attribute_length = parse_u4(&mut bytes)?;
 
             match name.as_str() {
+                "ConstantValue" => {
+                    let constant_index = parse_u2(&mut bytes)?;
+                    constant_value = Some(ConstantValue{
+                        constant_index
+                    })
+                }
                 _ => {
                     let mut info = Vec::new();
                     for _ in 0..attribute_length{
@@ -183,7 +230,8 @@ fn parse_class_file(path: &str) -> std::io::Result<()> {
     for _ in 0..method_count{
         let flags = parse_method_flags(parse_u2(&mut bytes)?);
         let name = get_constant_printable(&constant_pool, parse_u2(&mut bytes)?);
-        let descriptor = get_constant_printable(&constant_pool, parse_u2(&mut bytes)?);
+        let descriptor_str = get_constant_printable(&constant_pool, parse_u2(&mut bytes)?);
+        let descriptor = MethodDescriptor::new(descriptor_str);
         let attributes_count = parse_u2(&mut bytes)?;
         let mut attributes = Vec::new();
         let mut deprecated = false;
@@ -191,6 +239,7 @@ fn parse_class_file(path: &str) -> std::io::Result<()> {
         for _ in 0..attributes_count{
             let name = get_constant_printable(&constant_pool, parse_u2(&mut bytes)?);
             let attribute_length = parse_u4(&mut bytes)?;
+            let mut line_number_table = None;
 
             match name.as_str() {
                 "Code" => {
@@ -201,6 +250,8 @@ fn parse_class_file(path: &str) -> std::io::Result<()> {
                     for _ in 0..code_length{
                         code_bytes.push(parse_u1(&mut bytes)?)
                     }
+                    let code_instructions = instructions_from_bytes(code_bytes);
+
                     let exception_table_length = parse_u2(&mut bytes)?;
                     for _ in 0..exception_table_length{
                         let start_pc = parse_u2(&mut bytes)?;
@@ -213,21 +264,36 @@ fn parse_class_file(path: &str) -> std::io::Result<()> {
                     for _ in 0..code_attribute_count{
                         let name = get_constant_printable(&constant_pool, parse_u2(&mut bytes)?);
                         let attribute_length = parse_u4(&mut bytes)?;
-                        let mut info = Vec::new();
-                        for _ in 0..attribute_length{
-                            info.push(parse_u1(&mut bytes)?)
+                        match name.as_str() {
+                            "LineNumberTable" => {
+                                let line_number_table_length = parse_u2(&mut bytes)?;
+                                let mut entries = Vec::new();
+                                for _ in 0..line_number_table_length{
+                                    let start_pc = parse_u2(&mut bytes)?;
+                                    let line_number = parse_u2(&mut bytes)?;
+                                    entries.push(LineNumberTableEntry::new(ProgramCounter(start_pc), LineNumber(line_number)))
+                                }
+                                line_number_table = Some(LineNumberTable(entries))
+                            }
+                            _ =>{
+                                let mut info = Vec::new();
+                                for _ in 0..attribute_length{
+                                    info.push(parse_u1(&mut bytes)?)
+                                }
+                                code_attributes.push(Attribute{
+                                    name,
+                                    info
+                                })
+                            }
                         }
-                        code_attributes.push(Attribute{
-                            name,
-                            info
-                        })
                     }
 
                     code = Some(Code{
                         max_stack,
                         max_locals,
-                        code: code_bytes,
-                        attributes: code_attributes
+                        code: code_instructions,
+                        attributes: code_attributes,
+                        line_number_table,
                     });
                 }
                 "Deprecated" => {
@@ -245,7 +311,6 @@ fn parse_class_file(path: &str) -> std::io::Result<()> {
                     });
                 }
             }
-            println!("- - - - - - - -");
         }
         methods.push(MethodInfo{
             flags,
@@ -253,7 +318,7 @@ fn parse_class_file(path: &str) -> std::io::Result<()> {
             descriptor,
             deprecated,
             attributes,
-            code
+            code,
         });
     }
     let attributes_count = parse_u2(&mut bytes)?;
@@ -293,36 +358,29 @@ fn parse_class_file(path: &str) -> std::io::Result<()> {
     };
 
     println!("------------------------------------");
-    println!("{:#?}", class_file);
+    //println!("{:#?}", class_file);
 
     println!("------------------------------------");
     for i in 0..class_file.constant_pool.0.len(){
-        println!("[{}] {} {:?}", i+1, get_constant_printable(&class_file.constant_pool, i as u16 + 1), &class_file.constant_pool.0.get(i).unwrap());
+        //println!("[{}] {} {:?}", i+1, get_constant_printable(&class_file.constant_pool, i as u16 + 1), &class_file.constant_pool.0.get(i).unwrap());
     }
 
-    /*for i in 0..class_file.methods.len(){
-        println!("[{}] {}", i+1, get_member_printable(&class_file.constant_pool, &class_file.methods, i as u32));
-    }*/
-    // ["2a", "b7", "0", "1", "b1"]
-    // aload_0
-    // invokespecial x0001
-    // return
-
-    // ["b2", "0", "7", "12", "d", "b6", "0", "f", "b1"]
-    // getstatic x0007
-    // ldc 13
-    // invokevirtual x000f
-    // return
-
-    /*for i in 0..class_file.fields.len(){
-        println!("[{}] {}", i+1, get_member_printable(&class_file.constant_pool, &class_file.fields, i as u32));
-    }*/
-
-    Ok(())
+    Ok(class_file)
 }
 
-fn main() -> std::io::Result<()> {
-    parse_class_file("resources/Main.class")?;
+fn main() -> Result<(), VmError> {
+    let mut class_path = ClassPath::default();
+    class_path.push("resources;resources/rt.jar").expect("TODO: panic message");
+
+    let mut vm = VM::new(class_path);
+    //vm.class_manager.get_or_resolve_class("Empty").expect("TODO: panic message");
+    let main_method = vm.resolve_class_method("Main", "main", "([Ljava/lang/String;)I")?;
+    let result = vm.invoke(main_method, None, vec![Value::Null])?;
+    println!("result: {result:?}");
+    println!("{:?}", vm.static_class_objects);
+    //parse_class_file(&class_path, "Main")?;
+    //parse_class_file(&class_path, "java/lang/Object")?;
+    //parse_class_file(&class_path, "java/io/PrintStream")?;
 
     Ok(())
 }

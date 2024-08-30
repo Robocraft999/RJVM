@@ -1,0 +1,121 @@
+use std::collections::HashMap;
+
+use typed_arena::Arena;
+
+use crate::{ClassFile, parse_class_file};
+use crate::vm::class::{Class, ClassId, ClassRef};
+use crate::vm::class_path::ClassPath;
+use crate::vm::VmError;
+
+#[derive(Debug, Clone)]
+pub(crate) enum ResolvedClass<'a> {
+    AlreadyLoaded(ClassRef<'a>),
+    NewClass(ClassesToInitialize<'a>),
+}
+
+impl<'a> ResolvedClass<'a> {
+    pub fn get_class(&self) -> ClassRef<'a> {
+        match self {
+            ResolvedClass::AlreadyLoaded(class) => class,
+            ResolvedClass::NewClass(classes_to_initialize) => classes_to_initialize.resolved_class,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ClassesToInitialize<'a> {
+    resolved_class: ClassRef<'a>,
+    pub(crate) to_initialize: Vec<ClassRef<'a>>,
+}
+
+
+pub struct ClassManager<'a>{
+    class_path: ClassPath,
+    classes_by_name: HashMap<String, ClassRef<'a>>,
+    pub classes: Arena<Class<'a>>,
+    next_id: u32,
+}
+
+impl<'a> ClassManager<'a>{
+    pub fn new (class_path: ClassPath) -> Self{
+        Self{
+            class_path,
+            classes_by_name: HashMap::new(),
+            classes: Arena::with_capacity(100),
+            next_id: 0,
+        }
+    }
+
+    pub fn get_or_resolve_class(&mut self, class_name: &str) -> Result<ResolvedClass<'a>, VmError>{
+        if let Some(loaded_class) = self.find_class_by_name(class_name){
+            Ok(ResolvedClass::AlreadyLoaded(loaded_class))
+        } else {
+            self.resolve_class(class_name).map(ResolvedClass::NewClass)
+        }
+    }
+
+    pub fn resolve_class(&mut self, class_name: &str) -> Result<ClassesToInitialize<'a>, VmError>{
+        let parsed_class = parse_class_file(&self.class_path, class_name)?;
+        let next_id = self.next_id;
+        self.next_id += 1;
+
+        let mut resolved_classes = self.resolve_super_and_interfaces(&parsed_class)?;
+        let super_class = parsed_class.super_class.map(|name| resolved_classes.get(&name).unwrap().get_class());
+        let interfaces = parsed_class.interfaces.iter().map(|name| resolved_classes.get(name).unwrap().get_class()).collect();
+
+        let class = Class {
+            id: ClassId(next_id),
+            name: parsed_class.name,
+            source_file: parsed_class.source_file,
+            constants: parsed_class.constant_pool,
+            flags: parsed_class.access_flags,
+            superclass: super_class,
+            interfaces,
+            fields: parsed_class.fields,
+            methods: parsed_class.methods,
+        };
+
+        let class_ref = self.classes.alloc(class);
+
+
+        let class_ref = unsafe {
+            let class_ptr: *const Class<'a> = class_ref;
+            &*class_ptr
+        };
+
+        let mut classes_to_init: Vec<ClassRef> = Vec::new();
+        for resolved_class in resolved_classes.values() {
+            if let ResolvedClass::NewClass(new_class) = resolved_class {
+                for to_initialize in new_class.to_initialize.iter() {
+                    classes_to_init.push(to_initialize)
+                }
+            }
+        }
+
+        classes_to_init.push(class_ref);
+
+        self.classes_by_name.insert(class_name.to_string(), class_ref);
+        Ok(ClassesToInitialize{
+            resolved_class: class_ref,
+            to_initialize: classes_to_init,
+        })
+    }
+
+    fn resolve_super_and_interfaces(&mut self, class_file: &ClassFile) -> Result<HashMap<String, ResolvedClass<'a>>, VmError>{
+        let mut resolved_classes = HashMap::new();
+        if let Some(super_class_name) = &class_file.super_class{
+            let resolved_class = self.get_or_resolve_class(super_class_name)?;
+            resolved_classes.insert(super_class_name.clone(), resolved_class);
+        }
+        for interface_name in class_file.interfaces.iter(){
+            let resolved_class = self.get_or_resolve_class(interface_name)?;
+            resolved_classes.insert(interface_name.clone(), resolved_class);
+        }
+        Ok(resolved_classes)
+    }
+
+    pub fn find_class_by_name(&self, class_name: &str) -> Option<ClassRef<'a>>{
+        //self.classes.iter().find(|c| c.name == class_name)
+        self.classes_by_name.get(class_name).cloned()
+    }
+}

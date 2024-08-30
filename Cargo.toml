@@ -4,5 +4,9 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-strum = "0.26.3"
 strum_macros = "0.26.3"
+zip = { version = "2.2.0", features = ["deflate"] }
+thiserror = "1.0.63"
+typed-arena = "2.0.2"
+log = "0.4.22"
+regex = "1.10.6"
