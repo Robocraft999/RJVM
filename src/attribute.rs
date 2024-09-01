@@ -1,6 +1,6 @@
 use std::fmt::{Debug, Formatter};
 
-use crate::bytecode::Instruction;
+use crate::bytecode::{Instruction, printable_instructions};
 
 #[derive(Debug, Clone)]
 pub struct Attribute{
@@ -18,7 +18,7 @@ pub struct Code{
     pub max_stack: u16,
     pub max_locals: u16,
     //TODO add proper struct
-    pub code: Vec<Instruction>,
+    pub code: Vec<u8>,
     //TODO add remaining fields (https://docs.oracle.com/javase/specs/jvms/se7/html/jvms-4.html#jvms-4.7.3)
     pub attributes: Vec<Attribute>,
     pub line_number_table: Option<LineNumberTable>,
@@ -29,7 +29,7 @@ impl Debug for Code{
         f.debug_struct("CodeAttribute")
             .field("max_stack", &self.max_stack)
             .field("max_locals", &self.max_locals)
-            .field("bytecode", &format_args!("{:02x?}", self.code))
+            .field("bytecode", &format_args!("{:?}", printable_instructions(&self.code)))
             .field("line_number_table", &format_args!("{:#?}", self.line_number_table))
             .field("attributes", &format_args!("{:#?}", self.attributes))
             .finish()

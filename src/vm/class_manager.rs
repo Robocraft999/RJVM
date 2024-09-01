@@ -32,6 +32,7 @@ pub(crate) struct ClassesToInitialize<'a> {
 pub struct ClassManager<'a>{
     class_path: ClassPath,
     classes_by_name: HashMap<String, ClassRef<'a>>,
+    classes_by_id: HashMap<ClassId, ClassRef<'a>>,
     pub classes: Arena<Class<'a>>,
     next_id: u32,
 }
@@ -41,6 +42,7 @@ impl<'a> ClassManager<'a>{
         Self{
             class_path,
             classes_by_name: HashMap::new(),
+            classes_by_id: HashMap::new(),
             classes: Arena::with_capacity(100),
             next_id: 0,
         }
@@ -63,6 +65,12 @@ impl<'a> ClassManager<'a>{
         let super_class = parsed_class.super_class.map(|name| resolved_classes.get(&name).unwrap().get_class());
         let interfaces = parsed_class.interfaces.iter().map(|name| resolved_classes.get(name).unwrap().get_class()).collect();
 
+        let superclass_field_count = match super_class{
+            Some(class) => class.transitive_field_count,
+            None => 0,
+        };
+        let fields_count = parsed_class.fields.len();
+
         let class = Class {
             id: ClassId(next_id),
             name: parsed_class.name,
@@ -73,6 +81,8 @@ impl<'a> ClassManager<'a>{
             interfaces,
             fields: parsed_class.fields,
             methods: parsed_class.methods,
+            transitive_field_count: superclass_field_count + fields_count,
+            first_field_index: superclass_field_count,
         };
 
         let class_ref = self.classes.alloc(class);
@@ -95,6 +105,7 @@ impl<'a> ClassManager<'a>{
         classes_to_init.push(class_ref);
 
         self.classes_by_name.insert(class_name.to_string(), class_ref);
+        self.classes_by_id.insert(class_ref.id, class_ref);
         Ok(ClassesToInitialize{
             resolved_class: class_ref,
             to_initialize: classes_to_init,
@@ -117,5 +128,9 @@ impl<'a> ClassManager<'a>{
     pub fn find_class_by_name(&self, class_name: &str) -> Option<ClassRef<'a>>{
         //self.classes.iter().find(|c| c.name == class_name)
         self.classes_by_name.get(class_name).cloned()
+    }
+
+    pub fn find_class_by_id(&self, class_id: ClassId) -> Option<ClassRef<'a>>{
+        self.classes_by_id.get(&class_id).cloned()
     }
 }

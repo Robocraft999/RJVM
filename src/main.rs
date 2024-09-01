@@ -1,19 +1,18 @@
 use std::fmt::{Debug, Formatter};
 use std::io::Read;
 use std::str::FromStr;
-
+use log::LevelFilter;
 use access_flags::{parse_class_flags, parse_field_flags, parse_method_flags};
 use attribute::{Attribute, Code};
 use vm::class_path::ClassPath;
 
 use crate::access_flags::ClassFlags;
 use crate::attribute::{ConstantValue, LineNumber, LineNumberTable, LineNumberTableEntry, ProgramCounter};
-use crate::bytecode::instructions_from_bytes;
 use crate::bytes::{parse_u1, parse_u2, parse_u4, parse_u8};
 use crate::class_file_version::ClassFileVersion;
 use crate::constants::*;
 use crate::error::ClassParseError;
-use crate::field_info::FieldInfo;
+use crate::field_info::{field_type_from_str, FieldInfo};
 use crate::method_info::{MethodDescriptor, MethodInfo};
 use crate::vm::{VM, VmError};
 use crate::vm::value::Value;
@@ -82,6 +81,12 @@ pub fn get_constant_printable(constant_pool: &ConstantPool, index: u16) -> Strin
         ConstantPoolEntry::Integer(value) => {
             format!("{}", value)
         }
+        ConstantPoolEntry::Long(value) => {
+            format!("{}", value)
+        }
+        ConstantPoolEntry::Float(value) => {
+            format!("{}", value)
+        }
         ConstantPoolEntry::Double(value) => {
             format!("{}", value)
         }
@@ -146,6 +151,16 @@ fn parse_class_file(class_path: &ClassPath, class_name: &str) -> Result<ClassFil
                 let integer_bytes = parse_u4(&mut bytes)?;
                 ConstantPoolEntry::Integer(integer_bytes as i32)
             }
+            ConstantPoolEntry::Long(_) => {
+                let bytes = parse_u8(&mut bytes)?;
+                println!("LONG {:?} {:?} {}", bytes.to_be_bytes(), bytes as i64, class_name);
+                double_spaced = true;
+                ConstantPoolEntry::Long(bytes as i64)
+            }
+            ConstantPoolEntry::Float(_) => {
+                let bytes = parse_u4(&mut bytes)?;
+                ConstantPoolEntry::Float(f32::from_bits(bytes))
+            }
             ConstantPoolEntry::Double(_) => {
                 let bytes = parse_u8(&mut bytes)?;
                 //println!("DOUBLE {:?} {:?}, {:?}, {:?}, {:?}", bytes.to_be_bytes(), bytes as f64, 13.5f64.to_be_bytes(), parse_u8(&mut 13.5f64.to_be_bytes().to_vec().into_iter()).unwrap() as f64, f64::from_bits(bytes));
@@ -185,6 +200,7 @@ fn parse_class_file(class_path: &ClassPath, class_name: &str) -> Result<ClassFil
         let flags = parse_field_flags(parse_u2(&mut bytes)?);
         let name = get_constant_printable(&constant_pool, parse_u2(&mut bytes)?);
         let descriptor = get_constant_printable(&constant_pool, parse_u2(&mut bytes)?);
+        let field_type = field_type_from_str(descriptor.as_str());
         let attributes_count = parse_u2(&mut bytes)?;
         let mut attributes = Vec::new();
         let mut deprecated = false;
@@ -218,7 +234,7 @@ fn parse_class_file(class_path: &ClassPath, class_name: &str) -> Result<ClassFil
         fields.push(FieldInfo{
             flags,
             name,
-            descriptor,
+            field_type,
             deprecated,
             constant_value,
             attributes
@@ -250,7 +266,6 @@ fn parse_class_file(class_path: &ClassPath, class_name: &str) -> Result<ClassFil
                     for _ in 0..code_length{
                         code_bytes.push(parse_u1(&mut bytes)?)
                     }
-                    let code_instructions = instructions_from_bytes(code_bytes);
 
                     let exception_table_length = parse_u2(&mut bytes)?;
                     for _ in 0..exception_table_length{
@@ -291,7 +306,7 @@ fn parse_class_file(class_path: &ClassPath, class_name: &str) -> Result<ClassFil
                     code = Some(Code{
                         max_stack,
                         max_locals,
-                        code: code_instructions,
+                        code: code_bytes,
                         attributes: code_attributes,
                         line_number_table,
                     });
@@ -362,13 +377,15 @@ fn parse_class_file(class_path: &ClassPath, class_name: &str) -> Result<ClassFil
 
     println!("------------------------------------");
     for i in 0..class_file.constant_pool.0.len(){
-        //println!("[{}] {} {:?}", i+1, get_constant_printable(&class_file.constant_pool, i as u16 + 1), &class_file.constant_pool.0.get(i).unwrap());
+        println!("[{}] {} {:?}", i+1, get_constant_printable(&class_file.constant_pool, i as u16 + 1), &class_file.constant_pool.0.get(i).unwrap());
     }
 
     Ok(class_file)
 }
 
 fn main() -> Result<(), VmError> {
+    simple_logger::SimpleLogger::new().with_level(LevelFilter::Trace).without_timestamps().init().unwrap();
+
     let mut class_path = ClassPath::default();
     class_path.push("resources;resources/rt.jar").expect("TODO: panic message");
 

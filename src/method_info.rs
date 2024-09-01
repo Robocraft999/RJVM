@@ -4,7 +4,7 @@ use regex::Regex;
 
 use crate::access_flags::{MethodFlag, MethodFlags};
 use crate::attribute::{Attribute, Code};
-use crate::field_info::{FieldType, PrimitiveType};
+use crate::field_info::{FieldType, parse_field_type, PrimitiveType};
 
 #[derive(Debug)]
 pub struct MethodInfo{
@@ -23,6 +23,10 @@ impl MethodInfo{
 
     pub fn is_native(&self) -> bool {
         self.flags.contains(&MethodFlag::Native)
+    }
+
+    pub fn is_static(&self) -> bool{
+        self.flags.contains(&MethodFlag::Static)
     }
 }
 
@@ -44,7 +48,7 @@ impl MethodDescriptor{
                 continue
             }
 
-            let primitive = cap.name("primitive");
+            /*let primitive = cap.name("primitive");
             let object = cap.name("object");
 
             let field_type = if let Some(prim) = primitive{
@@ -60,7 +64,8 @@ impl MethodDescriptor{
                 FieldType::Array(dims, Box::new(field_type))
             } else {
                 field_type
-            });
+            });*/
+            args.push(parse_field_type(cap.name("object").map(|m| m.as_str()), cap.name("primitive").map(|m| m.as_str()), cap.name("array").map(|m| m.len())))
         }
 
         let return_type = if void_return {None} else {args.pop()};
@@ -79,5 +84,11 @@ impl MethodDescriptor{
 
     pub fn as_str(&self) -> &str{
         self.raw.as_str()
+    }
+}
+
+impl PartialEq for MethodDescriptor{
+    fn eq(&self, other: &Self) -> bool {
+        self.matches(other.raw.as_str())
     }
 }

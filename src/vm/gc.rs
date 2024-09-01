@@ -1,5 +1,4 @@
 use std::cell::RefCell;
-
 use typed_arena::Arena;
 
 use crate::vm::class::ClassRef;
@@ -30,5 +29,9 @@ impl<'a> ObjectAllocator<'a>{
             id: class.id,
             fields: RefCell::new(fields)
         }
+    }
+
+    pub fn get_objects_count(&self) -> usize{
+        self.arena.len()
     }
 }

@@ -2,7 +2,7 @@ use std::fmt::{Debug, Formatter};
 
 use crate::access_flags::ClassFlags;
 use crate::constants::{ConstantPool, ConstantPoolEntry};
-use crate::field_info::FieldInfo;
+use crate::field_info::{FieldInfo, FieldType, PrimitiveType};
 use crate::method_info::MethodInfo;
 use crate::vm::value::Value;
 
@@ -17,6 +17,8 @@ pub struct Class<'a>{
     pub interfaces: Vec<ClassRef<'a>>,
     pub fields: Vec<FieldInfo>,
     pub methods: Vec<MethodInfo>,
+    pub transitive_field_count: usize,
+    pub first_field_index: usize,
 }
 
 impl<'a> Class<'a>{
@@ -25,7 +27,18 @@ impl<'a> Class<'a>{
     }
 
     pub fn find_field(&self, field_name: &str) -> Option<(usize, &FieldInfo)>{
-        self.fields.iter().enumerate().find(|(i, f)| f.name == field_name)
+        self.fields
+            .iter()
+            .enumerate()
+            .find(|(i, f)| f.name == field_name)
+            .map(|(index, field)| (index + self.first_field_index, field))
+            .or_else(|| {
+                if let Some(superclass) = &self.superclass{
+                    superclass.find_field(field_name)
+                } else {
+                    None
+                }
+            })
     }
 
     pub fn get_constant(&self, index: u16) -> Option<ConstantPoolEntry>{
@@ -49,16 +62,45 @@ impl<'a> Class<'a>{
     }
 
     pub fn get_fields(&self) -> Vec<Value>{
-        let mut values = Vec::new();
-        for info in &self.fields{
-            values.push(if let Some(constant_value) = info.constant_value.clone(){
-                self.get_constant_as_value(constant_value.constant_index)
-            } else {
-                Value::Uninitialized
+        let local_values = (self.first_field_index..self.transitive_field_count)
+            .map(|index| {
+                let field = self.field_at_index(index).unwrap();
+                if let Some(constant_value) = field.constant_value.clone(){
+                    self.get_constant_as_value(constant_value.constant_index)
+                } else {
+                    match &field.field_type{
+                        FieldType::Primitive(primitive) => {
+                            match primitive {
+                                PrimitiveType::Boolean => Value::Integer(0),
+                                PrimitiveType::Byte => Value::Integer(0),
+                                PrimitiveType::Short => Value::Integer(0),
+                                PrimitiveType::Integer => Value::Integer(0),
+                                PrimitiveType::Long => Value::Long(0),
+                                PrimitiveType::Float => Value::Float(0f32),
+                                PrimitiveType::Double => Value::Double(0f64),
+                                PrimitiveType::Char => Value::Integer(0),
+                            }
+                        }
+                        FieldType::Object(_) => Value::Null,
+                        FieldType::Array(_, _) => Value::Null,
+                    }
+                }
             });
-        }
+        let mut superclass_values = match self.superclass {
+            Some(super_class) => super_class.get_fields(),
+            None => Vec::new()
+        };
 
-        values
+        superclass_values.extend(local_values);
+        superclass_values
+    }
+
+    pub fn field_at_index(&self, index: usize) -> Option<&FieldInfo>{
+        if index < self.first_field_index{
+            self.superclass.and_then(|superclass| superclass.field_at_index(index))
+        } else {
+            self.fields.get(index - self.first_field_index)
+        }
     }
 }
 
@@ -104,16 +146,21 @@ impl<'a> ClassAndMethod<'a>{
     }
 
     pub fn get_constant_method_info_descriptor(&self, index: u16) -> Option<(String, String, String)>{
-        if let Some(ConstantPoolEntry::Methodref(class_index, name_and_type_index)) = self.class.get_constant(index){
-            if let Some(ConstantPoolEntry::NameAndType(name_index, type_index)) = self.class.get_constant(name_and_type_index){
-                let class_name = self.get_constant_utf8(class_index).unwrap();
-                let method_name = self.get_constant_utf8(name_index).unwrap();
-                let method_descriptor = self.get_constant_utf8(type_index).unwrap();
-                return Some((class_name, method_name, method_descriptor.as_str().to_string()));
-                /*if let Ok(class_and_method) = vm.resolve_class_method(class_name.as_str(), method_name.as_str(), method_descriptor.as_str()){
-                    return Some(class_and_method.clone())
-                }*/
-            }
+        let (class_index, name_and_type_index) = if let Some(ConstantPoolEntry::Methodref(class_index, name_and_type_index)) = self.class.get_constant(index){
+            (class_index, name_and_type_index)
+        } else if let Some(ConstantPoolEntry::InterfaceMethodref(class_index, name_and_type_index)) = self.class.get_constant(index){
+            (class_index, name_and_type_index)
+        } else {
+            return None;
+        };
+        if let Some(ConstantPoolEntry::NameAndType(name_index, type_index)) = self.class.get_constant(name_and_type_index){
+            let class_name = self.get_constant_utf8(class_index).unwrap();
+            let method_name = self.get_constant_utf8(name_index).unwrap();
+            let method_descriptor = self.get_constant_utf8(type_index).unwrap();
+            return Some((class_name, method_name, method_descriptor.as_str().to_string()));
+            /*if let Ok(class_and_method) = vm.resolve_class_method(class_name.as_str(), method_name.as_str(), method_descriptor.as_str()){
+                return Some(class_and_method.clone())
+            }*/
         }
         None
     }
@@ -134,6 +181,10 @@ impl<'a> ClassAndMethod<'a>{
     }
 
     pub fn get_max_locals(&self) -> usize{
-        self.method.code.clone().unwrap().max_locals as usize
+        if let Some(code) = &self.method.code{
+            code.max_locals as usize
+        } else {
+            0
+        }
     }
 }

@@ -1,9 +1,14 @@
+use std::cell::RefCell;
+use std::rc::Rc;
+use log::{debug, error, info, trace, warn};
 use crate::attribute::ProgramCounter;
-use crate::bytecode::Instruction;
+use crate::bytecode::{Instruction, parse_instruction, printable_instructions};
+use crate::constants::ConstantPoolEntry;
+use crate::field_info::{FieldType, PrimitiveType};
 use crate::get_constant_printable;
 use crate::method_info::MethodDescriptor;
 use crate::vm::{VM, VmError};
-use crate::vm::class::ClassAndMethod;
+use crate::vm::class::{ClassAndMethod, ClassRef};
 use crate::vm::value::Value;
 
 pub struct CallFrame<'a>{
@@ -20,177 +25,478 @@ impl<'a> CallFrame<'a>{
             for class in vm.class_manager.classes.iter_mut(){
                 //println!("{class:?}");
             }
-            println!();
-            println!("{:?}", &code.code);
+            info!("");
+            info!("METHOD_NAME: {}.{}{}", self.class_and_method.class.name, self.class_and_method.method.name, self.class_and_method.method.descriptor.as_str());
+            info!("{:?}", printable_instructions(&code.code));
 
-            loop{
-                let instruction = code.code.get(self.pc.0 as usize).unwrap();
-                println!("stack={:?}, locals={:?}", &self.stack, &self.locals);
-                match instruction {
-                    Instruction::PUTSTATIC(index) => {
-                        let (class_name, field_name, descriptor) = self.class_and_method.get_constant_field_info_descriptor(*index).expect("GIB MICH DIE FELD");
-                        let (field_index, info) = self.class_and_method.class.find_field(field_name.as_str()).unwrap();
-                        println!("PUTSTATIC {} {} {} {:?}", field_name, descriptor, field_index, info);
-                        let value = self.stack.pop().unwrap();
-                        let class_id = vm.class_manager.find_class_by_name(class_name.as_str()).unwrap().id;
-                        let object = vm.get_static_class_object(class_id).unwrap();
-                        object.set_field(field_index, value);
+            loop {
+                if let Ok((instruction, pc)) = parse_instruction(&code.code, self.pc.0 as usize) {
+                    self.pc = ProgramCounter(pc as u16);
+                    trace!("{:?}", instruction);
+                    trace!("stack=");
+                    for (index, value) in self.stack.iter().enumerate(){
+                        trace!("    [{}] {:?}", index, value);
                     }
-                    Instruction::GETSTATIC(index) => {
-                        let (class_name, field_name, descriptor) = self.class_and_method.get_constant_field_info_descriptor(*index).expect("GIB MICH DIE FELD2");
-                        //let (field_index, info) = self.class_and_method.class.find_field(field_name.as_str()).unwrap();
-                        //let class = vm.class_manager.find_class_by_name(class_name.as_str()).unwrap();
-                        let class = vm.get_or_resolve_class(class_name.as_str())?;
-                        let (field_index, info) = class.find_field(field_name.as_str()).unwrap();
-                        let object = vm.get_static_class_object(class.id).unwrap();
-                        println!("GETSTATIC {} {} {} {:?}", field_name, descriptor, field_index, info);
-                        self.stack.push(object.get_field(field_index));
+                    trace!("locals=");
+                    for (index, value) in self.locals.iter().enumerate(){
+                        trace!("    [{}] {:?}", index, value);
                     }
-                    Instruction::LDC(index) => {
-                        self.stack.push(self.class_and_method.get_constant_as_value(*index as u16));
-                        println!("LDC: {}", get_constant_printable(constants, *index as u16))
-                    }
-                    Instruction::LDC2W(index) => {
-                        self.stack.push(self.class_and_method.get_constant_as_value(*index));
-                        println!("LDC2W: {}", get_constant_printable(constants, *index))
-                    }
-                    Instruction::PUTFIELD(index) => {
-                        let (class_name, field_name, descriptor) = self.class_and_method.get_constant_field_info_descriptor(*index).expect("GIB MICH DIE FELD");
-                        let (field_index, info) = self.class_and_method.class.find_field(field_name.as_str()).unwrap();
-                        println!("PUTFIELD {} {} {} {:?}", field_name, descriptor, field_index, info);
-                        let value = self.stack.pop().unwrap();
-                        let object = self.stack.pop().unwrap();
-                        if let Value::Object(mut obj) = object{
-                            obj.set_field(field_index, value);
-                            println!("obj:{:?}", &obj);
-                        } else {
-                            println!("NAO");
+                    match instruction {
+                        Instruction::ACONST_NULL => {
+                            self.stack.push(Value::Null)
                         }
-                    }
-                    Instruction::GETFIELD(index) => {
-                        let (class_name, field_name, descriptor) = self.class_and_method.get_constant_field_info_descriptor(*index).expect("GIB MICH DIE FELD2");
-                        println!("GETFIELD {} {}", field_name, descriptor);
-                        let (field_index, _) = self.class_and_method.class.find_field(field_name.as_str()).unwrap();
-                        let object = self.stack.pop().unwrap();
-                        if let Value::Object(obj) = object{
-                            self.stack.push(obj.get_field(field_index));
-                        } else {
-                            println!("NAO");
+                        Instruction::PUTSTATIC(index) => {
+                            let (class_name, field_name, descriptor) = self.class_and_method.get_constant_field_info_descriptor(index).expect("GIB MICH DIE FELD");
+                            let (field_index, info) = self.class_and_method.class.find_field(field_name.as_str()).unwrap();
+                            debug!("PUTSTATIC {} {} {} {:?}", field_name, descriptor, field_index, info);
+                            let value = self.stack.pop().unwrap();
+                            let class_id = vm.class_manager.find_class_by_name(class_name.as_str()).unwrap().id;
+                            let object = vm.get_static_class_object(class_id).unwrap();
+                            object.set_field(field_index, value);
                         }
-                    }
-                    Instruction::INVOKEVIRTUAL(index) => {self.execute_invoke(vm, *index, InvokeKind::VIRTUAL)?}
-                    Instruction::INVOKESPECIAL(index) => {self.execute_invoke(vm, *index, InvokeKind::SPECIAL)?}
-                    Instruction::INVOKESTATIC(index) => {self.execute_invoke(vm, *index, InvokeKind::STATIC)?}
+                        Instruction::GETSTATIC(index) => {
+                            let (class_name, field_name, descriptor) = self.class_and_method.get_constant_field_info_descriptor(index).expect("GIB MICH DIE FELD2");
+                            //let (field_index, info) = self.class_and_method.class.find_field(field_name.as_str()).unwrap();
+                            //let class = vm.class_manager.find_class_by_name(class_name.as_str()).unwrap();
+                            let class = vm.get_or_resolve_class(class_name.as_str())?;
+                            let (field_index, info) = class.find_field(field_name.as_str()).unwrap();
+                            let object = vm.get_static_class_object(class.id).unwrap();
+                            debug!("GETSTATIC {} {} {} {:?}", field_name, descriptor, field_index, info);
+                            self.stack.push(object.get_field(field_index));
+                        }
+                        Instruction::LDC(index) => {
+                            let value = self.get_constant_as_value(vm, index as u16)?;
+                            self.stack.push(value);
+                            debug!("LDC: {}", get_constant_printable(constants, index as u16))
+                        }
+                        Instruction::LDCW(index) => {
+                            let value = self.get_constant_as_value(vm, index)?;
+                            self.stack.push(value);
+                            debug!("LDCW: {}", get_constant_printable(constants, index))
+                        }
+                        Instruction::LDC2W(index) => {
+                            let value = self.get_constant_as_value(vm, index)?;
+                            self.stack.push(value);
+                            debug!("LDC2W: {}", get_constant_printable(constants, index))
+                        }
+                        Instruction::PUTFIELD(index) => {
+                            let (class_name, field_name, descriptor) = self.class_and_method.get_constant_field_info_descriptor(index).expect("GIB MICH DIE FELD");
+                            let (field_index, info) = self.class_and_method.class.find_field(field_name.as_str()).unwrap();
+                            debug!("PUTFIELD {} {} {} {:?}", field_name, descriptor, field_index, info);
+                            let value = self.stack.pop().unwrap();
+                            let object = self.stack.pop().unwrap();
+                            if let Value::Object(mut obj) = object {
+                                obj.set_field(field_index, value);
+                                debug!("obj:{:?}", &obj);
+                            } else {
+                                warn!("NAO");
+                            }
+                        }
+                        Instruction::GETFIELD(index) => {
+                            let (class_name, field_name, descriptor) = self.class_and_method.get_constant_field_info_descriptor(index).expect("GIB MICH DIE FELD2");
+                            debug!("GETFIELD {} {}", field_name, descriptor);
+                            let (field_index, _) = self.class_and_method.class.find_field(field_name.as_str()).unwrap();
+                            let object = self.stack.pop().unwrap();
+                            if let Value::Object(obj) = object {
+                                self.stack.push(obj.get_field(field_index));
+                            } else {
+                                warn!("NAO");
+                            }
+                        }
+                        Instruction::INVOKEVIRTUAL(index) => { self.execute_invoke(vm, index, InvokeKind::VIRTUAL)? }
+                        Instruction::INVOKESPECIAL(index) => { self.execute_invoke(vm, index, InvokeKind::SPECIAL)? }
+                        Instruction::INVOKESTATIC(index) => { self.execute_invoke(vm, index, InvokeKind::STATIC)? }
+                        Instruction::INVOKEINTERFACE(index, _, _) => { self.execute_invoke(vm, index, InvokeKind::INTERFACE)? }
 
-                    Instruction::RETURN => {
-                        println!("RETURN");
-                        return Ok(None);
-                    }
-                    Instruction::IRETURN => {
-                        let value = self.stack.pop();
-                        println!("RETURN {:?}", value);
-                        return Ok(value);
-                    }
-                    Instruction::NEW(index) => {
-                        let i = *index;
-                        let class_name = self.class_and_method.get_constant_utf8(i).unwrap();
-                        //let res = vm.invoke_method(class_name.as_str(), "<init>", "()V")?;
-                        let new_object = vm.new_object(class_name.as_str())?;
+                        Instruction::RETURN => {
+                            info!("RETURN");
+                            return Ok(None);
+                        }
+                        Instruction::IRETURN | Instruction::LRETURN | Instruction::FRETURN => {
+                            //TODO check for types
+                            let value = self.stack.pop();
+                            info!("RETURN {:?}", value);
+                            return Ok(value);
+                        }
+                        Instruction::NEW(index) => {
+                            let class_name = self.class_and_method.get_constant_utf8(index).unwrap();
+                            //let res = vm.invoke_method(class_name.as_str(), "<init>", "()V")?;
+                            let new_object = vm.new_object(class_name.as_str())?;
 
-                        println!("NEW: {} {}", index, get_constant_printable(constants, i));
-                        self.stack.push(Value::Object(new_object));
-                    }
-                    Instruction::DUP => {
-                        println!("DUP");
-                        let value = self.stack.pop().unwrap();
-                        self.stack.push(value.clone());
-                        self.stack.push(value);
-                    }
-                    Instruction::IF_ACMPNE(offset) => {
-                        let o1 = self.stack.pop().unwrap();
-                        let o2 = self.stack.pop().unwrap();
-                        match (o1, o2) {
-                            (Value::Object(obj1), Value::Object(obj2)) => {
-                                if obj1.id != obj2.id{
-                                    self.pc.0 += offset-1
+                            debug!("NEW: {} {}", index, get_constant_printable(constants, index));
+                            self.stack.push(Value::Object(new_object));
+                        }
+                        Instruction::ANEWARRAY(index) => {
+                            let count = self.pop_int()?;
+                            let class_name = self.class_and_method.get_constant_utf8(index).unwrap();
+                            debug!("ANEWARRAY {}[{}]", class_name, count);
+                            let array_content = vec![Value::Null; count as usize];
+                            let array = Value::Array(FieldType::Array(count as usize, Box::new(FieldType::Object(class_name))), Rc::new(RefCell::new(array_content)));
+                            self.stack.push(array);
+                        }
+                        Instruction::NEWARRAY(atype) => {
+                            let primitive_type = match atype {
+                                4  => FieldType::Primitive(PrimitiveType::Boolean),
+                                5  => FieldType::Primitive(PrimitiveType::Char),
+                                6  => FieldType::Primitive(PrimitiveType::Float),
+                                7  => FieldType::Primitive(PrimitiveType::Double),
+                                8  => FieldType::Primitive(PrimitiveType::Byte),
+                                9  => FieldType::Primitive(PrimitiveType::Short),
+                                10 => FieldType::Primitive(PrimitiveType::Integer),
+                                11 => FieldType::Primitive(PrimitiveType::Long),
+                                _ => unreachable!("Can not create an array of type {atype}")
+                            };
+                            let count = self.pop_int()?;
+                            debug!("NEWARRAY {:?}[{}]", primitive_type, count);
+                            let array_content = vec![Value::Null; count as usize];
+                            let array = Value::Array(FieldType::Array(count as usize, Box::new(primitive_type)), Rc::new(RefCell::new(array_content)));
+                            self.stack.push(array);
+                        }
+                        Instruction::ARRAYLENGTH => {
+                            debug!("ARRAYLENGTH");
+                            if let Value::Array(FieldType::Array(size, _), _) = self.stack.pop().unwrap(){
+                                self.stack.push(Value::Integer(size as i32));
+                            } else {
+                                warn!("Not an array");
+                            }
+                        }
+                        Instruction::DUP => {
+                            debug!("DUP");
+                            let value = self.stack.pop().unwrap();
+                            self.stack.push(value.clone());
+                            self.stack.push(value);
+                        }
+                        Instruction::POP => {
+                            debug!("POP");
+                            if self.stack.pop().is_none(){
+                                warn!("Expected a value to pop");
+                            }
+                        }
+                        Instruction::IF_ACMPNE(offset) => {
+                            let o1 = self.stack.pop().unwrap();
+                            let o2 = self.stack.pop().unwrap();
+                            match (o1, o2) {
+                                (Value::Object(obj1), Value::Object(obj2)) => {
+                                    debug!("IF_ACMPNE {:?} != {:?}?", obj1.id, obj2.id);
+                                    if obj1.id != obj2.id {
+                                        self.pc.0 = offset
+                                    }
+                                }
+                                _ => {}
+                            };
+                        }
+                        Instruction::IF_ACMPEQ(offset) => {
+                            let o1 = self.stack.pop().unwrap();
+                            let o2 = self.stack.pop().unwrap();
+                            match (o1, o2) {
+                                (Value::Object(obj1), Value::Object(obj2)) => {
+                                    debug!("IF_ACMPEQ {:?} == {:?}?", obj1.id, obj2.id);
+                                    if obj1.id == obj2.id {
+                                        self.pc.0 = offset
+                                    }
+                                }
+                                _ => {}
+                            };
+                        }
+                        Instruction::IF_ICMPNE(offset) => { self.execute_i_cmp(offset, |val1, val2| val1 != val2) }
+                        Instruction::IF_ICMPGE(offset) => { self.execute_i_cmp(offset, |val1, val2| val1 >= val2) }
+                        Instruction::IF_ICMPLE(offset) => { self.execute_i_cmp(offset, |val1, val2| val1 <= val2) }
+                        Instruction::IF_ICMPLT(offset) => { self.execute_i_cmp(offset, |val1, val2| val1 <  val2) }
+                        Instruction::IFNONNULL(offset) => {
+                            let reference = self.stack.pop().unwrap();
+                            match reference {
+                                Value::Null => {debug!("IFNONNULL is NULL");}
+                                Value::Object(_) | Value::Array(_, _) => {debug!("IFNONNULL is reference"); self.pc.0 = offset}
+                                _ => {warn!("IFNONNULL {:?} is this valid?", reference.clone())}
+                            }
+                        }
+                        Instruction::IFNULL(offset) => {
+                            let reference = self.stack.pop().unwrap();
+                            match reference {
+                                Value::Null => {debug!("IFNULL is NULL"); self.pc.0 = offset}
+                                Value::Object(_) | Value::Array(_, _) => {debug!("IFNULL is reference");}
+                                _ => {warn!("IFNULL {:?} is this valid?", reference.clone())}
+                            }
+                        }
+                        Instruction::IFGT(offset) => { self.execute_cmp(offset, |value| value >  0) }
+                        Instruction::IFGE(offset) => { self.execute_cmp(offset, |value| value >= 0) }
+                        Instruction::IFEQ(offset) => { self.execute_cmp(offset, |value| value == 0) }
+                        Instruction::IFLE(offset) => { self.execute_cmp(offset, |value| value <= 0) }
+                        Instruction::IFLT(offset) => { self.execute_cmp(offset, |value| value <  0) }
+                        Instruction::IFNE(offset) => { self.execute_cmp(offset, |value| value != 0) }
+                        Instruction::FCMPG | Instruction::FCMPL => {
+                            if let (Some(Value::Float(value2)), Some(Value::Float(value1))) = (self.stack.pop(), self.stack.pop()){
+                                debug!("FCMP");
+                                if value1 > value2{
+                                    self.stack.push(Value::Integer(1))
+                                } else if value1 == value2{
+                                    self.stack.push(Value::Integer(0))
+                                } else if value1 < value2{
+                                    self.stack.push(Value::Integer(-1))
+                                } else if value1.is_nan() || value2.is_nan(){
+                                    if instruction == Instruction::FCMPG{
+                                        self.stack.push(Value::Integer(1))
+                                    } else {
+                                        self.stack.push(Value::Integer(-1))
+                                    }
                                 }
                             }
-                            _ => {}
-                        };
-                    }
-                    Instruction::GOTO(offset) => {
-                        self.pc.0 += offset - 1
-                    }
-                    Instruction::ISTORE(index) => {self.execute_istore(*index as usize)}
-                    Instruction::ISTORE0 => {self.execute_istore(0)}
-                    Instruction::ISTORE1 => {self.execute_istore(1)}
-                    Instruction::ISTORE2 => {self.execute_istore(2)}
-                    Instruction::ISTORE3 => {self.execute_istore(3)}
-
-                    Instruction::ASTORE1 => {self.execute_astore(1)}
-                    Instruction::ASTORE2 => {self.execute_astore(2)}
-                    Instruction::ICONST0 => {self.execute_iconst(0)}
-                    Instruction::ICONST1 => {self.execute_iconst(1)}
-                    Instruction::ICONST5 => {self.execute_iconst(5)}
-                    Instruction::ILOAD(index) => {self.execute_iload(*index as usize)}
-                    Instruction::ILOAD1 => {self.execute_iload(1)}
-                    Instruction::ILOAD2 => {self.execute_iload(2)}
-                    Instruction::ALOAD0 => {self.execute_aload(0)}
-                    Instruction::ALOAD1 => {self.execute_aload(1)}
-                    Instruction::ALOAD2 => {self.execute_aload(2)}
-                    Instruction::BIPUSH(value) => {
-                        println!("BIPUSH {:?}", value);
-                        self.stack.push(Value::Integer(*value as i32))
-                    }
-                    Instruction::ISUB => {self.execute_i_arithmetic(|val1, val2| val1 - val2)}
-                    Instruction::IMUL => {self.execute_i_arithmetic(|val1, val2| val1 * val2)}
-                    Instruction::IADD => {self.execute_i_arithmetic(|val1, val2| val1 + val2)}
-                    Instruction::D2I => {
-                        let value = self.stack.pop().unwrap();
-                        println!("D2I");
-                        if let Value::Double(double) = value{
-                            self.stack.push(Value::Integer(double as i32));
-                        } else {
-                            eprintln!("D2I Conversion failed, because {value:?} is not of type Double")
                         }
+                        Instruction::LCMP => {
+                            if let (Some(Value::Long(value2)), Some(Value::Long(value1))) = (self.stack.pop(), self.stack.pop()) {
+                                debug!("LCMP");
+                                if value1 > value2 {
+                                    self.stack.push(Value::Integer(1))
+                                } else if value1 == value2 {
+                                    self.stack.push(Value::Integer(0))
+                                } else if value1 < value2 {
+                                    self.stack.push(Value::Integer(-1))
+                                }
+                            }
+                        }
+                        Instruction::GOTO(offset) => {
+                            debug!("GOTO {}", offset);
+                            self.pc.0 = offset
+                        }
+                        Instruction::ISTORE(index) => { self.execute_istore(index as usize) }
+                        Instruction::ISTORE0 => { self.execute_istore(0) }
+                        Instruction::ISTORE1 => { self.execute_istore(1) }
+                        Instruction::ISTORE2 => { self.execute_istore(2) }
+                        Instruction::ISTORE3 => { self.execute_istore(3) }
+
+                        Instruction::LSTORE0 => { self.execute_lstore(0) }
+                        Instruction::LSTORE1 => { self.execute_lstore(1) }
+                        Instruction::LSTORE2 => { self.execute_lstore(2) }
+                        Instruction::LSTORE3 => { self.execute_lstore(3) }
+
+                        Instruction::ASTORE(index) => { self.execute_astore(index as usize) }
+                        Instruction::ASTORE0 => { self.execute_astore(0) }
+                        Instruction::ASTORE1 => { self.execute_astore(1) }
+                        Instruction::ASTORE2 => { self.execute_astore(2) }
+                        Instruction::IASTORE | Instruction::AASTORE | Instruction::CASTORE => {
+                            //TODO validate type of value to fit instruction
+                            let value = self.stack.pop().unwrap();
+                            let index = self.pop_int()?;
+                            let arrayref = self.stack.pop().unwrap();
+                            debug!("{:?}", arrayref);
+                            if let Value::Array(_, content) = arrayref{
+                                content.borrow_mut()[index as usize] = value;
+                            }
+                        }
+                        Instruction::ICONST0 => { self.execute_iconst(0) }
+                        Instruction::ICONST1 => { self.execute_iconst(1) }
+                        Instruction::ICONST2 => { self.execute_iconst(2) }
+                        Instruction::ICONST3 => { self.execute_iconst(3) }
+                        Instruction::ICONST4 => { self.execute_iconst(4) }
+                        Instruction::ICONST5 => { self.execute_iconst(5) }
+
+                        Instruction::FCONST0 => { self.execute_fconst(0) }
+                        Instruction::FCONST1 => { self.execute_fconst(1) }
+                        Instruction::FCONST2 => { self.execute_fconst(2) }
+
+                        Instruction::ILOAD(index) => { self.execute_iload(index as usize) }
+                        Instruction::ILOAD0 => { self.execute_iload(0) }
+                        Instruction::ILOAD1 => { self.execute_iload(1) }
+                        Instruction::ILOAD2 => { self.execute_iload(2) }
+                        Instruction::ILOAD3 => { self.execute_iload(3) }
+
+                        Instruction::LLOAD0 => { self.execute_lload(0) }
+                        Instruction::LLOAD1 => { self.execute_lload(1) }
+                        Instruction::LLOAD2 => { self.execute_lload(2) }
+                        Instruction::LLOAD3 => { self.execute_lload(3) }
+
+                        Instruction::FLOAD0 => { self.execute_fload(0) }
+                        Instruction::FLOAD1 => { self.execute_fload(1) }
+                        Instruction::FLOAD2 => { self.execute_fload(2) }
+                        Instruction::FLOAD3 => { self.execute_fload(3) }
+
+                        Instruction::DLOAD0 => { self.execute_dload(0) }
+                        Instruction::DLOAD1 => { self.execute_dload(1) }
+                        Instruction::DLOAD2 => { self.execute_dload(2) }
+                        Instruction::DLOAD3 => { self.execute_dload(3) }
+
+                        Instruction::ALOAD(index) => { self.execute_aload(index as usize)? }
+                        Instruction::ALOAD0 => { self.execute_aload(0)? }
+                        Instruction::ALOAD1 => { self.execute_aload(1)? }
+                        Instruction::ALOAD2 => { self.execute_aload(2)? }
+                        Instruction::BIPUSH(value) => {
+                            debug!("BIPUSH {:?}", value);
+                            self.stack.push(Value::Integer(value as i32))
+                        }
+                        Instruction::SIPUSH(value) => {
+                            debug!("SIPUSH {:?}", value);
+                            self.stack.push(Value::Integer(value as i32))
+                        }
+                        Instruction::AALOAD => {
+                            let index = self.pop_int()?;
+                            if let Some(Value::Array(_, content)) = self.stack.pop(){
+                                self.stack.push(content.borrow().get(index as usize).cloned().unwrap());
+                            }
+                        }
+                        Instruction::ISUB => { self.execute_i_arithmetic(|val1, val2| val1.wrapping_sub(val2)) }
+                        Instruction::IMUL => { self.execute_i_arithmetic(|val1, val2| val1.wrapping_mul(val2)) }
+                        Instruction::IADD => { self.execute_i_arithmetic(|val1, val2| val1.wrapping_add(val2)) }
+                        Instruction::IXOR => { self.execute_i_arithmetic(|val1, val2| val1 ^ val2) }
+                        Instruction::IAND => { self.execute_i_arithmetic(|val1, val2| val1 & val2) }
+                        Instruction::IOR  => { self.execute_i_arithmetic(|val1, val2| val1 | val2) }
+                        Instruction::ISHL => { self.execute_i_arithmetic(|val1, val2| val1 << (val2 & 0x1f)) }
+                        Instruction::ISHR => { self.execute_i_arithmetic(|val1, val2| val1 >> (val2 & 0x1f)) }
+                        Instruction::IUSHR => { self.execute_i_arithmetic(|val1, val2| {
+                            if val1 > 0{
+                                val1 >> (val2 & 0x1f)
+                            } else {
+                                ((val1 as u32) >> (val2 & 0x1f)) as i32
+                            }
+                        })}
+                        Instruction::LAND => { self.execute_j_arithmetic(|val1, val2| val1 & val2) },
+                        Instruction::LUSHR => { self.execute_ji_arithmetic(|val1, val2| {
+                            if val1 > 0{
+                                val1 >> (val2 & 0x1f)
+                            } else {
+                                ((val1 as u64) >> (val2 & 0x1f)) as i64
+                            }
+                        })}
+                        Instruction::FMUL => { self.execute_f_arithmetic(|val1, val2| val1 * val2) }
+                        Instruction::D2I => {
+                            let value = self.stack.pop().unwrap();
+                            debug!("D2I");
+                            if let Value::Double(double) = value {
+                                self.stack.push(Value::Integer(double as i32));
+                            } else {
+                                warn!("D2I Conversion failed, because {value:?} is not of type Double")
+                            }
+                        }
+                        Instruction::L2I => {
+                            let value = self.stack.pop().unwrap();
+                            debug!("L2I");
+                            if let Value::Long(long) = value {
+                                self.stack.push(Value::Integer(long as i32));
+                            } else {
+                                warn!("L2I Conversion failed, because {value:?} is not of type Long")
+                            }
+                        }
+                        Instruction::I2L => {
+                            let value = self.stack.pop().unwrap();
+                            debug!("I2L");
+                            if let Value::Integer(long) = value {
+                                self.stack.push(Value::Long(long as i64));
+                            } else {
+                                warn!("I2L Conversion failed, because {value:?} is not of type Integet")
+                            }
+                        }
+                        Instruction::I2F => {
+                            let value = self.stack.pop().unwrap();
+                            debug!("I2F");
+                            if let Value::Integer(int) = value {
+                                self.stack.push(Value::Float(int as f32));
+                            } else {
+                                warn!("I2F Conversion failed, because {value:?} is not of type Int")
+                            }
+                        }
+                        Instruction::F2I => {
+                            let value = self.stack.pop().unwrap();
+                            debug!("F2I");
+                            if let Value::Float(float) = value {
+                                self.stack.push(Value::Integer(float as i32));
+                            } else {
+                                warn!("F2I Conversion failed, because {value:?} is not of type Float")
+                            }
+                        }
+                        Instruction::MONITORENTER => {
+                            if let Some(Value::Object(_)) = self.stack.pop(){
+                                debug!("MONITORENTER")
+                            } else {
+                                warn!("No object to lock")
+                            }
+                        }
+                        Instruction::MONITOREXIT => {
+                            if let Some(Value::Object(_)) = self.stack.pop(){
+                                debug!("MONITOREXIT")
+                            } else {
+                                warn!("No object to lock")
+                            }
+                        }
+                        Instruction::CHECKCAST(constant_index) => {
+                            //TODO
+                            debug!("CHECKCAST {}", get_constant_printable(constants, constant_index))
+                        }
+                        _ => { unimplemented!("Instruction {:?} not executable (stack={:?})", instruction, &self.stack) }
                     }
-                    _ => {unimplemented!("Instruction {:?} not executable (stack={:?})", instruction, &self.stack)}
+                } else {
+                    break;
                 }
-                self.pc.0 += 1
             }
         }
         Err(VmError::MethodCallError(self.class_and_method.method.name.to_string()))
     }
 
     fn execute_istore(&mut self, index: usize){
-        let value = self.stack.pop().expect("LECK MICH DOCH");
-        println!("ISTORE{} {:?}", index, value);
-        self.locals.insert(index, value);
+        let value = self.stack.pop().unwrap();
+        debug!("ISTORE{} {:?}", index, value);
+        self.locals[index] = value;
+    }
+    fn execute_lstore(&mut self, index: usize){
+        let value = self.stack.pop().unwrap();
+        debug!("LSTORE{} {:?}", index, value);
+        self.locals[index] = value;
     }
 
     fn execute_astore(&mut self, index: usize){
-        let value = self.stack.pop().expect("LECK MICH DOCH2");
-        println!("ASTORE{} {:?}", index, value);
-        self.locals.insert(index, value);
+        let value = self.stack.pop().unwrap();
+        debug!("ASTORE{} {:?}", index, value);
+        self.locals[index] = value;
     }
 
     fn execute_iload(&mut self, index: usize){
         if let Value::Integer(value) = self.locals.get(index).unwrap(){
             self.stack.push(Value::Integer(*value));
-            println!("ILOAD{} {:?}", index, value);
+            debug!("ILOAD{} {:?}", index, value);
         }
     }
 
-    fn execute_aload(&mut self, index: usize){
-        if let Value::Object(value) = self.locals.get(index).unwrap(){
-            self.stack.push(Value::Object(value));
-            println!("ALOAD{} {:?}", index, value);
+    fn execute_lload(&mut self, index: usize){
+        if let Value::Long(value) = self.locals.get(index).unwrap(){
+            self.stack.push(Value::Long(*value));
+            debug!("LLOAD{} {:?}", index, value);
         }
+    }
+
+    fn execute_fload(&mut self, index: usize){
+        if let Value::Float(value) = self.locals.get(index).unwrap(){
+            self.stack.push(Value::Float(*value));
+            debug!("FLOAD{} {:?}", index, value);
+        }
+    }
+
+    fn execute_dload(&mut self, index: usize){
+        if let Value::Double(value) = self.locals.get(index).unwrap(){
+            self.stack.push(Value::Double(*value));
+            debug!("DLOAD{} {:?}", index, value);
+        }
+    }
+
+    fn execute_aload(&mut self, index: usize) -> Result<(), VmError>{
+        let popped = self.locals.get(index).unwrap();
+        if let Value::Object(value) = popped{
+            self.stack.push(Value::Object(value));
+            debug!("ALOAD{} {:?}", index, value);
+        } else if let Value::Array(FieldType::Array(array_size, field_type), content) = popped{
+            self.stack.push(Value::Array(FieldType::Array(*array_size, field_type.clone()), content.clone()));
+            debug!("ALOAD{}", index);
+        } else {
+            return Err(VmError::ValidationError(format!("ALOAD{} failed", index)))
+        }
+        Ok(())
     }
 
     fn execute_iconst(&mut self, value: usize){
-        println!("ICONST {:?}", value);
+        debug!("ICONST {:?}", value);
         self.stack.push(Value::Integer(value as i32))
+    }
+
+    fn execute_fconst(&mut self, value: usize){
+        debug!("FCONST {:?}", value);
+        self.stack.push(Value::Float(value as f32))
     }
 
     fn execute_i_arithmetic<F: FnOnce(i32, i32) -> i32>(&mut self, f: F){
@@ -198,39 +504,165 @@ impl<'a> CallFrame<'a>{
         let value1 = self.stack.pop();
         if let (Some(Value::Integer(val1)), Some(Value::Integer(val2))) = (value1, value2){
             let res = f(val1, val2);
-            println!("Integer ARITHMETIC {}&{}={}", val1, val2, res);
+            debug!("Integer ARITHMETIC {}&{}={}", val1, val2, res);
             self.stack.push(Value::Integer(res))
         } else {
-            println!("dat sin nich zwee ints to keck");
+            warn!("dat sin nich zwee ints to keck");
+        }
+    }
+
+    fn execute_ji_arithmetic<F: FnOnce(i64, i32) -> i64>(&mut self, f: F){
+        let value2 = self.stack.pop();
+        let value1 = self.stack.pop();
+        if let (Some(Value::Long(val1)), Some(Value::Integer(val2))) = (value1, value2){
+            let res = f(val1, val2);
+            debug!("LongInt ARITHMETIC {}&{}={}", val1, val2, res);
+            self.stack.push(Value::Long(res))
+        } else {
+            warn!("dat sin nich eene long und eene int du keck");
+        }
+    }
+
+    fn execute_j_arithmetic<F: FnOnce(i64, i64) -> i64>(&mut self, f: F){
+        let value2 = self.stack.pop();
+        let value1 = self.stack.pop();
+        if let (Some(Value::Long(val1)), Some(Value::Long(val2))) = (value1, value2){
+            let res = f(val1, val2);
+            debug!("Long ARITHMETIC {}&{}={}", val1, val2, res);
+            self.stack.push(Value::Long(res))
+        } else {
+            warn!("dat sin nich zwee longse to keck");
+        }
+    }
+
+    fn execute_f_arithmetic<F: FnOnce(f32, f32) -> f32>(&mut self, f: F){
+        let value2 = self.stack.pop();
+        let value1 = self.stack.pop();
+        if let (Some(Value::Float(val1)), Some(Value::Float(val2))) = (value1, value2){
+            let res = f(val1, val2);
+            debug!("Float ARITHMETIC {}&{}={}", val1, val2, res);
+            self.stack.push(Value::Float(res))
+        } else {
+            warn!("dat sin nich zwee floatse to keck");
+        }
+    }
+
+    fn execute_i_cmp<F: FnOnce(i32, i32) -> bool>(&mut self, offset: u16, f: F){
+        let val2 = self.pop_int().unwrap();
+        let val1 = self.pop_int().unwrap();
+        let jump = f(val1, val2);
+        debug!("ICMP: {}&{}={}", val1, val2, jump);
+        if jump{
+            self.pc.0 = offset
+        }
+    }
+
+    fn execute_cmp<F: FnOnce(i32) -> bool>(&mut self, offset: u16, cmp: F){
+        let value = self.pop_int().unwrap();
+        if cmp(value){
+            self.pc.0 = offset;
         }
     }
 
     fn execute_invoke(&mut self, vm: &mut VM<'a>, index: u16, kind: InvokeKind) -> Result<(), VmError> {
-        //TODO add virtual method resolving
         let (class_name, method_name, descriptor) = self.class_and_method.get_constant_method_info_descriptor(index).expect("GIB MICH DIE METHODE");
         let args_count = MethodDescriptor::new(descriptor.clone()).args.len();
         let mut args = Vec::new();
         for _ in 0..args_count{
-            args.push(self.stack.pop().unwrap());
+            args.insert(0, self.stack.pop().unwrap());
         }
-        let (method, object) = if kind == InvokeKind::STATIC{
-            let class = vm.get_or_resolve_class(class_name.as_str())?;
-            let method = class.find_method(method_name.as_str(), descriptor.as_str()).unwrap();
-            let class_and_method = ClassAndMethod{class, method};
-            let object = vm.get_static_class_object(class.id);
-            (class_and_method, object)
+        let class = vm.get_or_resolve_class(class_name.as_str())?;
+        let class_and_method = match kind {
+            InvokeKind::STATIC | InvokeKind::SPECIAL => {
+                class.find_method(method_name.as_str(), descriptor.as_str()).map(|method| ClassAndMethod {class, method}).unwrap()
+            }
+            InvokeKind::VIRTUAL | InvokeKind::INTERFACE => {
+                Self::get_method_virtual(class, method_name.as_str(), descriptor.as_str())?
+            }
+        };
+        let receiver = if class_and_method.method.is_static(){
+            None
         } else {
-            let method = vm.resolve_class_method(class_name.as_str(), method_name.as_str(), descriptor.as_str())?;
-            let object = if let Some(Value::Object(obj)) = self.stack.pop() {Some(obj)} else {None};
-            (method, object)
+            if let Value::Object(obj) = self.stack.pop().unwrap(){
+                Some(obj)
+            } else {
+                warn!("Expected object");
+                None
+            }
+        };
+        let class_and_method = match kind {
+            InvokeKind::VIRTUAL | InvokeKind::INTERFACE => {
+                match receiver {
+                    Some(obj) => {
+                        let receiver_class = vm.find_class_by_id(obj.id).unwrap();
+                        let resolved_method = Self::get_method_virtual(receiver_class, class_and_method.method.name.as_str(), class_and_method.method.descriptor.as_str())?;
+                        resolved_method
+                    }
+                    None => {
+                        error!("Receiver was not found");
+                        class_and_method
+                    }
+                }
+            }
+            _ => class_and_method
         };
 
-        println!("INVOKE{:?}: {}{} {:?}", kind, method_name, descriptor, object);
-        let res = vm.invoke(method, object, args)?;
+        debug!("INVOKE{:?}: {}{} {:?}", kind, method_name, descriptor, receiver);
+        let res = vm.invoke(class_and_method, receiver, args)?;
         if res.is_some(){
             self.stack.push(res.unwrap())
         }
         Ok(())
+    }
+
+    fn get_method_virtual(class: ClassRef<'a>, method_name: &str, descriptor: &str) -> Result<ClassAndMethod<'a>, VmError>{
+        let mut current_class = class;
+        loop {
+            if let Some(method) = current_class.find_method(method_name, descriptor){
+                return Ok(ClassAndMethod{class: current_class, method})
+            }
+            if let Some(super_class) = class.superclass{
+                current_class = super_class
+            }
+        }
+    }
+
+    fn pop_int(&mut self) -> Result<i32, VmError>{
+        if let Some(Value::Integer(value)) = self.stack.pop(){
+            return Ok(value)
+        }
+        Err(VmError::ValidationError("Integer".to_string()))
+    }
+
+    fn get_constant_as_value(&mut self, vm: &mut VM<'a>, index: u16) -> Result<Value<'a>, VmError>{
+        let constant_value = self.class_and_method.class.get_constant(index).unwrap();
+        let value = match constant_value {
+            ConstantPoolEntry::Integer(value) => Value::Integer(value),
+            ConstantPoolEntry::Long(value) => Value::Long(value),
+            ConstantPoolEntry::Float(value) => Value::Float(value),
+            ConstantPoolEntry::Double(value) => Value::Double(value),
+            ConstantPoolEntry::String(string_index) => {
+                if let Some(ConstantPoolEntry::Utf8(string)) = self.class_and_method.class.get_constant(string_index){
+                    let string_object = vm.new_string_object(string)?;
+                    Value::Object(string_object)
+                } else {
+                    //return Err(ValidationError("Expected string".to_string()));
+                    warn!("expected but didnt find string object");
+                    Value::Null
+                }
+            }
+            ConstantPoolEntry::Class(name_index) => {
+                if let Some(ConstantPoolEntry::Utf8(string)) = self.class_and_method.class.get_constant(name_index){
+                    let class_object = vm.new_class_object(string)?;
+                    Value::Object(class_object)
+                } else {
+                    warn!("expected but didnt find string object");
+                    Value::Null
+                }
+            }
+            _ => unimplemented!("Constant of type {constant_value:?} cannot be converted to a value")
+        };
+        Ok(value)
     }
 }
 
@@ -239,5 +671,5 @@ enum InvokeKind{
     STATIC,
     SPECIAL,
     VIRTUAL,
-    DYNAMIC,
+    INTERFACE,
 }
