@@ -135,7 +135,7 @@ public class HashMap<K extends Comparable<K>, V> {
 	 */
 	public static double defaultLoad     = 0.66; 
 	// How many of the slots from your HashMap should be used before new ones are allocated
-	public static int    defaultCapacity = 128;
+	public static int    defaultCapacity = 5;
 	// What is the standard capacity, used in the constructor
 
 	private double count;

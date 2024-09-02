@@ -1,5 +1,3 @@
-use std::str::FromStr;
-
 use regex::Regex;
 
 use crate::access_flags::{MethodFlag, MethodFlags};

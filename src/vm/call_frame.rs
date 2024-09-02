@@ -69,12 +69,12 @@ impl<'a> CallFrame<'a>{
                         Instruction::LDC(index) => {
                             let value = self.get_constant_as_value(vm, index as u16)?;
                             self.stack.push(value);
-                            debug!("LDC: {}", get_constant_printable(constants, index as u16))
+                            debug!("LDC: {:?}", get_constant_printable(constants, index as u16))
                         }
                         Instruction::LDCW(index) => {
                             let value = self.get_constant_as_value(vm, index)?;
                             self.stack.push(value);
-                            debug!("LDCW: {}", get_constant_printable(constants, index))
+                            debug!("LDCW: {:?}", get_constant_printable(constants, index))
                         }
                         Instruction::LDC2W(index) => {
                             let value = self.get_constant_as_value(vm, index)?;
@@ -166,6 +166,12 @@ impl<'a> CallFrame<'a>{
                             debug!("DUP");
                             let value = self.stack.pop().unwrap();
                             self.stack.push(value.clone());
+                            self.stack.push(value);
+                        }
+                        Instruction::DUPX1 => {
+                            debug!("DUPX1");
+                            let value = self.stack.pop().unwrap();
+                            self.stack.insert(self.stack.len() - 1, value.clone());
                             self.stack.push(value);
                         }
                         Instruction::POP => {
@@ -262,21 +268,22 @@ impl<'a> CallFrame<'a>{
                             debug!("GOTO {}", offset);
                             self.pc.0 = offset
                         }
-                        Instruction::ISTORE(index) => { self.execute_istore(index as usize) }
-                        Instruction::ISTORE0 => { self.execute_istore(0) }
-                        Instruction::ISTORE1 => { self.execute_istore(1) }
-                        Instruction::ISTORE2 => { self.execute_istore(2) }
-                        Instruction::ISTORE3 => { self.execute_istore(3) }
+                        Instruction::ISTORE(index) => { self.execute_istore(index as usize)? }
+                        Instruction::ISTORE0 => { self.execute_istore(0)? }
+                        Instruction::ISTORE1 => { self.execute_istore(1)? }
+                        Instruction::ISTORE2 => { self.execute_istore(2)? }
+                        Instruction::ISTORE3 => { self.execute_istore(3)? }
 
-                        Instruction::LSTORE0 => { self.execute_lstore(0) }
-                        Instruction::LSTORE1 => { self.execute_lstore(1) }
-                        Instruction::LSTORE2 => { self.execute_lstore(2) }
-                        Instruction::LSTORE3 => { self.execute_lstore(3) }
+                        Instruction::LSTORE0 => { self.execute_lstore(0)? }
+                        Instruction::LSTORE1 => { self.execute_lstore(1)? }
+                        Instruction::LSTORE2 => { self.execute_lstore(2)? }
+                        Instruction::LSTORE3 => { self.execute_lstore(3)? }
 
-                        Instruction::ASTORE(index) => { self.execute_astore(index as usize) }
-                        Instruction::ASTORE0 => { self.execute_astore(0) }
-                        Instruction::ASTORE1 => { self.execute_astore(1) }
-                        Instruction::ASTORE2 => { self.execute_astore(2) }
+                        Instruction::ASTORE(index) => { self.execute_astore(index as usize)? }
+                        Instruction::ASTORE0 => { self.execute_astore(0)? }
+                        Instruction::ASTORE1 => { self.execute_astore(1)? }
+                        Instruction::ASTORE2 => { self.execute_astore(2)? }
+                        Instruction::ASTORE3 => { self.execute_astore(3)? }
                         Instruction::IASTORE | Instruction::AASTORE | Instruction::CASTORE => {
                             //TODO validate type of value to fit instruction
                             let value = self.stack.pop().unwrap();
@@ -298,31 +305,34 @@ impl<'a> CallFrame<'a>{
                         Instruction::FCONST1 => { self.execute_fconst(1) }
                         Instruction::FCONST2 => { self.execute_fconst(2) }
 
-                        Instruction::ILOAD(index) => { self.execute_iload(index as usize) }
-                        Instruction::ILOAD0 => { self.execute_iload(0) }
-                        Instruction::ILOAD1 => { self.execute_iload(1) }
-                        Instruction::ILOAD2 => { self.execute_iload(2) }
-                        Instruction::ILOAD3 => { self.execute_iload(3) }
+                        Instruction::DCONST0 => { self.execute_dconst(0) }
 
-                        Instruction::LLOAD0 => { self.execute_lload(0) }
-                        Instruction::LLOAD1 => { self.execute_lload(1) }
-                        Instruction::LLOAD2 => { self.execute_lload(2) }
-                        Instruction::LLOAD3 => { self.execute_lload(3) }
+                        Instruction::ILOAD(index) => { self.execute_iload(index as usize)? }
+                        Instruction::ILOAD0 => { self.execute_iload(0)? }
+                        Instruction::ILOAD1 => { self.execute_iload(1)? }
+                        Instruction::ILOAD2 => { self.execute_iload(2)? }
+                        Instruction::ILOAD3 => { self.execute_iload(3)? }
 
-                        Instruction::FLOAD0 => { self.execute_fload(0) }
-                        Instruction::FLOAD1 => { self.execute_fload(1) }
-                        Instruction::FLOAD2 => { self.execute_fload(2) }
-                        Instruction::FLOAD3 => { self.execute_fload(3) }
+                        Instruction::LLOAD0 => { self.execute_lload(0)? }
+                        Instruction::LLOAD1 => { self.execute_lload(1)? }
+                        Instruction::LLOAD2 => { self.execute_lload(2)? }
+                        Instruction::LLOAD3 => { self.execute_lload(3)? }
 
-                        Instruction::DLOAD0 => { self.execute_dload(0) }
-                        Instruction::DLOAD1 => { self.execute_dload(1) }
-                        Instruction::DLOAD2 => { self.execute_dload(2) }
-                        Instruction::DLOAD3 => { self.execute_dload(3) }
+                        Instruction::FLOAD0 => { self.execute_fload(0)? }
+                        Instruction::FLOAD1 => { self.execute_fload(1)? }
+                        Instruction::FLOAD2 => { self.execute_fload(2)? }
+                        Instruction::FLOAD3 => { self.execute_fload(3)? }
+
+                        Instruction::DLOAD0 => { self.execute_dload(0)? }
+                        Instruction::DLOAD1 => { self.execute_dload(1)? }
+                        Instruction::DLOAD2 => { self.execute_dload(2)? }
+                        Instruction::DLOAD3 => { self.execute_dload(3)? }
 
                         Instruction::ALOAD(index) => { self.execute_aload(index as usize)? }
                         Instruction::ALOAD0 => { self.execute_aload(0)? }
                         Instruction::ALOAD1 => { self.execute_aload(1)? }
                         Instruction::ALOAD2 => { self.execute_aload(2)? }
+                        Instruction::ALOAD3 => { self.execute_aload(3)? }
                         Instruction::BIPUSH(value) => {
                             debug!("BIPUSH {:?}", value);
                             self.stack.push(Value::Integer(value as i32))
@@ -444,48 +454,80 @@ impl<'a> CallFrame<'a>{
         Err(VmError::MethodCallError(self.class_and_method.method.name.to_string()))
     }
 
-    fn execute_istore(&mut self, index: usize){
-        let value = self.stack.pop().unwrap();
-        debug!("ISTORE{} {:?}", index, value);
-        self.locals[index] = value;
+    fn execute_istore(&mut self, index: usize) -> Result<(), VmError>{
+        let popped = self.stack.pop();
+        if let Some(Value::Integer(value)) = popped{
+            debug!("ISTORE{} {:?}", index, value);
+            self.locals[index] = popped.unwrap();
+            Ok(())
+        } else {
+            Err(VmError::ValidationError(format!("ISTORE{} failed, because stack[{}] was {:?} and not and Integer", index, index, popped)))
+        }
     }
-    fn execute_lstore(&mut self, index: usize){
-        let value = self.stack.pop().unwrap();
-        debug!("LSTORE{} {:?}", index, value);
-        self.locals[index] = value;
+    fn execute_lstore(&mut self, index: usize) -> Result<(), VmError>{
+        let popped = self.stack.pop();
+        if let Some(Value::Long(value)) = popped{
+            debug!("LSTORE{} {:?}", index, value);
+            self.locals[index] = popped.unwrap();
+            Ok(())
+        } else {
+            Err(VmError::ValidationError(format!("LSTORE{} failed, because stack[{}] was {:?} and not and Long", index, index, popped)))
+        }
     }
 
-    fn execute_astore(&mut self, index: usize){
-        let value = self.stack.pop().unwrap();
-        debug!("ASTORE{} {:?}", index, value);
-        self.locals[index] = value;
+    fn execute_astore(&mut self, index: usize) -> Result<(), VmError>{
+        //TODO validation
+        let popped = self.stack.pop();
+        if let Some(value) = popped{
+            debug!("ASTORE{} {:?}", index, value);
+            self.locals[index] = value;
+            Ok(())
+        } else {
+            Err(VmError::ValidationError(format!("ASTORE{} failed, because stack[{}] was {:?} and not and Object", index, index, popped)))
+        }
     }
 
-    fn execute_iload(&mut self, index: usize){
-        if let Value::Integer(value) = self.locals.get(index).unwrap(){
+    fn execute_iload(&mut self, index: usize) -> Result<(), VmError>{
+        let local = self.locals.get(index);
+        if let Some(Value::Integer(value)) = local{
             self.stack.push(Value::Integer(*value));
             debug!("ILOAD{} {:?}", index, value);
+            Ok(())
+        } else {
+            Err(VmError::ValidationError(format!("ILOAD{} failed, because locals[{}] was {:?} and not and Integer", index, index, local)))
         }
     }
 
-    fn execute_lload(&mut self, index: usize){
-        if let Value::Long(value) = self.locals.get(index).unwrap(){
+    fn execute_lload(&mut self, index: usize) -> Result<(), VmError>{
+        let local = self.locals.get(index);
+        if let Some(Value::Long(value)) = local{
             self.stack.push(Value::Long(*value));
             debug!("LLOAD{} {:?}", index, value);
+            Ok(())
+        } else {
+            Err(VmError::ValidationError(format!("LLOAD{} failed, because locals[{}] was {:?} and not and Long", index, index, local)))
         }
     }
 
-    fn execute_fload(&mut self, index: usize){
-        if let Value::Float(value) = self.locals.get(index).unwrap(){
+    fn execute_fload(&mut self, index: usize) -> Result<(), VmError>{
+        let local = self.locals.get(index);
+        if let Some(Value::Float(value)) = local{
             self.stack.push(Value::Float(*value));
             debug!("FLOAD{} {:?}", index, value);
+            Ok(())
+        } else {
+            Err(VmError::ValidationError(format!("FLOAD{} failed, because locals[{}] was {:?} and not and Float", index, index, local)))
         }
     }
 
-    fn execute_dload(&mut self, index: usize){
-        if let Value::Double(value) = self.locals.get(index).unwrap(){
+    fn execute_dload(&mut self, index: usize) -> Result<(), VmError>{
+        let local = self.locals.get(index);
+        if let Some(Value::Double(value)) = local{
             self.stack.push(Value::Double(*value));
             debug!("DLOAD{} {:?}", index, value);
+            Ok(())
+        } else {
+            Err(VmError::ValidationError(format!("DLOAD{} failed, because locals[{}] was {:?} and not and Double", index, index, local)))
         }
     }
 
@@ -517,6 +559,11 @@ impl<'a> CallFrame<'a>{
     fn execute_fconst(&mut self, value: usize){
         debug!("FCONST {:?}", value);
         self.stack.push(Value::Float(value as f32))
+    }
+
+    fn execute_dconst(&mut self, value: usize){
+        debug!("DCONST {:?}", value);
+        self.stack.push(Value::Double(value as f64))
     }
 
     fn execute_i_arithmetic<F: FnOnce(i32, i32) -> i32>(&mut self, f: F){
@@ -589,7 +636,12 @@ impl<'a> CallFrame<'a>{
         let args_count = MethodDescriptor::new(descriptor.clone()).args.len();
         let mut args = Vec::new();
         for _ in 0..args_count{
-            args.insert(0, self.stack.pop().unwrap());
+            let popped = self.stack.pop().unwrap();
+            match popped {
+                Value::Long(_) | Value::Double(_) => {args.insert(0, Value::Uninitialized)}
+                _ => {}
+            }
+            args.insert(0, popped);
         }
         let class = vm.get_or_resolve_class(class_name.as_str())?;
         let class_and_method = match kind {
@@ -648,10 +700,11 @@ impl<'a> CallFrame<'a>{
     }
 
     fn pop_int(&mut self) -> Result<i32, VmError>{
-        if let Some(Value::Integer(value)) = self.stack.pop(){
+        let popped = self.stack.pop();
+        if let Some(Value::Integer(value)) = popped{
             return Ok(value)
         }
-        Err(VmError::ValidationError("Integer".to_string()))
+        Err(VmError::ValidationError(format!("Expected Integer to pop but found {:?}", popped)))
     }
 
     fn get_constant_as_value(&mut self, vm: &mut VM<'a>, index: u16) -> Result<Value<'a>, VmError>{

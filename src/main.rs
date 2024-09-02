@@ -153,7 +153,6 @@ fn parse_class_file(class_path: &ClassPath, class_name: &str) -> Result<ClassFil
             }
             ConstantPoolEntry::Long(_) => {
                 let bytes = parse_u8(&mut bytes)?;
-                println!("LONG {:?} {:?} {}", bytes.to_be_bytes(), bytes as i64, class_name);
                 double_spaced = true;
                 ConstantPoolEntry::Long(bytes as i64)
             }
@@ -172,8 +171,14 @@ fn parse_class_file(class_path: &ClassPath, class_name: &str) -> Result<ClassFil
                 let name_and_type_index = parse_u2(&mut bytes)?;
                 ConstantPoolEntry::InvokeDynamic(bootstrap_method_attr_index, name_and_type_index)
             }
-            ConstantPoolEntry::MethodHandle => {
-                ConstantPoolEntry::MethodHandle
+            ConstantPoolEntry::MethodHandle(_, _) => {
+                let reference_kind = parse_u1(&mut bytes)?;
+                let reference_index = parse_u2(&mut bytes)?;
+                ConstantPoolEntry::MethodHandle(reference_kind, reference_index)
+            }
+            ConstantPoolEntry::MethodType(_) => {
+                let descriptor_index = parse_u2(&mut bytes)?;
+                ConstantPoolEntry::MethodType(descriptor_index)
             }
             _ => unimplemented!("CPTag {tag:?} not supported yet")
         };
@@ -392,7 +397,7 @@ fn parse_class_file(class_path: &ClassPath, class_name: &str) -> Result<ClassFil
 }
 
 fn main() {
-    simple_logger::SimpleLogger::new().with_level(LevelFilter::Debug).without_timestamps().init().unwrap();
+    simple_logger::SimpleLogger::new().with_level(LevelFilter::Trace).without_timestamps().init().unwrap();
 
     let mut class_path = ClassPath::default();
     class_path.push("resources;resources/rt.jar").expect("TODO: panic message");

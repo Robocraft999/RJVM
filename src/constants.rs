@@ -16,8 +16,8 @@ pub enum ConstantPoolEntry{
     Double(f64) = 6,
     NameAndType(u16, u16) = 12,
     Utf8(String) = 1,
-    MethodHandle = 15,
-    MethodType = 16,
+    MethodHandle(u8, u16) = 15,
+    MethodType(u16) = 16,
     InvokeDynamic(u16, u16) = 18,
     Dummy = 255,
 }

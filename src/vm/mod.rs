@@ -54,10 +54,12 @@ impl<'a> VM<'a>{
 
     pub fn invoke(&mut self, class_and_method: ClassAndMethod<'a>, object: Option<ObjectRef<'a>>, args: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
         if !class_and_method.method.is_native(){
-            info!("INVOKE {}.{}{} on {:?} with {:?}", class_and_method.class.name, class_and_method.method.name, class_and_method.method.descriptor.as_str(), object, args);
+            let method_signature = format!("{}.{}{}", class_and_method.class.name, class_and_method.method.name, class_and_method.method.descriptor.as_str());
+            info!("INVOKE {} on {:?} with {:?}", method_signature, object, args);
             self.push_call_frame(class_and_method, object, args)?;
             let mut callframe = self.call_stack.last().unwrap().clone();
             let result = callframe.execute(self)?;
+            info!("INVRETURN {} returned: {:?}", method_signature, result);
             self.call_stack.pop().unwrap();
 
             Ok(result)
@@ -210,7 +212,8 @@ impl<'a> VM<'a>{
                 empty_locals.pop();
             }
         }
-        assert_eq!(args.len(), class_and_method.method.get_args_count(), "Args has not the correct length (was {}, expected {})", args.len(), class_and_method.method.get_args_count());
+        let args_amount = args.iter().filter(|v| **v != Value::Uninitialized).count();
+        assert_eq!(args_amount, class_and_method.method.get_args_count(), "Args has not the correct length (was {}, expected {})", args_amount, class_and_method.method.get_args_count());
         info!("NEW CALL FRAME with {:?} locals, \nobject=({:?}), \nargs=({:?}), \nmax_locals=[{}]", empty_locals, object, args, class_and_method.get_max_locals());
         assert_eq!(empty_locals.len(), class_and_method.get_max_locals(), "Locals has not the correct length (was {}, expected {})", empty_locals.len(), class_and_method.get_max_locals());
         let call_frame = CallFrame{

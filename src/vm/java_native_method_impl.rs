@@ -57,6 +57,7 @@ pub fn register_all_natives(registry: &mut NativeMethodRegistry){
     registry.register("java/lang/Class", "desiredAssertionStatus0", "(Ljava/lang/Class;)Z", delegate_desired_assertion_status);
     registry.register("java/lang/Float", "floatToRawIntBits", "(F)I", delegate_float_to_raw_bits);
     registry.register("java/lang/Double", "doubleToRawLongBits", "(D)J", delegate_double_to_raw_bits);
+    registry.register("java/lang/Object", "getClass", "()Ljava/lang/Class;", delegate_get_class)
 }
 
 fn delegate_nano_time<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, _: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
@@ -131,4 +132,11 @@ fn delegate_double_to_raw_bits<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, args: Vec<V
         return Ok(Some(Value::Long(value.to_bits() as i64)))
     }
     Err(VmError::ValidationError(format!("Expected float")))
+}
+
+fn delegate_get_class<'a>(vm: &mut VM<'a>, class : ClassRef<'a>, _: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
+    //TODO check
+    debug!("getClass");
+    debug!("{}", class.name);
+    Ok(Some(Value::Object(vm.new_class_object(class.name.clone())?)))
 }

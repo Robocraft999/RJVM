@@ -1,11 +1,9 @@
 use strum_macros::FromRepr;
-use crate::attribute::ProgramCounter;
 use crate::bytecode::Instruction::*;
 use crate::error::ClassParseError;
 use crate::vm::VmError;
 
 pub fn printable_instructions(code_bytes: &Vec<u8>) -> Vec<Instruction>{
-    let mut iter = code_bytes.iter();
     let mut instructions = Vec::new();
     //TODO add error handling
     let mut pc = 0;
@@ -91,15 +89,16 @@ pub fn parse_instruction(code_bytes: &Vec<u8>, mut pc: usize) -> Result<(Instruc
             LLOAD0 | LLOAD1 | LLOAD2 |
             ILOAD0 | ILOAD1 | ILOAD2 | ILOAD3 |
             FLOAD0 | FLOAD1 | FLOAD2 |
-            DLOAD0 |
+            DLOAD0 | DLOAD1 |
             ACONST_NULL |
             ICONST0 | ICONST1 | ICONST2 | ICONST3 | ICONST4 | ICONST5 |
             LCONST0 | LCONST1 |
             FCONST0 | FCONST1 |
+            DCONST0 |
             ISTORE0 | ISTORE1 | ISTORE2 | ISTORE3 |
             ASTORE0 | ASTORE1 | ASTORE2 | ASTORE3 | IASTORE | AASTORE | CASTORE |
             LSTORE0 | LSTORE1 | LSTORE2 |
-            DUP | LCMP | ATHROW | LADD | IADD | ISUB | IMUL | FMUL | ARRAYLENGTH | POP | NOP |
+            DUP | DUPX1 | LCMP | ATHROW | LADD | IADD | ISUB | IMUL | FMUL | ARRAYLENGTH | POP | NOP |
             LUSHR | ISHL | ISHR | IUSHR | IOR | IXOR | IAND | LAND |
             MONITORENTER | MONITOREXIT |
             D2I | L2I | I2F | F2I | I2L |
