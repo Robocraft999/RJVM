@@ -2,7 +2,6 @@ import sub.*;
 
 public class Main{
     public static final int answer = 42;
-    private static Pair<T, X> pair;
 
 	public static int main(String[] args){
 		//System.out.println("Hello, World!");
@@ -16,30 +15,16 @@ public class Main{
 		int x = answer * (empty.getNumber() - 1);
 		return x;*/
 
-		pair = new Pair(new T(), new X());
+		HashMap<Integer, X> map = new HashMap();
+		int firstKey = 5;
+		map.set(firstKey, new X());
+		map.set(8, new X());
+
+		X res = map.get(firstKey);
 
 		return 0;
 	}
 
-	static class T{}
 	static class X{}
-
-	double test(int v1, int v2, int[][] v3, float v4, double v5, char v6, Object v7, int v8){
-	    return 3;
-	}
-
-	public static class Inner{
-	    public void cmonDoSomething(){}
-	}
-
-	public static class Pair<K, V>{
-	    private K key;
-	    private V value;
-
-	    public Pair(K key, V value){
-	        this.key = key;
-	        this.value = value;
-	    }
-	}
 }
 

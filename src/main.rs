@@ -167,6 +167,14 @@ fn parse_class_file(class_path: &ClassPath, class_name: &str) -> Result<ClassFil
                 double_spaced = true;
                 ConstantPoolEntry::Double(f64::from_bits(bytes))
             }
+            ConstantPoolEntry::InvokeDynamic(_, _) => {
+                let bootstrap_method_attr_index = parse_u2(&mut bytes)?;
+                let name_and_type_index = parse_u2(&mut bytes)?;
+                ConstantPoolEntry::InvokeDynamic(bootstrap_method_attr_index, name_and_type_index)
+            }
+            ConstantPoolEntry::MethodHandle => {
+                ConstantPoolEntry::MethodHandle
+            }
             _ => unimplemented!("CPTag {tag:?} not supported yet")
         };
         constant_pool_entries.push(constant_pool_entry);
