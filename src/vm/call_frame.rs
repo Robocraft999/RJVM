@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::fmt::{Debug, Formatter};
 use std::rc::Rc;
 use log::{debug, error, info, trace, warn};
 use crate::attribute::ProgramCounter;
@@ -11,6 +12,7 @@ use crate::vm::{VM, VmError};
 use crate::vm::class::{ClassAndMethod, ClassRef};
 use crate::vm::value::Value;
 
+#[derive(Clone)]
 pub struct CallFrame<'a>{
     pub class_and_method: ClassAndMethod<'a>,
     pub locals: Vec<Value<'a>>,
@@ -112,7 +114,7 @@ impl<'a> CallFrame<'a>{
                             info!("RETURN");
                             return Ok(None);
                         }
-                        Instruction::IRETURN | Instruction::LRETURN | Instruction::FRETURN => {
+                        Instruction::IRETURN | Instruction::LRETURN | Instruction::FRETURN | Instruction::ARETURN=> {
                             //TODO check for types
                             let value = self.stack.pop();
                             info!("RETURN {:?}", value);
@@ -199,7 +201,9 @@ impl<'a> CallFrame<'a>{
                             };
                         }
                         Instruction::IF_ICMPNE(offset) => { self.execute_i_cmp(offset, |val1, val2| val1 != val2) }
+                        Instruction::IF_ICMPGT(offset) => { self.execute_i_cmp(offset, |val1, val2| val1 >  val2) }
                         Instruction::IF_ICMPGE(offset) => { self.execute_i_cmp(offset, |val1, val2| val1 >= val2) }
+                        Instruction::IF_ICMPEQ(offset) => { self.execute_i_cmp(offset, |val1, val2| val1 == val2) }
                         Instruction::IF_ICMPLE(offset) => { self.execute_i_cmp(offset, |val1, val2| val1 <= val2) }
                         Instruction::IF_ICMPLT(offset) => { self.execute_i_cmp(offset, |val1, val2| val1 <  val2) }
                         Instruction::IFNONNULL(offset) => {
@@ -327,7 +331,13 @@ impl<'a> CallFrame<'a>{
                             debug!("SIPUSH {:?}", value);
                             self.stack.push(Value::Integer(value as i32))
                         }
-                        Instruction::AALOAD => {
+                        Instruction::IINC(index, amount) => {
+                            if let Some(Value::Integer(value)) = &self.locals.get(index as usize){
+                                self.locals[index as usize] = Value::Integer(value + amount as i32)
+                            }
+                        }
+                        //TODO add type validation
+                        Instruction::AALOAD | Instruction::IALOAD => {
                             let index = self.pop_int()?;
                             if let Some(Value::Array(_, content)) = self.stack.pop(){
                                 self.stack.push(content.borrow().get(index as usize).cloned().unwrap());
@@ -418,7 +428,11 @@ impl<'a> CallFrame<'a>{
                         }
                         Instruction::CHECKCAST(constant_index) => {
                             //TODO
-                            debug!("CHECKCAST {}", get_constant_printable(constants, constant_index))
+                            debug!("CHECKCAST {}", get_constant_printable(constants, constant_index));
+                        }
+                        Instruction::INSTANCEOF(constant_index) => {
+                            debug!("INSTANCEOF {}", get_constant_printable(constants, constant_index));
+                            self.stack.push(Value::Integer(1));
                         }
                         _ => { unimplemented!("Instruction {:?} not executable (stack={:?})", instruction, &self.stack) }
                     }
@@ -477,14 +491,20 @@ impl<'a> CallFrame<'a>{
 
     fn execute_aload(&mut self, index: usize) -> Result<(), VmError>{
         let popped = self.locals.get(index).unwrap();
-        if let Value::Object(value) = popped{
-            self.stack.push(Value::Object(value));
-            debug!("ALOAD{} {:?}", index, value);
-        } else if let Value::Array(FieldType::Array(array_size, field_type), content) = popped{
-            self.stack.push(Value::Array(FieldType::Array(*array_size, field_type.clone()), content.clone()));
-            debug!("ALOAD{}", index);
-        } else {
-            return Err(VmError::ValidationError(format!("ALOAD{} failed", index)))
+        match popped {
+            Value::Object(value) => {
+                self.stack.push(Value::Object(value));
+                debug!("ALOAD{} {:?}", index, value);
+            }
+            Value::Array(FieldType::Array(array_size, field_type), content) => {
+                self.stack.push(Value::Array(FieldType::Array(*array_size, field_type.clone()), content.clone()));
+                debug!("ALOAD{}", index);
+            }
+            Value::Null => {
+                self.stack.push(Value::Null);
+                debug!("ALOAD{} (loaded null)", index);
+            }
+            _ => return Err(VmError::ValidationError(format!("ALOAD{} failed", index)))
         }
         Ok(())
     }
@@ -663,6 +683,12 @@ impl<'a> CallFrame<'a>{
             _ => unimplemented!("Constant of type {constant_value:?} cannot be converted to a value")
         };
         Ok(value)
+    }
+}
+
+impl Debug for CallFrame<'_>{
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Method: {}.{}{} at {:?}", self.class_and_method.class.name, self.class_and_method.method.name, self.class_and_method.method.descriptor.as_str(), self.pc)
     }
 }
 

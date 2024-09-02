@@ -1,7 +1,7 @@
 use std::fmt::{Debug, Formatter};
 use std::io::Read;
 use std::str::FromStr;
-use log::LevelFilter;
+use log::{error, LevelFilter};
 use access_flags::{parse_class_flags, parse_field_flags, parse_method_flags};
 use attribute::{Attribute, Code};
 use vm::class_path::ClassPath;
@@ -377,27 +377,36 @@ fn parse_class_file(class_path: &ClassPath, class_name: &str) -> Result<ClassFil
 
     println!("------------------------------------");
     for i in 0..class_file.constant_pool.0.len(){
-        println!("[{}] {} {:?}", i+1, get_constant_printable(&class_file.constant_pool, i as u16 + 1), &class_file.constant_pool.0.get(i).unwrap());
+        //println!("[{}] {} {:?}", i+1, get_constant_printable(&class_file.constant_pool, i as u16 + 1), &class_file.constant_pool.0.get(i).unwrap());
     }
 
     Ok(class_file)
 }
 
-fn main() -> Result<(), VmError> {
-    simple_logger::SimpleLogger::new().with_level(LevelFilter::Trace).without_timestamps().init().unwrap();
+fn main() {
+    simple_logger::SimpleLogger::new().with_level(LevelFilter::Debug).without_timestamps().init().unwrap();
 
     let mut class_path = ClassPath::default();
     class_path.push("resources;resources/rt.jar").expect("TODO: panic message");
 
     let mut vm = VM::new(class_path);
     //vm.class_manager.get_or_resolve_class("Empty").expect("TODO: panic message");
-    let main_method = vm.resolve_class_method("Main", "main", "([Ljava/lang/String;)I")?;
-    let result = vm.invoke(main_method, None, vec![Value::Null])?;
-    println!("result: {result:?}");
-    println!("{:?}", vm.static_class_objects);
+    let main_method = vm.resolve_class_method("Main", "main", "([Ljava/lang/String;)I").unwrap();
+    let result = vm.invoke(main_method, None, vec![Value::Null]);
+    match result {
+        Ok(res) => {
+            println!("result: {res:?}");
+            for (id, static_object) in vm.static_class_objects.iter(){
+                println!("[{}] {:?}", vm.find_class_by_id(id.clone()).unwrap().name, static_object);
+            }
+        }
+        Err(error) => {
+            error!("{}", error);
+            vm.print_call_stack()
+        }
+    }
+
     //parse_class_file(&class_path, "Main")?;
     //parse_class_file(&class_path, "java/lang/Object")?;
     //parse_class_file(&class_path, "java/io/PrintStream")?;
-
-    Ok(())
 }

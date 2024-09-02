@@ -36,8 +36,8 @@ impl Debug for Value<'_>{
             Value::Object(object) => write!(f, "VObject({:?})", object),
             Value::Integer(value) => write!(f, "VInt ({})", value),
             Value::Long(value) => write!(f, "VLong ({})", value),
-            Value::Float(value) => write!(f, "VFloat ({})", value),
-            Value::Double(value) => write!(f, "VDouble ({})", value),
+            Value::Float(value) => write!(f, "VFloat ({:08})", value),
+            Value::Double(value) => write!(f, "VDouble ({:08})", value),
         }
     }
 }

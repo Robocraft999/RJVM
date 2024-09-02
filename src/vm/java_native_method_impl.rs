@@ -53,6 +53,8 @@ pub fn register_all_natives(registry: &mut NativeMethodRegistry){
     registry.register("java/lang/System", "identityHashCode", "(Ljava/lang/Object;)I", delegate_identity_hash_code);
     registry.register("java/lang/System", "setOut0", "(Ljava/io/PrintStream;)V", delegate_set_out);
     registry.register("java/lang/Class", "getPrimitiveClass", "(Ljava/lang/String;)Ljava/lang/Class;", delegate_get_primitive_class);
+    registry.register("java/lang/Class", "getClassLoader0", "()Ljava/lang/ClassLoader;", delegate_get_classloader);
+    registry.register("java/lang/Class", "desiredAssertionStatus0", "(Ljava/lang/Class;)Z", delegate_desired_assertion_status);
     registry.register("java/lang/Float", "floatToRawIntBits", "(F)I", delegate_float_to_raw_bits);
     registry.register("java/lang/Double", "doubleToRawLongBits", "(D)J", delegate_double_to_raw_bits);
 }
@@ -103,6 +105,18 @@ fn delegate_get_primitive_class<'a>(vm: &mut VM<'a>, _ : ClassRef<'a>, args: Vec
         "boolean" => Ok(Some(Value::Object(vm.new_class_object(  "java/lang/Boolean".to_string())?))),
         _ => Err(VmError::ValidationError(format!("Expected extractable string")))
     }
+}
+
+fn delegate_get_classloader<'a>(vm: &mut VM<'a>, _ : ClassRef<'a>, _: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
+    //TODO check
+    debug!("getClassLoader0");
+    Ok(Some(Value::Null))
+}
+
+fn delegate_desired_assertion_status<'a>(vm: &mut VM<'a>, _ : ClassRef<'a>, _: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
+    //TODO check
+    debug!("desiredAssertionStatus0");
+    Ok(Some(Value::Integer(1)))
 }
 
 fn delegate_float_to_raw_bits<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, args: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{

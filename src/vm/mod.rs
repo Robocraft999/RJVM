@@ -55,8 +55,12 @@ impl<'a> VM<'a>{
     pub fn invoke(&mut self, class_and_method: ClassAndMethod<'a>, object: Option<ObjectRef<'a>>, args: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
         if !class_and_method.method.is_native(){
             info!("INVOKE {}.{}{} on {:?} with {:?}", class_and_method.class.name, class_and_method.method.name, class_and_method.method.descriptor.as_str(), object, args);
-            let mut callframe = self.push_call_frame(class_and_method, object, args);
-            callframe.execute(self)
+            self.push_call_frame(class_and_method, object, args)?;
+            let mut callframe = self.call_stack.last().unwrap().clone();
+            let result = callframe.execute(self)?;
+            self.call_stack.pop().unwrap();
+
+            Ok(result)
         } else {
             let class_name = class_and_method.class.name.clone();
             let method_name = class_and_method.method.name.clone();
@@ -87,16 +91,19 @@ impl<'a> VM<'a>{
     }
 
     fn init_class(&mut self, class: ClassRef<'a>) -> Result<(), VmError>{
-        let static_object = self.new_object_from_class(class);
-        self.static_class_objects.insert(class.id, static_object);
-        if let Some(clinit_method) = class.find_method("<clinit>", "()V"){
-            let class_and_method = ClassAndMethod{
-                class,
-                method: clinit_method,
-            };
-            self.invoke(class_and_method, Some(static_object), Vec::new())?;
+        if class.transitive_field_count > 0{
+            let static_object = self.new_object_from_class(class);
+            self.static_class_objects.insert(class.id, static_object);
+            if let Some(clinit_method) = class.find_method("<clinit>", "()V"){
+                let class_and_method = ClassAndMethod{
+                    class,
+                    method: clinit_method,
+                };
+                self.invoke(class_and_method, Some(static_object), Vec::new())?;
+            }
         }
-        if class.name == "java/lang/System"{
+
+        /*if class.name == "java/lang/System"{
             if let Some(setout0_method) = class.find_method("setOut0", "(Ljava/io/PrintStream;)V"){
                 let class_and_method = ClassAndMethod{
                     class,
@@ -120,7 +127,7 @@ impl<'a> VM<'a>{
 
                 self.invoke(class_and_method, Some(static_object), vec![Value::Object(print_stream)])?;
             }
-        }
+        }*/
         Ok(())
     }
 
@@ -186,7 +193,13 @@ impl<'a> VM<'a>{
         self.class_manager.find_class_by_id(class_id)
     }
 
-    fn push_call_frame(&self, class_and_method: ClassAndMethod<'a>, object: Option<ObjectRef<'a>>, args: Vec<Value<'a>>) -> CallFrame<'a>{
+    pub fn print_call_stack(&self) {
+        for (index, call_frame) in self.call_stack.iter().enumerate(){
+            error!("[{}]: {:?}", index, call_frame);
+        }
+    }
+
+    fn push_call_frame(&mut self, class_and_method: ClassAndMethod<'a>, object: Option<ObjectRef<'a>>, args: Vec<Value<'a>>) -> Result<(), VmError>{
         let mut empty_locals = vec![Value::Null; class_and_method.get_max_locals()];
         for i in 0..args.len(){
             empty_locals[i] = args.get(i).unwrap().clone();
@@ -200,12 +213,14 @@ impl<'a> VM<'a>{
         assert_eq!(args.len(), class_and_method.method.get_args_count(), "Args has not the correct length (was {}, expected {})", args.len(), class_and_method.method.get_args_count());
         info!("NEW CALL FRAME with {:?} locals, \nobject=({:?}), \nargs=({:?}), \nmax_locals=[{}]", empty_locals, object, args, class_and_method.get_max_locals());
         assert_eq!(empty_locals.len(), class_and_method.get_max_locals(), "Locals has not the correct length (was {}, expected {})", empty_locals.len(), class_and_method.get_max_locals());
-        CallFrame{
+        let call_frame = CallFrame{
             class_and_method,
             locals: empty_locals,
             pc: ProgramCounter(0),
             stack: Vec::new()
-        }
+        };
+        self.call_stack.push(call_frame);
+        Ok(())
     }
 }
 
