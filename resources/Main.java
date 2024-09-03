@@ -22,6 +22,7 @@ public class Main{
 
 		X res = map.get(firstKey);
 
+        //Car car = new Car();
 		return 0;
 	}
 

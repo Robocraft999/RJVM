@@ -57,6 +57,7 @@ impl<'a> VM<'a>{
             let method_signature = format!("{}.{}{}", class_and_method.class.name, class_and_method.method.name, class_and_method.method.descriptor.as_str());
             info!("INVOKE {} on {:?} with {:?}", method_signature, object, args);
             self.push_call_frame(class_and_method, object, args)?;
+            self.print_call_stack();
             let mut callframe = self.call_stack.last().unwrap().clone();
             let result = callframe.execute(self)?;
             info!("INVRETURN {} returned: {:?}", method_signature, result);

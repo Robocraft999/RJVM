@@ -56,13 +56,22 @@ impl<'a> ObjectValue<'a>{
     pub fn get_field(&self, index: usize) -> Value<'a>{
         self.fields.borrow()[index].clone()
     }
+
+    fn get_fields_printable(&self) -> Vec<String>{
+        self.fields.borrow().iter().map(|field|
+            match field {
+                Value::Object(inner) => format!("{:?}", inner.id),
+                _ => format!("{field:?}")
+            }
+        ).collect::<Vec<_>>()
+    }
 }
 
 impl Debug for ObjectValue<'_>{
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Object")
             .field("id", &self.id)
-            .field("fields", &format_args!("{:?}", self.fields.borrow()))
+            .field("fields", &self.get_fields_printable())
             .finish()
     }
 }
