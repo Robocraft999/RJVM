@@ -1,4 +1,5 @@
 import sub.*;
+import java.lang.RuntimeException;
 
 public class Main{
     public static final int answer = 42;

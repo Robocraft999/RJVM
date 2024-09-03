@@ -6,4 +6,6 @@ pub enum JavaError{
     ClassNotFoundException(String),
     #[error("Class not found: {0}")]
     MethodNotFoundException(String),
+    #[error("{0}: {1}")]
+    JavaExceptionThrown(String, String),
 }

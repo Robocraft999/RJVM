@@ -33,6 +33,11 @@ fn parse_u2(code_bytes: &Vec<u8>, pc: &mut usize) -> Result<u16, VmError>{
     Ok(res)
 }
 
+fn parse_i4(code_bytes: &Vec<u8>, pc: &mut usize) -> Result<i32, VmError>{
+    let res = i32::from_be_bytes([parse_u1(code_bytes, pc)?, parse_u1(code_bytes, pc)?, parse_u1(code_bytes, pc)?, parse_u1(code_bytes, pc)?]);
+    Ok(res)
+}
+
 fn parse_offset(code_bytes: &Vec<u8>, pc: &mut usize) -> Result<u16, VmError>{
     let instruction_pc = *pc - 1;
     let offset = parse_u2(code_bytes, pc)? as i16;
@@ -43,6 +48,47 @@ pub fn parse_instruction(code_bytes: &Vec<u8>, mut pc: usize) -> Result<(Instruc
     let opcode = parse_u1(code_bytes, &mut pc)?;
     let result = if let Some(instruction) = Instruction::from_repr(opcode){
         match instruction{
+            TABLESWITCH => {
+                let instruction_pc = pc - 1;
+                //let padding = pc % 4;
+                //ti: 4 -> pc = 5 -> padding = 1 -> dbi = 5+1=6  X
+                //ti: 5 -> pc = 6 -> padding = 2 -> dbi = 6+2=8  J
+                //ti: 6 -> pc = 7 -> padding = 3 -> dbi = 7+3=10 X
+                //ti: 7 -> pc = 8 -> padding = 0 -> dbi = 8+0=8  J
+
+                let padding = (4 - (pc % 4)) % 4;
+                //ti: 4 -> pc = 5 -> padding = 3 -> dbi = 5+3=8  J
+                //ti: 5 -> pc = 6 -> padding = 2 -> dbi = 6+2=8  J
+                //ti: 6 -> pc = 7 -> padding = 1 -> dbi = 7+1=8  J
+                //ti: 7 -> pc = 8 -> padding = 0 -> dbi = 8+0=8  J
+                for _ in 0..padding{
+                    parse_u1(code_bytes, &mut pc)?;
+                }
+                let default = parse_i4(code_bytes, &mut pc)?;
+                let low     = parse_i4(code_bytes, &mut pc)?;
+                let high    = parse_i4(code_bytes, &mut pc)?;
+                let mut offsets = Vec::new();
+                for _ in 0..(high-low +1){
+                    offsets.push(parse_i4(code_bytes, &mut pc)?);
+                }
+
+                TABLESWITCH
+            }
+            LOOKUPSWITCH => {
+                let padding = (4 - (pc % 4)) % 4;
+                for _ in 0..padding{
+                    parse_u1(code_bytes, &mut pc)?;
+                }
+
+                let default = parse_i4(code_bytes, &mut pc)?;
+                let npairs = parse_i4(code_bytes, &mut pc)?;
+
+                let mut offsets = Vec::new();
+                for _ in 0..npairs{
+                    offsets.push(parse_i4(code_bytes, &mut pc)?);
+                }
+                LOOKUPSWITCH
+            }
             INVOKEVIRTUAL(_) => INVOKEVIRTUAL(parse_u2(code_bytes, &mut pc)?),
             INVOKESPECIAL(_) => INVOKESPECIAL(parse_u2(code_bytes, &mut pc)?),
             INVOKESTATIC(_) => INVOKESTATIC(parse_u2(code_bytes, &mut pc)?),
@@ -76,6 +122,12 @@ pub fn parse_instruction(code_bytes: &Vec<u8>, mut pc: usize) -> Result<(Instruc
             PUTFIELD(_) => PUTFIELD(parse_u2(code_bytes, &mut pc)?),
             ISTORE(_) => ISTORE(parse_u1(code_bytes, &mut pc)?),
             ILOAD(_) => ILOAD(parse_u1(code_bytes, &mut pc)?),
+            LSTORE(_) => LSTORE(parse_u1(code_bytes, &mut pc)?),
+            LLOAD(_) => LLOAD(parse_u1(code_bytes, &mut pc)?),
+            FSTORE(_) => FSTORE(parse_u1(code_bytes, &mut pc)?),
+            FLOAD(_) => FLOAD(parse_u1(code_bytes, &mut pc)?),
+            DSTORE(_) => DSTORE(parse_u1(code_bytes, &mut pc)?),
+            DLOAD(_) => DLOAD(parse_u1(code_bytes, &mut pc)?),
             ASTORE(_) => ASTORE(parse_u1(code_bytes, &mut pc)?),
             ALOAD(_) => ALOAD(parse_u1(code_bytes, &mut pc)?),
             NEW(_) => NEW(parse_u2(code_bytes, &mut pc)?),
@@ -85,24 +137,27 @@ pub fn parse_instruction(code_bytes: &Vec<u8>, mut pc: usize) -> Result<(Instruc
             CHECKCAST(_) => CHECKCAST(parse_u2(code_bytes, &mut pc)?),
             INSTANCEOF(_) => INSTANCEOF(parse_u2(code_bytes, &mut pc)?),
             RETURN | IRETURN | ARETURN | DRETURN | LRETURN | FRETURN |
-            ALOAD0 | ALOAD1 | ALOAD2 | ALOAD3 | IALOAD | AALOAD |
-            LLOAD0 | LLOAD1 | LLOAD2 |
+            ALOAD0 | ALOAD1 | ALOAD2 | ALOAD3 | IALOAD | BALOAD | CALOAD | SALOAD | LALOAD | FALOAD | DALOAD | AALOAD |
+            LLOAD0 | LLOAD1 | LLOAD2 | LLOAD3 |
             ILOAD0 | ILOAD1 | ILOAD2 | ILOAD3 |
-            FLOAD0 | FLOAD1 | FLOAD2 |
-            DLOAD0 | DLOAD1 |
+            FLOAD0 | FLOAD1 | FLOAD2 | FLOAD3 |
+            DLOAD0 | DLOAD1 | DLOAD2 | DLOAD3 |
             ACONST_NULL |
-            ICONST0 | ICONST1 | ICONST2 | ICONST3 | ICONST4 | ICONST5 |
+            ICONST0 | ICONST1 | ICONST2 | ICONST3 | ICONST4 | ICONST5 | ICONSTM1 |
             LCONST0 | LCONST1 |
             FCONST0 | FCONST1 |
-            DCONST0 |
+            DCONST0 | DCONST1 |
             ISTORE0 | ISTORE1 | ISTORE2 | ISTORE3 |
-            ASTORE0 | ASTORE1 | ASTORE2 | ASTORE3 | IASTORE | AASTORE | CASTORE |
-            LSTORE0 | LSTORE1 | LSTORE2 |
-            DUP | DUPX1 | LCMP | ATHROW | LADD | IADD | ISUB | IMUL | FMUL | ARRAYLENGTH | POP | NOP |
-            LUSHR | ISHL | ISHR | IUSHR | IOR | IXOR | IAND | LAND |
+            ASTORE0 | ASTORE1 | ASTORE2 | ASTORE3 | IASTORE | BASTORE | CASTORE | SASTORE | LASTORE | FASTORE | DASTORE | AASTORE |
+            LSTORE0 | LSTORE1 | LSTORE2 | LSTORE3 |
+            DSTORE0 | DSTORE1 | DSTORE2 | DSTORE3 |
+            DUP | DUPX1 | LCMP | ATHROW | 
+            IADD | LADD | DADD | FADD | ISUB | LSUB | FSUB | DSUB | IMUL | LMUL | FMUL | DMUL | IDIV | LDIV | FDIV | DDIV |
+            ARRAYLENGTH | POP | NOP |
+            LUSHR | ISHL | ISHR | IUSHR | IOR | LOR | IXOR | LXOR | IAND | LAND | INEG | LNEG | FNEG | IREM |
             MONITORENTER | MONITOREXIT |
-            D2I | L2I | I2F | F2I | I2L |
-            FCMPG | FCMPL => instruction,
+            I2L | I2F | I2D | I2B | I2C | I2S | L2I | L2F | L2D | F2I | F2L | F2D | D2I | D2L | D2F |
+            FCMPG | FCMPL | DCMPL | DCMPG => instruction,
             _ => unreachable!("Instruction {:?} not initializable", instruction)
         }
     } else {
@@ -266,6 +321,7 @@ pub enum Instruction{
     IAND         = 0x7e,
     LAND         = 0x7f,
     IOR          = 0x80,
+    LOR          = 0x81,
     IXOR         = 0x82,
     LXOR         = 0x83,
     IINC(u8, i8) = 0x84,
@@ -290,7 +346,7 @@ pub enum Instruction{
     FCMPL = 0x95,
     FCMPG = 0x96,
     DCMPL = 0x97,
-    DCMPD = 0x98,
+    DCMPG = 0x98,
 
     IFEQ(u16) = 0x99,
     IFNE(u16) = 0x9a,

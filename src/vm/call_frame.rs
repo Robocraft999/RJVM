@@ -8,6 +8,7 @@ use crate::constants::ConstantPoolEntry;
 use crate::field_info::{FieldType, PrimitiveType};
 use crate::get_constant_printable;
 use crate::method_info::MethodDescriptor;
+use crate::vm::java_error::JavaError;
 use crate::vm::{VM, VmError};
 use crate::vm::class::{ClassAndMethod, ClassRef};
 use crate::vm::value::Value;
@@ -294,6 +295,7 @@ impl<'a> CallFrame<'a>{
                                 content.borrow_mut()[index as usize] = value;
                             }
                         }
+                        Instruction::ICONSTM1 => { self.execute_iconst(-1) }
                         Instruction::ICONST0 => { self.execute_iconst(0) }
                         Instruction::ICONST1 => { self.execute_iconst(1) }
                         Instruction::ICONST2 => { self.execute_iconst(2) }
@@ -306,6 +308,7 @@ impl<'a> CallFrame<'a>{
                         Instruction::FCONST2 => { self.execute_fconst(2) }
 
                         Instruction::DCONST0 => { self.execute_dconst(0) }
+                        Instruction::DCONST1 => { self.execute_dconst(1) }
 
                         Instruction::ILOAD(index) => { self.execute_iload(index as usize)? }
                         Instruction::ILOAD0 => { self.execute_iload(0)? }
@@ -347,7 +350,7 @@ impl<'a> CallFrame<'a>{
                             }
                         }
                         //TODO add type validation
-                        Instruction::AALOAD | Instruction::IALOAD => {
+                        Instruction::AALOAD | Instruction::IALOAD | Instruction::BALOAD => {
                             let index = self.pop_int()?;
                             if let Some(Value::Array(_, content)) = self.stack.pop(){
                                 self.stack.push(content.borrow().get(index as usize).cloned().unwrap());
@@ -413,6 +416,15 @@ impl<'a> CallFrame<'a>{
                                 warn!("I2F Conversion failed, because {value:?} is not of type Int")
                             }
                         }
+                        Instruction::I2C => {
+                            let value = self.stack.pop().unwrap();
+                            debug!("I2C");
+                            if let Value::Integer(int) = value {
+                                self.stack.push(Value::Integer(int));
+                            } else {
+                                warn!("I2C Conversion failed, because {value:?} is not of type Int")
+                            }
+                        }
                         Instruction::F2I => {
                             let value = self.stack.pop().unwrap();
                             debug!("F2I");
@@ -443,6 +455,15 @@ impl<'a> CallFrame<'a>{
                         Instruction::INSTANCEOF(constant_index) => {
                             debug!("INSTANCEOF {}", get_constant_printable(constants, constant_index));
                             self.stack.push(Value::Integer(1));
+                        }
+                        Instruction::ATHROW => {
+                            if let Some(Value::Object(error)) = self.stack.pop(){
+                                let string_value = error.get_field(2);
+                                let string = vm.extract_string_from_object(&string_value)?;
+                                let exception_name = vm.class_manager.find_class_by_id(error.id).unwrap().name.clone();
+                                return Err(VmError::JavaException(JavaError::JavaExceptionThrown(exception_name, string)));
+                            }
+                            return Err(VmError::JavaException(JavaError::JavaExceptionThrown("JavaException".to_string(), "Unknown".to_string())));
                         }
                         _ => { unimplemented!("Instruction {:?} not executable (stack={:?})", instruction, &self.stack) }
                     }
@@ -551,7 +572,7 @@ impl<'a> CallFrame<'a>{
         Ok(())
     }
 
-    fn execute_iconst(&mut self, value: usize){
+    fn execute_iconst(&mut self, value: isize){
         debug!("ICONST {:?}", value);
         self.stack.push(Value::Integer(value as i32))
     }
@@ -691,10 +712,12 @@ impl<'a> CallFrame<'a>{
         let mut current_class = class;
         loop {
             if let Some(method) = current_class.find_method(method_name, descriptor){
-                return Ok(ClassAndMethod{class: current_class, method})
+                return Ok(ClassAndMethod{class: current_class, method});
             }
-            if let Some(super_class) = class.superclass{
+            if let Some(super_class) = current_class.superclass{
                 current_class = super_class
+            } else {
+                return Err(VmError::JavaException(JavaError::MethodNotFoundException(method_name.to_string())));
             }
         }
     }

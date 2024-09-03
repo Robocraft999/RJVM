@@ -386,7 +386,7 @@ fn parse_class_file(class_path: &ClassPath, class_name: &str) -> Result<ClassFil
     };
 
     println!("------------------------------------");
-    //println!("{:#?}", class_file);
+    println!("{:#?}", class_file);
 
     println!("------------------------------------");
     for i in 0..class_file.constant_pool.0.len(){
@@ -414,10 +414,11 @@ fn main() {
             }
         }
         Err(error) => {
-            error!("{}", error);
+            error!("Error: {}", error);
             vm.print_call_stack()
         }
     }
+    //parse_class_file(&class_path, "java/lang/Exception");
 
     //parse_class_file(&class_path, "Main")?;
     //parse_class_file(&class_path, "java/lang/Object")?;

@@ -230,7 +230,7 @@ impl<'a> VM<'a>{
 
 #[derive(Error, Debug, PartialEq)]
 pub enum VmError{
-    #[error("")]
+    #[error("{0}")]
     JavaException(#[from] JavaError),
     #[error("")]
     ParseError(#[from] ClassParseError),
