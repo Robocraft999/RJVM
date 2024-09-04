@@ -386,7 +386,7 @@ fn parse_class_file(class_path: &ClassPath, class_name: &str) -> Result<ClassFil
     };
 
     println!("------------------------------------");
-    println!("{:#?}", class_file);
+    //println!("{:#?}", class_file);
 
     println!("------------------------------------");
     for i in 0..class_file.constant_pool.0.len(){
@@ -396,6 +396,19 @@ fn parse_class_file(class_path: &ClassPath, class_name: &str) -> Result<ClassFil
     Ok(class_file)
 }
 
+fn init_vm(vm: &mut VM) -> Result<(), VmError>{
+    let vm_class = vm.get_or_resolve_class("sun/misc/VM")?;
+    let properties_object = vm.new_object("java/util/Properties")?;
+    let arg1 = vm.new_string_object("java.lang.Integer.IntegerCache.high".to_string())?;
+    let arg2 = vm.new_string_object("127".to_string())?;
+    let propeties_set_method = vm.resolve_class_method("java/util/Properties", "setProperty", "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/Object;")?;
+    vm.invoke(propeties_set_method, Some(properties_object), vec![Value::Object(arg1), Value::Object(arg2)])?;
+    let save_properties_method = vm.resolve_class_method("sun/misc/VM", "saveAndRemoveProperties", "(Ljava/util/Properties)V")?;
+    vm.invoke(save_properties_method, None, vec![Value::Object(properties_object)])?;
+
+    Ok(())
+}
+
 fn main() {
     simple_logger::SimpleLogger::new().with_level(LevelFilter::Trace).without_timestamps().init().unwrap();
 
@@ -403,6 +416,8 @@ fn main() {
     class_path.push("resources;resources/rt.jar").expect("TODO: panic message");
 
     let mut vm = VM::new(class_path);
+    init_vm(&mut vm).expect("Geht wohl doch nicht");
+
     //vm.class_manager.get_or_resolve_class("Empty").expect("TODO: panic message");
     let main_method = vm.resolve_class_method("Main", "main", "([Ljava/lang/String;)I").unwrap();
     let result = vm.invoke(main_method, None, vec![Value::Null]);

@@ -9,6 +9,11 @@ public class Vehicle{
         this.letter = 'X';
     }
 
+    public Vehicle(char letter){
+        this.modifier = 1.0f;
+        this.letter = letter;
+    }
+
     public int drive(){
         return 42;
     }

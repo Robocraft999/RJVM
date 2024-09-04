@@ -1,10 +1,16 @@
 import sub.*;
 import java.lang.RuntimeException;
+import java.util.Properties;
+//import sun.misc.VM;
 
 public class Main{
     public static final int answer = 42;
 
 	public static int main(String[] args){
+	    /*Properties props = new Properties();
+	    props.setProperty("java.lang.Integer.IntegerCache.high", "127");
+	    VM.saveAndRemoveProperties(props);*/
+
 		//System.out.println("Hello, World!");
 		//java.lang.Class integer = int.class;
 		//Car car = new Car();
@@ -16,12 +22,12 @@ public class Main{
 		int x = answer * (empty.getNumber() - 1);
 		return x;*/
 
-		HashMap<Integer, X> map = new HashMap();
+		/*HashMap<Integer, X> map = new HashMap();
 		int firstKey = 5;
 		map.set(firstKey, new X());
 		map.set(8, new X());
 
-		X res = map.get(firstKey);
+		X res = map.get(firstKey);*/
 
         //Car car = new Car();
 		return 0;

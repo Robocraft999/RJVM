@@ -44,7 +44,8 @@ impl Debug for Value<'_>{
 
 #[derive(PartialEq, Clone)]
 pub struct ObjectValue<'a>{
-    pub(crate) id: ClassId,
+    pub(crate) id: u32,
+    pub(crate) class_id: ClassId,
     pub(crate) fields: RefCell<Vec<Value<'a>>>
 }
 
@@ -60,7 +61,7 @@ impl<'a> ObjectValue<'a>{
     fn get_fields_printable(&self) -> Vec<String>{
         self.fields.borrow().iter().map(|field|
             match field {
-                Value::Object(inner) => format!("{:?}", inner.id),
+                Value::Object(inner) => format!("{}:{:?}", inner.id, inner.class_id),
                 _ => format!("{field:?}")
             }
         ).collect::<Vec<_>>()
@@ -70,7 +71,8 @@ impl<'a> ObjectValue<'a>{
 impl Debug for ObjectValue<'_>{
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Object")
-            .field("id", &self.id)
+            .field("object_id", &self.id)
+            .field("class_id", &self.class_id)
             .field("fields", &self.get_fields_printable())
             .finish()
     }

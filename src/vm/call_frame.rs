@@ -85,7 +85,7 @@ impl<'a> CallFrame<'a>{
                         Instruction::PUTFIELD(index) => {
                             let (class_name, field_name, descriptor) = self.class_and_method.get_constant_field_info_descriptor(index).expect("GIB MICH DIE FELD");
                             let (field_index, info) = self.class_and_method.class.find_field(field_name.as_str()).unwrap();
-                            debug!("PUTFIELD {} {} {} {:?}", field_name, descriptor, field_index, info);
+                            debug!("PUTFIELD {}.{} {} {} {:?}", class_name, field_name, descriptor, field_index, info);
                             let value = self.stack.pop().unwrap();
                             let object = self.stack.pop().unwrap();
                             if let Value::Object(mut obj) = object {
@@ -97,7 +97,7 @@ impl<'a> CallFrame<'a>{
                         }
                         Instruction::GETFIELD(index) => {
                             let (class_name, field_name, descriptor) = self.class_and_method.get_constant_field_info_descriptor(index).expect("GIB MICH DIE FELD2");
-                            debug!("GETFIELD {} {}", field_name, descriptor);
+                            debug!("GETFIELD {}.{} {}", class_name, field_name, descriptor);
                             let (field_index, _) = self.class_and_method.class.find_field(field_name.as_str()).unwrap();
                             let object = self.stack.pop().unwrap();
                             if let Value::Object(obj) = object {
@@ -126,7 +126,7 @@ impl<'a> CallFrame<'a>{
                             //let res = vm.invoke_method(class_name.as_str(), "<init>", "()V")?;
                             let new_object = vm.new_object(class_name.as_str())?;
 
-                            debug!("NEW: {} {}", index, get_constant_printable(constants, index));
+                            debug!("NEW: {} {} {:?}", index, get_constant_printable(constants, index), &new_object);
                             self.stack.push(Value::Object(new_object));
                         }
                         Instruction::ANEWARRAY(index) => {
@@ -186,8 +186,8 @@ impl<'a> CallFrame<'a>{
                             let o2 = self.stack.pop().unwrap();
                             match (o1, o2) {
                                 (Value::Object(obj1), Value::Object(obj2)) => {
-                                    debug!("IF_ACMPNE {:?} != {:?}?", obj1.id, obj2.id);
-                                    if obj1.id != obj2.id {
+                                    debug!("IF_ACMPNE {:?} != {:?}?", obj1.class_id, obj2.class_id);
+                                    if obj1.class_id != obj2.class_id {
                                         self.pc.0 = offset
                                     }
                                 }
@@ -199,8 +199,8 @@ impl<'a> CallFrame<'a>{
                             let o2 = self.stack.pop().unwrap();
                             match (o1, o2) {
                                 (Value::Object(obj1), Value::Object(obj2)) => {
-                                    debug!("IF_ACMPEQ {:?} == {:?}?", obj1.id, obj2.id);
-                                    if obj1.id == obj2.id {
+                                    debug!("IF_ACMPEQ {:?} == {:?}?", obj1.class_id, obj2.class_id);
+                                    if obj1.class_id == obj2.class_id {
                                         self.pc.0 = offset
                                     }
                                 }
@@ -350,7 +350,7 @@ impl<'a> CallFrame<'a>{
                             }
                         }
                         //TODO add type validation
-                        Instruction::AALOAD | Instruction::IALOAD | Instruction::BALOAD => {
+                        Instruction::AALOAD | Instruction::IALOAD | Instruction::BALOAD | Instruction::CALOAD => {
                             let index = self.pop_int()?;
                             if let Some(Value::Array(_, content)) = self.stack.pop(){
                                 self.stack.push(content.borrow().get(index as usize).cloned().unwrap());
@@ -460,7 +460,7 @@ impl<'a> CallFrame<'a>{
                             if let Some(Value::Object(error)) = self.stack.pop(){
                                 let string_value = error.get_field(2);
                                 let string = vm.extract_string_from_object(&string_value)?;
-                                let exception_name = vm.class_manager.find_class_by_id(error.id).unwrap().name.clone();
+                                let exception_name = vm.class_manager.find_class_by_id(error.class_id).unwrap().name.clone();
                                 return Err(VmError::JavaException(JavaError::JavaExceptionThrown(exception_name, string)));
                             }
                             return Err(VmError::JavaException(JavaError::JavaExceptionThrown("JavaException".to_string(), "Unknown".to_string())));
@@ -687,7 +687,7 @@ impl<'a> CallFrame<'a>{
             InvokeKind::VIRTUAL | InvokeKind::INTERFACE => {
                 match receiver {
                     Some(obj) => {
-                        let receiver_class = vm.find_class_by_id(obj.id).unwrap();
+                        let receiver_class = vm.find_class_by_id(obj.class_id).unwrap();
                         let resolved_method = Self::get_method_virtual(receiver_class, class_and_method.method.name.as_str(), class_and_method.method.descriptor.as_str())?;
                         resolved_method
                     }
