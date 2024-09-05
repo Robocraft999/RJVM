@@ -139,9 +139,9 @@ fn parse_class_file(class_path: &ClassPath, class_name: &str) -> Result<ClassFil
                 let length = parse_u2(&mut bytes)?;
                 let mut string_bytes = Vec::new();
                 for _ in 0..length{
-                    string_bytes.push(parse_u1(&mut bytes)?)
+                    string_bytes.push(parse_u1(&mut bytes)? as u16)
                 }
-                ConstantPoolEntry::Utf8(String::from_utf8(string_bytes).expect("String could not be parsed"))
+                ConstantPoolEntry::Utf8(String::from_utf16(string_bytes.as_slice()).expect(format!("String at {} in {} could not be parsed", i+1, class_name).as_str()))
             }
             ConstantPoolEntry::String(_) => {
                 let string_index = parse_u2(&mut bytes)?;
@@ -182,6 +182,7 @@ fn parse_class_file(class_path: &ClassPath, class_name: &str) -> Result<ClassFil
             }
             _ => unimplemented!("CPTag {tag:?} not supported yet")
         };
+        //println!("[{}] {:?}", i+1, constant_pool_entry);
         constant_pool_entries.push(constant_pool_entry);
         if double_spaced{
             i += 1;
@@ -418,7 +419,11 @@ fn main() {
     class_path.push("resources;resources/rt.jar").expect("TODO: panic message");
 
     let mut vm = VM::new(class_path);
+    //vm.get_or_resolve_class("java/lang/CharacterDataLatin1").expect("msg");
+    //return;
+
     init_vm(&mut vm).expect("Geht wohl doch nicht");
+    //vm.get_or_resolve_class("java/lang/CharacterData").expect("msg");
 
     //vm.class_manager.get_or_resolve_class("Empty").expect("TODO: panic message");
     let main_method = vm.resolve_class_method("Main", "main", "([Ljava/lang/String;)I").unwrap();
@@ -432,7 +437,7 @@ fn main() {
         }
         Err(error) => {
             error!("Error: {}", error);
-            vm.print_call_stack()
+            vm.call_stack.print_call_stack()
         }
     }
     //parse_class_file(&class_path, "java/lang/Exception");

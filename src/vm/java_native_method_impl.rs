@@ -7,6 +7,8 @@ use crate::vm::java_error::JavaError;
 use crate::vm::value::Value;
 use crate::vm::{VM, VmError};
 
+use super::value::ObjectRef;
+
 pub struct NativeMethodRegistry<'a>{
     methods: Vec<NativeMethod<'a>>
 }
@@ -27,10 +29,10 @@ impl <'a>NativeMethodRegistry<'a>{
         })
     }
 
-    pub fn invoke(vm: &mut VM<'a>, class_and_method: &ClassAndMethod<'a>, args: Vec<Value<'a>>) -> Option<Result<Option<Value<'a>>, VmError>>{
+    pub fn invoke(vm: &mut VM<'a>, class_and_method: &ClassAndMethod<'a>, object: Option<ObjectRef<'a>>, args: Vec<Value<'a>>) -> Option<Result<Option<Value<'a>>, VmError>>{
         for method in &vm.native_method_registry.methods{
             if method.method_name == class_and_method.method.name && method.method_descriptor == class_and_method.method.descriptor{
-                return Some((method.delegate)(vm, class_and_method.class, args))
+                return Some((method.delegate)(vm, class_and_method.class, object, args))
             }
         }
         //Some(Err(VmError::JavaException(JavaError::MethodNotFoundException(class_and_method.method.name.clone()))))
@@ -45,7 +47,7 @@ pub struct NativeMethod<'a>{
     delegate: NativeMethodDelegate<'a>
 }
 
-type NativeMethodDelegate<'a> = fn(&mut VM<'a>, ClassRef<'a>, Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>;
+type NativeMethodDelegate<'a> = fn(&mut VM<'a>, ClassRef<'a>, Option<ObjectRef<'a>>, Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>;
 
 pub fn register_all_natives(registry: &mut NativeMethodRegistry){
     registry.register("java/lang/System", "nanoTime", "()J", delegate_nano_time);
@@ -57,19 +59,20 @@ pub fn register_all_natives(registry: &mut NativeMethodRegistry){
     registry.register("java/lang/Class", "desiredAssertionStatus0", "(Ljava/lang/Class;)Z", delegate_desired_assertion_status);
     registry.register("java/lang/Float", "floatToRawIntBits", "(F)I", delegate_float_to_raw_bits);
     registry.register("java/lang/Double", "doubleToRawLongBits", "(D)J", delegate_double_to_raw_bits);
-    registry.register("java/lang/Object", "getClass", "()Ljava/lang/Class;", delegate_get_class)
+    registry.register("java/lang/Object", "getClass", "()Ljava/lang/Class;", delegate_get_class);
+    registry.register("java/lang/Throwable", "fillInStackTrace", "(I)Ljava/lang/Throwable;", delegate_fill_in_stacktrace)
 }
 
-fn delegate_nano_time<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, _: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
+fn delegate_nano_time<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, _: Option<ObjectRef<'a>>, _: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
     let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos() as i64;
     Ok(Some(Value::Long(nanos)))
 }
-fn delegate_millis_time<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, _: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
+fn delegate_millis_time<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, _: Option<ObjectRef<'a>>, _: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
     let millis = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as i64;
     Ok(Some(Value::Long(millis)))
 }
 
-fn delegate_identity_hash_code<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, args: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
+fn delegate_identity_hash_code<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, _: Option<ObjectRef<'a>>, args: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
     if let Some(Value::Object(object)) = args.get(0){
         let addr = &object as *const _;
         let addr = addr as i32;
@@ -80,7 +83,7 @@ fn delegate_identity_hash_code<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, args: Vec<V
     }
 }
 
-fn delegate_set_out<'a>(vm: &mut VM<'a>, class : ClassRef<'a>, args: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
+fn delegate_set_out<'a>(vm: &mut VM<'a>, class : ClassRef<'a>, _: Option<ObjectRef<'a>>, args: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
     if let Some(static_object) = vm.get_static_class_object(class.id){
         if let Some(Value::Object(object)) = args.get(0){
             static_object.set_field(2, Value::Object(object));
@@ -93,7 +96,7 @@ fn delegate_set_out<'a>(vm: &mut VM<'a>, class : ClassRef<'a>, args: Vec<Value<'
     }
 }
 
-fn delegate_get_primitive_class<'a>(vm: &mut VM<'a>, _ : ClassRef<'a>, args: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
+fn delegate_get_primitive_class<'a>(vm: &mut VM<'a>, _ : ClassRef<'a>, _: Option<ObjectRef<'a>>, args: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
     let string = vm.extract_string_from_object(args.get(0).unwrap())?;
     match string.as_str() {
         "int"     => Ok(Some(Value::Object(vm.new_class_object(  "java/lang/Integer".to_string())?))),
@@ -108,35 +111,42 @@ fn delegate_get_primitive_class<'a>(vm: &mut VM<'a>, _ : ClassRef<'a>, args: Vec
     }
 }
 
-fn delegate_get_classloader<'a>(vm: &mut VM<'a>, _ : ClassRef<'a>, _: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
+fn delegate_get_classloader<'a>(vm: &mut VM<'a>, _ : ClassRef<'a>, _: Option<ObjectRef<'a>>, _: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
     //TODO check
     debug!("getClassLoader0");
     Ok(Some(Value::Null))
 }
 
-fn delegate_desired_assertion_status<'a>(vm: &mut VM<'a>, _ : ClassRef<'a>, _: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
+fn delegate_desired_assertion_status<'a>(vm: &mut VM<'a>, _ : ClassRef<'a>, _: Option<ObjectRef<'a>>, _: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
     //TODO check
     debug!("desiredAssertionStatus0");
     Ok(Some(Value::Integer(1)))
 }
 
-fn delegate_float_to_raw_bits<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, args: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
+fn delegate_float_to_raw_bits<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, _: Option<ObjectRef<'a>>, args: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
     if let Some(Value::Float(value)) = args.get(0){
         return Ok(Some(Value::Integer(value.to_bits() as i32)))
     }
     Err(VmError::ValidationError(format!("Expected float")))
 }
 
-fn delegate_double_to_raw_bits<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, args: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
+fn delegate_double_to_raw_bits<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, _: Option<ObjectRef<'a>>, args: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
     if let Some(Value::Double(value)) = args.get(0){
         return Ok(Some(Value::Long(value.to_bits() as i64)))
     }
     Err(VmError::ValidationError(format!("Expected float")))
 }
 
-fn delegate_get_class<'a>(vm: &mut VM<'a>, class : ClassRef<'a>, _: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
+fn delegate_get_class<'a>(vm: &mut VM<'a>, class : ClassRef<'a>, _: Option<ObjectRef<'a>>, _: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
     //TODO check
     debug!("getClass");
     debug!("{}", class.name);
     Ok(Some(Value::Object(vm.new_class_object(class.name.clone())?)))
+}
+
+fn delegate_fill_in_stacktrace<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, object: Option<ObjectRef<'a>>, _: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
+    if let Some(receiver) = object{
+        return Ok(Some(Value::Object(receiver)));
+    }
+    return Err(VmError::ValidationError("Expected a Throwable".to_string()));
 }

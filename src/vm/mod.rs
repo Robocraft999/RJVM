@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::str::Utf8Error;
+use callstack::CallStack;
 use log::{debug, error, info};
 use thiserror::Error;
 
@@ -26,13 +27,15 @@ pub mod class_manager;
 mod java_error;
 pub mod value;
 mod call_frame;
+mod callstack;
 mod class;
 mod gc;
 mod java_native_method_impl;
 
 pub struct VM<'a>{
     pub class_manager: ClassManager<'a>,
-    pub call_stack: Vec<CallFrame<'a>>,
+    //pub call_stack: Vec<CallFrame<'a>>,
+    pub call_stack: CallStack<'a>,
     pub object_allocator: ObjectAllocator<'a>,
     pub static_class_objects: HashMap<ClassId, ObjectRef<'a>>,
     pub native_method_registry: NativeMethodRegistry<'a>,
@@ -46,7 +49,8 @@ impl<'a> VM<'a>{
         Self{
             class_manager,
             object_allocator: ObjectAllocator::new(),
-            call_stack: Vec::new(),
+            //call_stack: Vec::new(),
+            call_stack: CallStack::new(),
             static_class_objects: HashMap::new(),
             native_method_registry,
         }
@@ -57,17 +61,19 @@ impl<'a> VM<'a>{
             let method_signature = format!("{}.{}{}", class_and_method.class.name, class_and_method.method.name, class_and_method.method.descriptor.as_str());
             info!("INVOKE {} on {:?} with {:?}", method_signature, object, args);
             self.push_call_frame(class_and_method, object, args)?;
-            self.print_call_stack();
-            let mut callframe = self.call_stack.last().unwrap().clone();
-            let result = callframe.execute(self)?;
+            self.call_stack.print_call_stack();
+            /*let mut callframe = self.call_stack.last().unwrap().clone();
+            let result = callframe.execute(self)?;*/
+            
+            let result = self.call_stack.execute(self)?;
             info!("INVRETURN {} returned: {:?}", method_signature, result);
-            self.call_stack.pop().unwrap();
+            //self.call_stack.pop().unwrap();
 
             Ok(result)
         } else {
             let class_name = class_and_method.class.name.clone();
             let method_name = class_and_method.method.name.clone();
-            let try_native = NativeMethodRegistry::invoke(self, &class_and_method, args);
+            let try_native = NativeMethodRegistry::invoke(self, &class_and_method, object, args);
             if let Some(native) = try_native{
                 return native;
             } else {
@@ -196,12 +202,6 @@ impl<'a> VM<'a>{
         self.class_manager.find_class_by_id(class_id)
     }
 
-    pub fn print_call_stack(&self) {
-        for (index, call_frame) in self.call_stack.iter().enumerate(){
-            error!("[{}]: {:?}", index, call_frame);
-        }
-    }
-
     fn push_call_frame(&mut self, class_and_method: ClassAndMethod<'a>, object: Option<ObjectRef<'a>>, args: Vec<Value<'a>>) -> Result<(), VmError>{
         let mut empty_locals = vec![Value::Null; class_and_method.get_max_locals()];
         for i in 0..args.len(){
@@ -223,7 +223,8 @@ impl<'a> VM<'a>{
             pc: ProgramCounter(0),
             stack: Vec::new()
         };
-        self.call_stack.push(call_frame);
+        //self.call_stack.push(call_frame);
+        self.call_stack.push_call_frame(call_frame);
         Ok(())
     }
 }

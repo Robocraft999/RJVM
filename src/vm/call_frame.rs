@@ -371,6 +371,7 @@ impl<'a> CallFrame<'a>{
                         Instruction::IADD => { self.execute_i_arithmetic(|val1, val2| val1.wrapping_add(val2)) }
                         //TODO check if val2 is zero -> error
                         Instruction::IREM => { self.execute_i_arithmetic(|val1, val2| val1.wrapping_rem(val2)) }
+                        Instruction::IDIV => { self.execute_i_arithmetic(|val1, val2| val1.wrapping_div(val2)) }
                         Instruction::IXOR => { self.execute_i_arithmetic(|val1, val2| val1 ^ val2) }
                         Instruction::IAND => { self.execute_i_arithmetic(|val1, val2| val1 & val2) }
                         Instruction::IOR  => { self.execute_i_arithmetic(|val1, val2| val1 | val2) }
