@@ -37,7 +37,7 @@ pub struct MethodDescriptor{
 
 impl MethodDescriptor{
     pub fn new(raw_string: String) -> Self{
-        let r = Regex::new(r"(?<array>\[+)?(?:(?<primitive>[ZBSIJFDC])|L(?<object>[/a-zA-Z]+);|(?<void>V))").unwrap();
+        let r = Regex::new(r"(?<array>\[+)?(?:(?<primitive>[ZBSIJFDC])|L(?<object>[/a-zA-Z$0-9]+);|(?<void>V))").unwrap();
         let mut args = Vec::new();
         let mut void_return = false;
         for cap in r.captures_iter(raw_string.as_str()){

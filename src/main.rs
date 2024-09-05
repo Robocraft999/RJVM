@@ -401,9 +401,11 @@ fn init_vm(vm: &mut VM) -> Result<(), VmError>{
     let properties_object = vm.new_object("java/util/Properties")?;
     let arg1 = vm.new_string_object("java.lang.Integer.IntegerCache.high".to_string())?;
     let arg2 = vm.new_string_object("127".to_string())?;
+    let properties_init_method = vm.resolve_class_method("java/util/Properties", "<init>", "()V")?;
+    vm.invoke(properties_init_method, Some(properties_object), vec![])?;
     let propeties_set_method = vm.resolve_class_method("java/util/Properties", "setProperty", "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/Object;")?;
     vm.invoke(propeties_set_method, Some(properties_object), vec![Value::Object(arg1), Value::Object(arg2)])?;
-    let save_properties_method = vm.resolve_class_method("sun/misc/VM", "saveAndRemoveProperties", "(Ljava/util/Properties)V")?;
+    let save_properties_method = vm.resolve_class_method("sun/misc/VM", "saveAndRemoveProperties", "(Ljava/util/Properties;)V")?;
     vm.invoke(save_properties_method, None, vec![Value::Object(properties_object)])?;
 
     Ok(())

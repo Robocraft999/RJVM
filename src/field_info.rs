@@ -14,7 +14,7 @@ pub struct FieldInfo{
 }
 
 pub fn field_type_from_str(string: &str) -> FieldType{
-    let r = Regex::new(r"(?<array>\[+)?(?:(?<primitive>[ZBSIJFDC])|L(?<object>[/a-zA-Z$]+);)").unwrap();
+    let r = Regex::new(r"(?<array>\[+)?(?:(?<primitive>[ZBSIJFDC])|L(?<object>[/a-zA-Z$0-9]+);)").unwrap();
     if let Some(cap) = r.captures(string){
         parse_field_type(cap.name("object").map(|m| m.as_str()), cap.name("primitive").map(|m| m.as_str()), cap.name("array").map(|m| m.len()))
     } else {

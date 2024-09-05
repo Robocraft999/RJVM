@@ -84,7 +84,12 @@ impl<'a> CallFrame<'a>{
                         }
                         Instruction::PUTFIELD(index) => {
                             let (class_name, field_name, descriptor) = self.class_and_method.get_constant_field_info_descriptor(index).expect("GIB MICH DIE FELD");
-                            let (field_index, info) = self.class_and_method.class.find_field(field_name.as_str()).unwrap();
+                            let target_class = if class_name == self.class_and_method.class.name {
+                                self.class_and_method.class
+                            } else {
+                                vm.get_or_resolve_class(class_name.as_str())?
+                            };
+                            let (field_index, info) = target_class.find_field(field_name.as_str()).unwrap();
                             debug!("PUTFIELD {}.{} {} {} {:?}", class_name, field_name, descriptor, field_index, info);
                             let value = self.stack.pop().unwrap();
                             let object = self.stack.pop().unwrap();
@@ -98,7 +103,12 @@ impl<'a> CallFrame<'a>{
                         Instruction::GETFIELD(index) => {
                             let (class_name, field_name, descriptor) = self.class_and_method.get_constant_field_info_descriptor(index).expect("GIB MICH DIE FELD2");
                             debug!("GETFIELD {}.{} {}", class_name, field_name, descriptor);
-                            let (field_index, _) = self.class_and_method.class.find_field(field_name.as_str()).unwrap();
+                            let target_class = if class_name == self.class_and_method.class.name {
+                                self.class_and_method.class
+                            } else {
+                                vm.get_or_resolve_class(class_name.as_str())?
+                            };
+                            let (field_index, _) = target_class.find_field(field_name.as_str()).unwrap();
                             let object = self.stack.pop().unwrap();
                             if let Value::Object(obj) = object {
                                 self.stack.push(obj.get_field(field_index));
@@ -157,8 +167,8 @@ impl<'a> CallFrame<'a>{
                         }
                         Instruction::ARRAYLENGTH => {
                             debug!("ARRAYLENGTH");
-                            if let Value::Array(FieldType::Array(size, _), _) = self.stack.pop().unwrap(){
-                                self.stack.push(Value::Integer(size as i32));
+                            if let Value::Array(FieldType::Array(_dims, _), content) = self.stack.pop().unwrap(){
+                                self.stack.push(Value::Integer(content.borrow().len() as i32));
                             } else {
                                 warn!("Not an array");
                             }
@@ -359,6 +369,8 @@ impl<'a> CallFrame<'a>{
                         Instruction::ISUB => { self.execute_i_arithmetic(|val1, val2| val1.wrapping_sub(val2)) }
                         Instruction::IMUL => { self.execute_i_arithmetic(|val1, val2| val1.wrapping_mul(val2)) }
                         Instruction::IADD => { self.execute_i_arithmetic(|val1, val2| val1.wrapping_add(val2)) }
+                        //TODO check if val2 is zero -> error
+                        Instruction::IREM => { self.execute_i_arithmetic(|val1, val2| val1.wrapping_rem(val2)) }
                         Instruction::IXOR => { self.execute_i_arithmetic(|val1, val2| val1 ^ val2) }
                         Instruction::IAND => { self.execute_i_arithmetic(|val1, val2| val1 & val2) }
                         Instruction::IOR  => { self.execute_i_arithmetic(|val1, val2| val1 | val2) }
@@ -664,7 +676,9 @@ impl<'a> CallFrame<'a>{
             }
             args.insert(0, popped);
         }
+        trace!("loading class to execute on: '{}'", class_name.as_str());
         let class = vm.get_or_resolve_class(class_name.as_str())?;
+        trace!("finished loading class to execute on: '{}'", class_name.as_str());
         let class_and_method = match kind {
             InvokeKind::STATIC | InvokeKind::SPECIAL => {
                 class.find_method(method_name.as_str(), descriptor.as_str()).map(|method| ClassAndMethod {class, method}).unwrap()
@@ -700,6 +714,15 @@ impl<'a> CallFrame<'a>{
             _ => class_and_method
         };
 
+        trace!("STATUS of '{}' before invoke: ", self.class_and_method.method.name);
+        trace!("stack=");
+        for (index, value) in self.stack.iter().enumerate(){
+            trace!("    [{}] {:?}", index, value);
+        }
+        trace!("locals=");
+        for (index, value) in self.locals.iter().enumerate(){
+            trace!("    [{}] {:?}", index, value);
+        }
         debug!("INVOKE{:?}: {}{} {:?}", kind, method_name, descriptor, receiver);
         let res = vm.invoke(class_and_method, receiver, args)?;
         if res.is_some(){
