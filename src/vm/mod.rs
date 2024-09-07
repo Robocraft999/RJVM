@@ -19,7 +19,7 @@ use crate::vm::class_manager::ResolvedClass;
 use crate::vm::gc::ObjectAllocator;
 use crate::vm::java_error::JavaError;
 use crate::vm::java_native_method_impl::{NativeMethodRegistry, register_all_natives};
-use crate::vm::value::{ObjectRef, ObjectValue};
+use crate::vm::value::{Reference, ReferenceType};
 
 pub mod class_path;
 pub mod class_path_entry;
@@ -34,10 +34,9 @@ mod java_native_method_impl;
 
 pub struct VM<'a>{
     pub class_manager: ClassManager<'a>,
-    //pub call_stack: Vec<CallFrame<'a>>,
     pub call_stack: CallStack<'a>,
     pub object_allocator: ObjectAllocator<'a>,
-    pub static_class_objects: HashMap<ClassId, ObjectRef<'a>>,
+    pub static_class_objects: HashMap<ClassId, Reference<'a>>,
     pub native_method_registry: NativeMethodRegistry<'a>,
 }
 
@@ -49,25 +48,26 @@ impl<'a> VM<'a>{
         Self{
             class_manager,
             object_allocator: ObjectAllocator::new(),
-            //call_stack: Vec::new(),
             call_stack: CallStack::new(),
             static_class_objects: HashMap::new(),
             native_method_registry,
         }
     }
 
-    pub fn invoke(&mut self, class_and_method: ClassAndMethod<'a>, object: Option<ObjectRef<'a>>, args: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
+    pub fn invoke(&mut self, class_and_method: ClassAndMethod<'a>, object: Option<Reference<'a>>, args: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
         if !class_and_method.method.is_native(){
             let method_signature = format!("{}.{}{}", class_and_method.class.name, class_and_method.method.name, class_and_method.method.descriptor.as_str());
             info!("INVOKE {} on {:?} with {:?}", method_signature, object, args);
-            self.push_call_frame(class_and_method, object, args)?;
-            self.call_stack.print_call_stack();
-            /*let mut callframe = self.call_stack.last().unwrap().clone();
-            let result = callframe.execute(self)?;*/
             
-            let result = self.call_stack.execute(self)?;
+            /*let mut frame = */self.call_stack.push_call_frame(class_and_method, object, args)?;
+            self.call_stack.print_call_stack();
+            let vm_ptr: *mut VM = self;
+            //let result = frame.execute(self)?;
+            let result = self.call_stack.execute_top(vm_ptr)?;
+            
             info!("INVRETURN {} returned: {:?}", method_signature, result);
-            //self.call_stack.pop().unwrap();
+
+            //self.call_stack.pop_call_frame();
 
             Ok(result)
         } else {
@@ -150,24 +150,30 @@ impl<'a> VM<'a>{
             })
     }
 
-    pub fn new_object(&mut self, class_name: &str) -> Result<ObjectRef<'a>, VmError>{
+    pub fn new_object(&mut self, class_name: &str) -> Result<Reference<'a>, VmError>{
         let class = self.get_or_resolve_class(class_name)?;
         Ok(self.new_object_from_class(class))
     }
 
-    pub fn new_object_from_class(&self, class: ClassRef<'a>) -> ObjectRef<'a>{
+    pub fn new_object_from_class(&self, class: ClassRef<'a>) -> Reference<'a>{
         info!("CC[{:?}] = {}", class.id, class.name);
-        self.object_allocator.allocate(class)
+        self.object_allocator.allocate_object(class)
     }
 
-    pub fn get_static_class_object(&self, id: ClassId) -> Option<ObjectRef<'a>>{
+    pub fn get_static_class_object(&self, id: ClassId) -> Option<Reference<'a>>{
         self.static_class_objects.get(&id).cloned()
     }
 
-    pub fn new_string_object(&mut self, string: String) -> Result<ObjectRef<'a>, VmError>{
+    pub fn new_array(&mut self, dims: usize, field_type: FieldType, content: RefCell<Vec<Value<'a>>>) -> Result<Reference<'a>, VmError>{
+        let class_name = field_type.to_class_name();
+        let class = self.get_or_resolve_class(class_name.as_str())?;
+        Ok(self.object_allocator.allocate_array(class, dims, field_type, content))
+    }
+
+    pub fn new_string_object(&mut self, string: String) -> Result<Reference<'a>, VmError>{
         let char_array: Vec<Value<'a>> = string.encode_utf16().map(|c| Value::Integer(c as i32)).collect();
-        let char_array = Rc::new(RefCell::new(char_array));
-        let char_array = Value::Array(FieldType::Array(1, Box::new(FieldType::Primitive(PrimitiveType::Char))), char_array);
+        let char_array = RefCell::new(char_array);
+        let char_array = Value::Reference(self.new_array(1, FieldType::Primitive(PrimitiveType::Char), char_array)?);
 
         let string_object = self.new_object("java/lang/String")?;
         string_object.set_field(0, char_array);
@@ -178,54 +184,30 @@ impl<'a> VM<'a>{
     }
 
     pub fn extract_string_from_object(&self, value: &Value<'a>) -> Result<String, VmError>{
-        if let Value::Object(string_object) = value{
-            let chars = string_object.get_field(0);
-            if let Value::Array(_, content) = chars{
-                let chars: Vec<u8> = content.borrow().iter().map(|v| if let Value::Integer(val) = v {*val as u8} else {0}).collect();
-                let string = String::from_utf8(chars).map_err(|e| e.utf8_error())?;
-                debug!("string from object: {:?}", string);
-                return Ok(string);
+        if let Value::Reference(reference) = value{
+            let chars = reference.get_field(0);
+            if let Value::Reference(char_ref) = chars {
+                if let ReferenceType::Array(_, _, content) = &char_ref.reference_type{
+                    let chars: Vec<u8> = content.borrow().iter().map(|v| if let Value::Integer(val) = v {*val as u8} else {0}).collect();
+                    let string = String::from_utf8(chars).map_err(|e| e.utf8_error())?;
+                    debug!("string from object: {:?}", string);
+                    return Ok(string);
+                }
             }
         }
-        Err(VmError::ValidationError(format!( "Expected Object but found: {:?}", value)))
+        Err(VmError::ValidationError(format!( "Expected String Object but found: {:?}", value)))
     }
 
-    pub fn new_class_object(&mut self, class_name: String) -> Result<ObjectRef<'a>, VmError>{
-        let class_object = self.new_object("java/lang/Class").unwrap();
+    pub fn new_class_object(&mut self, class_name: String) -> Result<Reference<'a>, VmError>{
+        let class_object = self.new_object("java/lang/Class")?;
         let string_object = self.new_string_object(class_name)?;
 
-        class_object.set_field(5, Value::Object(string_object));
+        class_object.set_field(5, Value::Reference(string_object));
         Ok(class_object)
     }
 
     pub fn find_class_by_id(&self, class_id: ClassId) -> Option<ClassRef<'a>>{
         self.class_manager.find_class_by_id(class_id)
-    }
-
-    fn push_call_frame(&mut self, class_and_method: ClassAndMethod<'a>, object: Option<ObjectRef<'a>>, args: Vec<Value<'a>>) -> Result<(), VmError>{
-        let mut empty_locals = vec![Value::Null; class_and_method.get_max_locals()];
-        for i in 0..args.len(){
-            empty_locals[i] = args.get(i).unwrap().clone();
-        }
-        if !class_and_method.method.is_static(){
-            if let Some(obj) = object {
-                empty_locals.insert(0, Value::Object(obj));
-                empty_locals.pop();
-            }
-        }
-        let args_amount = args.iter().filter(|v| **v != Value::Uninitialized).count();
-        assert_eq!(args_amount, class_and_method.method.get_args_count(), "Args has not the correct length (was {}, expected {})", args_amount, class_and_method.method.get_args_count());
-        info!("NEW CALL FRAME with {:?} locals, \nobject=({:?}), \nargs=({:?}), \nmax_locals=[{}]", empty_locals, object, args, class_and_method.get_max_locals());
-        assert_eq!(empty_locals.len(), class_and_method.get_max_locals(), "Locals has not the correct length (was {}, expected {})", empty_locals.len(), class_and_method.get_max_locals());
-        let call_frame = CallFrame{
-            class_and_method,
-            locals: empty_locals,
-            pc: ProgramCounter(0),
-            stack: Vec::new()
-        };
-        //self.call_stack.push(call_frame);
-        self.call_stack.push_call_frame(call_frame);
-        Ok(())
     }
 }
 

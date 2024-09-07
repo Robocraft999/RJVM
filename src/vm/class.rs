@@ -82,7 +82,6 @@ impl<'a> Class<'a>{
                             }
                         }
                         FieldType::Object(_) => Value::Null,
-                        FieldType::Array(_, _) => Value::Null,
                     }
                 }
             });
@@ -186,5 +185,9 @@ impl<'a> ClassAndMethod<'a>{
         } else {
             0
         }
+    }
+
+    pub fn format(&self) -> String{
+        format!("{}.{}{}", self.class.name, self.method.name, self.method.descriptor.as_str())
     }
 }

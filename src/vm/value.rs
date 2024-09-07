@@ -1,5 +1,6 @@
-use std::cell::RefCell;
-use std::fmt::{Debug, Display, Formatter};
+use std::cell::{Ref, RefCell};
+use std::fmt::{Debug, Display, Formatter, Pointer};
+use std::ops::Index;
 use std::rc::Rc;
 use crate::field_info::{FieldType, PrimitiveType};
 use crate::vm::class::ClassId;
@@ -8,8 +9,7 @@ use crate::vm::class::ClassId;
 pub enum Value<'a>{
     #[default]
     Uninitialized,
-    Object(ObjectRef<'a>),
-    Array(FieldType, ArrayRef<'a>),
+    Reference(Reference<'a>),
 
     Integer(i32),
     Long(i64),
@@ -22,18 +22,9 @@ pub enum Value<'a>{
 impl Debug for Value<'_>{
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Value::Array(FieldType::Array(size, field_type), array) => {
-                if *field_type.as_ref() == FieldType::Primitive(PrimitiveType::Char){
-                    write!(f, "String[{:?}]", String::from_utf8(array.borrow().iter().map(|e| if let Value::Integer(val) = e {*val as u8} else {0}).collect()))
-                } else {
-                    write!(f ,"{:?}[{}] = {:?}", field_type, size, &array.borrow())
-                }
-            }
-            Value::Array(FieldType::Primitive(_), _) => {write!(f,"???")}
-            Value::Array(FieldType::Object(_), _) => {write!(f,"!!!")}
+            Value::Reference(rv) => write!(f,"{:?}", rv),
             Value::Uninitialized => write!(f, "VUninitialized"),
             Value::Null => write!(f, "VNull"),
-            Value::Object(object) => write!(f, "VObject({:?})", object),
             Value::Integer(value) => write!(f, "VInt ({})", value),
             Value::Long(value) => write!(f, "VLong ({})", value),
             Value::Float(value) => write!(f, "VFloat ({:.8})", value),
@@ -42,41 +33,79 @@ impl Debug for Value<'_>{
     }
 }
 
+pub type Reference<'a> = &'a ReferenceValue<'a>;
+
 #[derive(PartialEq, Clone)]
-pub struct ObjectValue<'a>{
+pub struct ReferenceValue<'a>{
     pub(crate) id: u32,
     pub(crate) class_id: ClassId,
-    pub(crate) fields: RefCell<Vec<Value<'a>>>
+    pub(crate) reference_type: ReferenceType<'a>,
 }
 
-impl<'a> ObjectValue<'a>{
+impl<'a> ReferenceValue<'a>{
     pub fn set_field(&self, index: usize, value: Value<'a>) {
-        self.fields.borrow_mut()[index] = value
+        match &self.reference_type {
+            ReferenceType::Object(fields) => {fields.borrow_mut()[index] = value}
+            ReferenceType::Array(_, _, _) => {unimplemented!("This reference represents an array, please use 'set_element()'")}
+        };
     }
 
     pub fn get_field(&self, index: usize) -> Value<'a>{
-        self.fields.borrow()[index].clone()
+        match &self.reference_type {
+            ReferenceType::Object(fields) => {fields.borrow()[index].clone()}
+            ReferenceType::Array(_, _, _) => {unimplemented!("This reference represents an array, please use 'get_element()'")}
+        }
     }
 
-    fn get_fields_printable(&self) -> Vec<String>{
-        self.fields.borrow().iter().map(|field|
-            match field {
-                Value::Object(inner) => format!("{}:{:?}", inner.id, inner.class_id),
-                _ => format!("{field:?}")
+    pub fn set_element(&self, index: usize, value: Value<'a>) {
+        match &self.reference_type {
+            ReferenceType::Object(_) => {unimplemented!("This reference represents an object, please use 'set_field()'")}
+            ReferenceType::Array(_, _, content) => {content.borrow_mut()[index] = value}
+        };
+    }
+
+    pub fn get_element(&self, index: usize) -> Value<'a>{
+        match &self.reference_type {
+            ReferenceType::Object(_) => {unimplemented!("This reference represents an object, please use 'get_field()'")}
+            ReferenceType::Array(_, _, content) => {content.borrow()[index].clone()}
+        }
+    }
+
+    fn get_components_printable(&self) -> Vec<String>{
+        let object = |field: &Value| match field {
+            Value::Reference(rv) => format!("{}:{:?}", rv.id, rv.class_id),
+            _ => format!("{:?}", field)
+        };
+        match &self.reference_type {
+            ReferenceType::Object(fields) => fields.borrow().iter().map(object).collect(),
+            ReferenceType::Array(_, field_type, content) => {
+                if let FieldType::Primitive(PrimitiveType::Char) = field_type {
+                    let bytes: Vec<u16> = content.borrow().iter().map(|e| if let Value::Integer(val) = e {*val as u16} else {0}).collect();
+                    vec![String::from_utf16(bytes.as_slice()).unwrap()]
+                } else {
+                    content.borrow().iter().map(object).collect()
+                }
             }
-        ).collect::<Vec<_>>()
+        }
     }
 }
 
-impl Debug for ObjectValue<'_>{
+impl Debug for ReferenceValue<'_>{
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Object")
+        f.debug_struct("VRef")
             .field("object_id", &self.id)
             .field("class_id", &self.class_id)
-            .field("fields", &self.get_fields_printable())
+            .field("type", &match self.reference_type {
+                ReferenceType::Object(_) => "Object",
+                ReferenceType::Array(_, _, _) => "Array",
+            })
+            .field("components", &self.get_components_printable())
             .finish()
     }
 }
 
-pub type ObjectRef<'a> = &'a ObjectValue<'a>;
-pub type ArrayRef<'a> = Rc<RefCell<Vec<Value<'a>>>>;
+#[derive(PartialEq, Clone)]
+pub enum ReferenceType<'a>{
+    Object(RefCell<Vec<Value<'a>>>),
+    Array(usize, FieldType, RefCell<Vec<Value<'a>>>)
+}

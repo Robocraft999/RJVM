@@ -405,15 +405,15 @@ fn init_vm(vm: &mut VM) -> Result<(), VmError>{
     let properties_init_method = vm.resolve_class_method("java/util/Properties", "<init>", "()V")?;
     vm.invoke(properties_init_method, Some(properties_object), vec![])?;
     let propeties_set_method = vm.resolve_class_method("java/util/Properties", "setProperty", "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/Object;")?;
-    vm.invoke(propeties_set_method, Some(properties_object), vec![Value::Object(arg1), Value::Object(arg2)])?;
+    vm.invoke(propeties_set_method, Some(properties_object), vec![Value::Reference(arg1), Value::Reference(arg2)])?;
     let save_properties_method = vm.resolve_class_method("sun/misc/VM", "saveAndRemoveProperties", "(Ljava/util/Properties;)V")?;
-    vm.invoke(save_properties_method, None, vec![Value::Object(properties_object)])?;
+    vm.invoke(save_properties_method, None, vec![Value::Reference(properties_object)])?;
 
     Ok(())
 }
 
 fn main() {
-    simple_logger::SimpleLogger::new().with_level(LevelFilter::Trace).without_timestamps().init().unwrap();
+    simple_logger::SimpleLogger::new().with_level(LevelFilter::Debug).without_timestamps().init().unwrap();
 
     let mut class_path = ClassPath::default();
     class_path.push("resources;resources/rt.jar").expect("TODO: panic message");
@@ -437,7 +437,7 @@ fn main() {
         }
         Err(error) => {
             error!("Error: {}", error);
-            vm.call_stack.print_call_stack()
+            //vm.call_stack.print_call_stack();
         }
     }
     //parse_class_file(&class_path, "java/lang/Exception");

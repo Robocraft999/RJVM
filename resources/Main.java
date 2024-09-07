@@ -22,12 +22,12 @@ public class Main{
 		int x = answer * (empty.getNumber() - 1);
 		return x;*/
 
-		/*HashMap<Integer, X> map = new HashMap();
+		HashMap<Integer, X> map = new HashMap();
 		int firstKey = 5;
 		map.set(firstKey, new X());
 		map.set(8, new X());
 
-		X res = map.get(firstKey);*/
+		X res = map.get(firstKey);
 
         //Car car = new Car();
 		return 0;

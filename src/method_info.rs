@@ -63,7 +63,7 @@ impl MethodDescriptor{
             } else {
                 field_type
             });*/
-            args.push(parse_field_type(cap.name("object").map(|m| m.as_str()), cap.name("primitive").map(|m| m.as_str()), cap.name("array").map(|m| m.len())))
+            args.push(parse_field_type(cap.name("object").map(|m| m.as_str()), cap.name("primitive").map(|m| m.as_str()), cap.name("array").map(|m| m.as_str())))
         }
 
         let return_type = if void_return {None} else {args.pop()};

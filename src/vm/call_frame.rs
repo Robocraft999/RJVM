@@ -11,7 +11,7 @@ use crate::method_info::MethodDescriptor;
 use crate::vm::java_error::JavaError;
 use crate::vm::{VM, VmError};
 use crate::vm::class::{ClassAndMethod, ClassRef};
-use crate::vm::value::Value;
+use crate::vm::value::{ReferenceType, Value};
 
 #[derive(Clone)]
 pub struct CallFrame<'a>{
@@ -93,7 +93,7 @@ impl<'a> CallFrame<'a>{
                             debug!("PUTFIELD {}.{} {} {} {:?}", class_name, field_name, descriptor, field_index, info);
                             let value = self.stack.pop().unwrap();
                             let object = self.stack.pop().unwrap();
-                            if let Value::Object(mut obj) = object {
+                            if let Value::Reference(mut obj) = object {
                                 obj.set_field(field_index, value);
                                 debug!("obj:{:?}", &obj);
                             } else {
@@ -110,7 +110,7 @@ impl<'a> CallFrame<'a>{
                             };
                             let (field_index, _) = target_class.find_field(field_name.as_str()).unwrap();
                             let object = self.stack.pop().unwrap();
-                            if let Value::Object(obj) = object {
+                            if let Value::Reference(obj) = object {
                                 self.stack.push(obj.get_field(field_index));
                             } else {
                                 warn!("NAO");
@@ -137,14 +137,14 @@ impl<'a> CallFrame<'a>{
                             let new_object = vm.new_object(class_name.as_str())?;
 
                             debug!("NEW: {} {} {:?}", index, get_constant_printable(constants, index), &new_object);
-                            self.stack.push(Value::Object(new_object));
+                            self.stack.push(Value::Reference(new_object));
                         }
                         Instruction::ANEWARRAY(index) => {
                             let count = self.pop_int()?;
                             let class_name = self.class_and_method.get_constant_utf8(index).unwrap();
                             debug!("ANEWARRAY {}[{}]", class_name, count);
                             let array_content = vec![Value::Null; count as usize];
-                            let array = Value::Array(FieldType::Array(count as usize, Box::new(FieldType::Object(class_name))), Rc::new(RefCell::new(array_content)));
+                            let array = Value::Reference(vm.new_array(1, FieldType::Object(class_name), RefCell::new(array_content))?);
                             self.stack.push(array);
                         }
                         Instruction::NEWARRAY(atype) => {
@@ -162,13 +162,16 @@ impl<'a> CallFrame<'a>{
                             let count = self.pop_int()?;
                             debug!("NEWARRAY {:?}[{}]", primitive_type, count);
                             let array_content = vec![Value::Null; count as usize];
-                            let array = Value::Array(FieldType::Array(count as usize, Box::new(primitive_type)), Rc::new(RefCell::new(array_content)));
+                            let array = Value::Reference(vm.new_array(1, primitive_type, RefCell::new(array_content))?);
                             self.stack.push(array);
                         }
                         Instruction::ARRAYLENGTH => {
                             debug!("ARRAYLENGTH");
-                            if let Value::Array(FieldType::Array(_dims, _), content) = self.stack.pop().unwrap(){
-                                self.stack.push(Value::Integer(content.borrow().len() as i32));
+                            if let Value::Reference(reference) = self.stack.pop().unwrap(){
+                                if let ReferenceType::Array(_, _, content) = &reference.reference_type{
+                                    self.stack.push(Value::Integer(content.borrow().len() as i32));
+                                }
+
                             } else {
                                 warn!("Not an array");
                             }
@@ -195,9 +198,9 @@ impl<'a> CallFrame<'a>{
                             let o1 = self.stack.pop().unwrap();
                             let o2 = self.stack.pop().unwrap();
                             match (o1, o2) {
-                                (Value::Object(obj1), Value::Object(obj2)) => {
-                                    debug!("IF_ACMPNE {:?} != {:?}?", obj1.class_id, obj2.class_id);
-                                    if obj1.class_id != obj2.class_id {
+                                (Value::Reference(obj1), Value::Reference(obj2)) => {
+                                    debug!("IF_ACMPNE {:?} != {:?}?", obj1.id, obj2.id);
+                                    if obj1.id != obj2.id {
                                         self.pc.0 = offset
                                     }
                                 }
@@ -208,9 +211,9 @@ impl<'a> CallFrame<'a>{
                             let o1 = self.stack.pop().unwrap();
                             let o2 = self.stack.pop().unwrap();
                             match (o1, o2) {
-                                (Value::Object(obj1), Value::Object(obj2)) => {
-                                    debug!("IF_ACMPEQ {:?} == {:?}?", obj1.class_id, obj2.class_id);
-                                    if obj1.class_id == obj2.class_id {
+                                (Value::Reference(obj1), Value::Reference(obj2)) => {
+                                    debug!("IF_ACMPEQ {:?} == {:?}?", obj1.id, obj2.id);
+                                    if obj1.id == obj2.id {
                                         self.pc.0 = offset
                                     }
                                 }
@@ -227,7 +230,7 @@ impl<'a> CallFrame<'a>{
                             let reference = self.stack.pop().unwrap();
                             match reference {
                                 Value::Null => {debug!("IFNONNULL is NULL");}
-                                Value::Object(_) | Value::Array(_, _) => {debug!("IFNONNULL is reference"); self.pc.0 = offset}
+                                Value::Reference(_) => {debug!("IFNONNULL is reference"); self.pc.0 = offset}
                                 _ => {warn!("IFNONNULL {:?} is this valid?", reference.clone())}
                             }
                         }
@@ -235,7 +238,7 @@ impl<'a> CallFrame<'a>{
                             let reference = self.stack.pop().unwrap();
                             match reference {
                                 Value::Null => {debug!("IFNULL is NULL"); self.pc.0 = offset}
-                                Value::Object(_) | Value::Array(_, _) => {debug!("IFNULL is reference");}
+                                Value::Reference(_) => {debug!("IFNULL is reference");}
                                 _ => {warn!("IFNULL {:?} is this valid?", reference.clone())}
                             }
                         }
@@ -299,10 +302,10 @@ impl<'a> CallFrame<'a>{
                             //TODO validate type of value to fit instruction
                             let value = self.stack.pop().unwrap();
                             let index = self.pop_int()?;
-                            let arrayref = self.stack.pop().unwrap();
-                            debug!("{:?}", arrayref);
-                            if let Value::Array(_, content) = arrayref{
-                                content.borrow_mut()[index as usize] = value;
+                            let popped = self.stack.pop().unwrap();
+                            debug!("{:?}", popped);
+                            if let Value::Reference(array_ref) = popped{
+                                array_ref.set_element(index as usize, value);
                             }
                         }
                         Instruction::ICONSTM1 => { self.execute_iconst(-1) }
@@ -362,8 +365,8 @@ impl<'a> CallFrame<'a>{
                         //TODO add type validation
                         Instruction::AALOAD | Instruction::IALOAD | Instruction::BALOAD | Instruction::CALOAD => {
                             let index = self.pop_int()?;
-                            if let Some(Value::Array(_, content)) = self.stack.pop(){
-                                self.stack.push(content.borrow().get(index as usize).cloned().unwrap());
+                            if let Some(Value::Reference(array_ref)) = self.stack.pop(){
+                                self.stack.push(array_ref.get_element(index as usize));
                             }
                         }
                         Instruction::ISUB => { self.execute_i_arithmetic(|val1, val2| val1.wrapping_sub(val2)) }
@@ -448,14 +451,14 @@ impl<'a> CallFrame<'a>{
                             }
                         }
                         Instruction::MONITORENTER => {
-                            if let Some(Value::Object(_)) = self.stack.pop(){
+                            if let Some(Value::Reference(_)) = self.stack.pop(){
                                 debug!("MONITORENTER")
                             } else {
                                 warn!("No object to lock")
                             }
                         }
                         Instruction::MONITOREXIT => {
-                            if let Some(Value::Object(_)) = self.stack.pop(){
+                            if let Some(Value::Reference(_)) = self.stack.pop(){
                                 debug!("MONITOREXIT")
                             } else {
                                 warn!("No object to lock")
@@ -470,7 +473,7 @@ impl<'a> CallFrame<'a>{
                             self.stack.push(Value::Integer(1));
                         }
                         Instruction::ATHROW => {
-                            if let Some(Value::Object(error)) = self.stack.pop(){
+                            if let Some(Value::Reference(error)) = self.stack.pop(){
                                 let string_value = error.get_field(2);
                                 let string = vm.extract_string_from_object(&string_value)?;
                                 let exception_name = vm.class_manager.find_class_by_id(error.class_id).unwrap().name.clone();
@@ -485,7 +488,7 @@ impl<'a> CallFrame<'a>{
                 }
             }
         }
-        Err(VmError::MethodCallError(self.class_and_method.method.name.to_string()))
+        Err(VmError::MethodCallError( format!("{}", self.class_and_method.method.name)))
     }
 
     fn execute_istore(&mut self, index: usize) -> Result<(), VmError>{
@@ -568,13 +571,9 @@ impl<'a> CallFrame<'a>{
     fn execute_aload(&mut self, index: usize) -> Result<(), VmError>{
         let popped = self.locals.get(index).unwrap();
         match popped {
-            Value::Object(value) => {
-                self.stack.push(Value::Object(value));
-                debug!("ALOAD{} {:?}", index, value);
-            }
-            Value::Array(FieldType::Array(array_size, field_type), content) => {
-                self.stack.push(Value::Array(FieldType::Array(*array_size, field_type.clone()), content.clone()));
-                debug!("ALOAD{}", index);
+            Value::Reference(reference) => {
+                self.stack.push(Value::Reference(reference));
+                debug!("ALOAD{} {:?}", index, reference);
             }
             Value::Null => {
                 self.stack.push(Value::Null);
@@ -691,10 +690,11 @@ impl<'a> CallFrame<'a>{
         let receiver = if class_and_method.method.is_static(){
             None
         } else {
-            if let Value::Object(obj) = self.stack.pop().unwrap(){
-                Some(obj)
+            let popped = self.stack.pop();
+            if let Some(Value::Reference(reference)) = popped{
+                Some(reference)
             } else {
-                warn!("Expected object");
+                warn!("Expected object or array");
                 None
             }
         };
@@ -764,7 +764,7 @@ impl<'a> CallFrame<'a>{
             ConstantPoolEntry::String(string_index) => {
                 if let Some(ConstantPoolEntry::Utf8(string)) = self.class_and_method.class.get_constant(string_index){
                     let string_object = vm.new_string_object(string)?;
-                    Value::Object(string_object)
+                    Value::Reference(string_object)
                 } else {
                     //return Err(ValidationError("Expected string".to_string()));
                     warn!("expected but didnt find string object");
@@ -774,7 +774,7 @@ impl<'a> CallFrame<'a>{
             ConstantPoolEntry::Class(name_index) => {
                 if let Some(ConstantPoolEntry::Utf8(string)) = self.class_and_method.class.get_constant(name_index){
                     let class_object = vm.new_class_object(string)?;
-                    Value::Object(class_object)
+                    Value::Reference(class_object)
                 } else {
                     warn!("expected but didnt find string object");
                     Value::Null

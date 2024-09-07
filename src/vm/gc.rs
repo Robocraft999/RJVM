@@ -1,12 +1,12 @@
 use std::cell::RefCell;
 use std::ops::Add;
 use typed_arena::Arena;
-
+use crate::field_info::FieldType;
 use crate::vm::class::ClassRef;
-use crate::vm::value::{ObjectRef, ObjectValue};
+use crate::vm::value::{Reference, ReferenceType, ReferenceValue, Value};
 
 pub struct ObjectAllocator<'a>{
-    arena: Arena<ObjectValue<'a>>,
+    arena: Arena<ReferenceValue<'a>>,
     next_object_id: RefCell<u32>,
 }
 
@@ -18,21 +18,36 @@ impl<'a> ObjectAllocator<'a>{
         }
     }
 
-    pub fn allocate(&self, class: ClassRef<'a>) -> ObjectRef<'a>{
+    pub fn allocate_object(&self, class: ClassRef<'a>) -> Reference<'a>{
         let new_object = self.arena.alloc(self.object_from_class(class));
         *self.next_object_id.borrow_mut() += 1;
         unsafe {
-            let object_ptr: *const ObjectValue = new_object;
+            let object_ptr: *const ReferenceValue = new_object;
             &*object_ptr
         }
     }
 
-    fn object_from_class(&self, class: ClassRef<'a>) -> ObjectValue<'a>{
+    fn object_from_class(&self, class: ClassRef<'a>) -> ReferenceValue<'a>{
         let fields = class.get_fields();
-        ObjectValue{
+        ReferenceValue{
             id: *self.next_object_id.borrow(),
             class_id: class.id,
-            fields: RefCell::new(fields)
+            reference_type: ReferenceType::Object(RefCell::new(fields))
+        }
+    }
+
+    pub fn allocate_array(&self, class: ClassRef<'a>, dims: usize, field_type: FieldType, content: RefCell<Vec<Value<'a>>>) -> Reference<'a>{
+        let array = ReferenceValue{
+            id: *self.next_object_id.borrow(),
+            class_id: class.id,
+            reference_type: ReferenceType::Array(dims, field_type, content),
+        };
+
+        let new_object = self.arena.alloc(array);
+        *self.next_object_id.borrow_mut() += 1;
+        unsafe {
+            let object_ptr: *const ReferenceValue = new_object;
+            &*object_ptr
         }
     }
 
