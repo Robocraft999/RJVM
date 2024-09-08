@@ -149,7 +149,7 @@ fn delegate_double_to_raw_bits<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, _: Option<R
     if let Some(Value::Double(value)) = args.get(0){
         return Ok(Some(Value::Long(value.to_bits() as i64)))
     }
-    Err(VmError::ValidationError(format!("Expected float")))
+    Err(VmError::ValidationError(format!("Expected double")))
 }
 
 fn delegate_get_class<'a>(vm: &mut VM<'a>, class : ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{

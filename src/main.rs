@@ -1,7 +1,8 @@
 use std::fmt::{Debug, Formatter};
 use std::io::Read;
 use std::str::FromStr;
-use log::{error, LevelFilter};
+use cesu8::from_java_cesu8;
+use log::{error, warn, LevelFilter};
 use access_flags::{parse_class_flags, parse_field_flags, parse_method_flags};
 use attribute::{Attribute, Code};
 use vm::class_path::ClassPath;
@@ -139,9 +140,11 @@ fn parse_class_file(class_path: &ClassPath, class_name: &str) -> Result<ClassFil
                 let length = parse_u2(&mut bytes)?;
                 let mut string_bytes = Vec::new();
                 for _ in 0..length{
-                    string_bytes.push(parse_u1(&mut bytes)? as u16)
+                    string_bytes.push(parse_u1(&mut bytes)?)
                 }
-                ConstantPoolEntry::Utf8(String::from_utf16(string_bytes.as_slice()).expect(format!("String at {} in {} could not be parsed", i+1, class_name).as_str()))
+                let string = from_java_cesu8(string_bytes.as_slice()).expect(format!("String at {} in {} could not be parsed", i+1, class_name).as_str()).to_string();
+                //warn!("{}, {} {} {}\n= {}", class_name, length, string.chars().count(), string.len(), string);
+                ConstantPoolEntry::Utf8(string)
             }
             ConstantPoolEntry::String(_) => {
                 let string_index = parse_u2(&mut bytes)?;
@@ -426,7 +429,7 @@ fn main() {
     //vm.get_or_resolve_class("java/lang/CharacterData").expect("msg");
 
     //vm.class_manager.get_or_resolve_class("Empty").expect("TODO: panic message");
-    let main_method = vm.resolve_class_method("Main", "main", "([Ljava/lang/String;)I").unwrap();
+    let main_method = vm.resolve_class_method("Main", "main", "([Ljava/lang/String;)V").unwrap();
     let result = vm.invoke(main_method, None, vec![Value::Null]);
     match result {
         Ok(res) => {

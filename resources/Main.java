@@ -6,7 +6,7 @@ import java.util.Properties;
 public class Main{
     public static final int answer = 42;
 
-	public static int main(String[] args){
+	public static void main(String[] args){
 	    /*Properties props = new Properties();
 	    props.setProperty("java.lang.Integer.IntegerCache.high", "127");
 	    VM.saveAndRemoveProperties(props);*/
@@ -24,13 +24,12 @@ public class Main{
 
 		HashMap<Integer, X> map = new HashMap();
 		int firstKey = 5;
-		map.set(firstKey, new X());
-		map.set(8, new X());
+		map.add(firstKey, new X());
+		map.add(8, new X());
 
 		X res = map.get(firstKey);
 
         //Car car = new Car();
-		return 0;
 	}
 
 	static class X{}

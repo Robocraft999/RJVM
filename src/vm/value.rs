@@ -1,7 +1,5 @@
 use std::cell::{Ref, RefCell};
 use std::fmt::{Debug, Display, Formatter, Pointer};
-use std::ops::Index;
-use std::rc::Rc;
 use crate::field_info::{FieldType, PrimitiveType};
 use crate::vm::class::ClassId;
 
@@ -80,8 +78,8 @@ impl<'a> ReferenceValue<'a>{
             ReferenceType::Object(fields) => fields.borrow().iter().map(object).collect(),
             ReferenceType::Array(_, field_type, content) => {
                 if let FieldType::Primitive(PrimitiveType::Char) = field_type {
-                    let bytes: Vec<u16> = content.borrow().iter().map(|e| if let Value::Integer(val) = e {*val as u16} else {0}).collect();
-                    vec![String::from_utf16(bytes.as_slice()).unwrap()]
+                    let chars: Vec<char> = content.borrow().iter().map(|e| if let Value::Integer(val) = e {char::from_u32(*val as u32).unwrap()} else {'?'}).collect();
+                    vec![chars.iter().collect::<String>()]
                 } else {
                     content.borrow().iter().map(object).collect()
                 }

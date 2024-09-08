@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::str::Utf8Error;
+use cesu8::{from_java_cesu8, to_java_cesu8, Cesu8DecodingError};
 use callstack::CallStack;
 use log::{debug, error, info};
 use thiserror::Error;
@@ -171,7 +172,7 @@ impl<'a> VM<'a>{
     }
 
     pub fn new_string_object(&mut self, string: String) -> Result<Reference<'a>, VmError>{
-        let char_array: Vec<Value<'a>> = string.encode_utf16().map(|c| Value::Integer(c as i32)).collect();
+        let char_array: Vec<Value<'a>> = string.chars().map(|c| Value::Integer(c as i32)).collect();
         let char_array = RefCell::new(char_array);
         let char_array = Value::Reference(self.new_array(1, FieldType::Primitive(PrimitiveType::Char), char_array)?);
 
@@ -189,7 +190,7 @@ impl<'a> VM<'a>{
             if let Value::Reference(char_ref) = chars {
                 if let ReferenceType::Array(_, _, content) = &char_ref.reference_type{
                     let chars: Vec<u8> = content.borrow().iter().map(|v| if let Value::Integer(val) = v {*val as u8} else {0}).collect();
-                    let string = String::from_utf8(chars).map_err(|e| e.utf8_error())?;
+                    let string = from_java_cesu8(chars.as_slice())?.to_string();
                     debug!("string from object: {:?}", string);
                     return Ok(string);
                 }
@@ -211,7 +212,7 @@ impl<'a> VM<'a>{
     }
 }
 
-#[derive(Error, Debug, PartialEq)]
+#[derive(Error, Debug)]
 pub enum VmError{
     #[error("{0}")]
     JavaException(#[from] JavaError),
@@ -222,5 +223,5 @@ pub enum VmError{
     #[error("Validation failed: expected: {0}")]
     ValidationError(String),
     #[error("{0}")]
-    UTF8Error(#[from] Utf8Error),
+    CESU8Error(#[from] Cesu8DecodingError),
 }

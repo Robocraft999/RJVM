@@ -125,7 +125,7 @@ impl<'a> CallFrame<'a>{
                             info!("RETURN");
                             return Ok(None);
                         }
-                        Instruction::IRETURN | Instruction::LRETURN | Instruction::FRETURN | Instruction::ARETURN=> {
+                        Instruction::IRETURN | Instruction::LRETURN | Instruction::FRETURN | Instruction::DRETURN | Instruction::ARETURN=> {
                             //TODO check for types
                             let value = self.stack.pop();
                             info!("RETURN {:?}", value);
@@ -266,6 +266,24 @@ impl<'a> CallFrame<'a>{
                                 }
                             }
                         }
+                        Instruction::DCMPG | Instruction::DCMPL => {
+                            if let (Some(Value::Double(value2)), Some(Value::Double(value1))) = (self.stack.pop(), self.stack.pop()){
+                                debug!("DCMP");
+                                if value1 > value2{
+                                    self.stack.push(Value::Integer(1))
+                                } else if value1 == value2{
+                                    self.stack.push(Value::Integer(0))
+                                } else if value1 < value2{
+                                    self.stack.push(Value::Integer(-1))
+                                } else if value1.is_nan() || value2.is_nan(){
+                                    if instruction == Instruction::DCMPG{
+                                        self.stack.push(Value::Integer(1))
+                                    } else {
+                                        self.stack.push(Value::Integer(-1))
+                                    }
+                                }
+                            }
+                        }
                         Instruction::LCMP => {
                             if let (Some(Value::Long(value2)), Some(Value::Long(value1))) = (self.stack.pop(), self.stack.pop()) {
                                 debug!("LCMP");
@@ -375,6 +393,11 @@ impl<'a> CallFrame<'a>{
                         //TODO check if val2 is zero -> error
                         Instruction::IREM => { self.execute_i_arithmetic(|val1, val2| val1.wrapping_rem(val2)) }
                         Instruction::IDIV => { self.execute_i_arithmetic(|val1, val2| val1.wrapping_div(val2)) }
+                        Instruction::INEG => {
+                            let value = self.pop_int()?;
+                            debug!("INEG");
+                            self.stack.push(Value::Integer(-value))
+                        }
                         Instruction::IXOR => { self.execute_i_arithmetic(|val1, val2| val1 ^ val2) }
                         Instruction::IAND => { self.execute_i_arithmetic(|val1, val2| val1 & val2) }
                         Instruction::IOR  => { self.execute_i_arithmetic(|val1, val2| val1 | val2) }
@@ -396,24 +419,9 @@ impl<'a> CallFrame<'a>{
                             }
                         })}
                         Instruction::FMUL => { self.execute_f_arithmetic(|val1, val2| val1 * val2) }
-                        Instruction::D2I => {
-                            let value = self.stack.pop().unwrap();
-                            debug!("D2I");
-                            if let Value::Double(double) = value {
-                                self.stack.push(Value::Integer(double as i32));
-                            } else {
-                                warn!("D2I Conversion failed, because {value:?} is not of type Double")
-                            }
-                        }
-                        Instruction::L2I => {
-                            let value = self.stack.pop().unwrap();
-                            debug!("L2I");
-                            if let Value::Long(long) = value {
-                                self.stack.push(Value::Integer(long as i32));
-                            } else {
-                                warn!("L2I Conversion failed, because {value:?} is not of type Long")
-                            }
-                        }
+                        Instruction::DADD => { self.execute_d_arithmetic(|val1, val2| val1 + val2) }
+                        Instruction::DDIV => { self.execute_d_arithmetic(|val1, val2| val1 / val2) }
+
                         Instruction::I2L => {
                             let value = self.stack.pop().unwrap();
                             debug!("I2L");
@@ -432,6 +440,15 @@ impl<'a> CallFrame<'a>{
                                 warn!("I2F Conversion failed, because {value:?} is not of type Int")
                             }
                         }
+                        Instruction::I2D => {
+                            let value = self.stack.pop().unwrap();
+                            debug!("I2D");
+                            if let Value::Integer(int) = value {
+                                self.stack.push(Value::Double(int as f64));
+                            } else {
+                                warn!("I2D Conversion failed, because {value:?} is not of type Int")
+                            }
+                        }
                         Instruction::I2C => {
                             let value = self.stack.pop().unwrap();
                             debug!("I2C");
@@ -441,6 +458,15 @@ impl<'a> CallFrame<'a>{
                                 warn!("I2C Conversion failed, because {value:?} is not of type Int")
                             }
                         }
+                        Instruction::L2I => {
+                            let value = self.stack.pop().unwrap();
+                            debug!("L2I");
+                            if let Value::Long(long) = value {
+                                self.stack.push(Value::Integer(long as i32));
+                            } else {
+                                warn!("L2I Conversion failed, because {value:?} is not of type Long")
+                            }
+                        }
                         Instruction::F2I => {
                             let value = self.stack.pop().unwrap();
                             debug!("F2I");
@@ -448,6 +474,15 @@ impl<'a> CallFrame<'a>{
                                 self.stack.push(Value::Integer(float as i32));
                             } else {
                                 warn!("F2I Conversion failed, because {value:?} is not of type Float")
+                            }
+                        }
+                        Instruction::D2I => {
+                            let value = self.stack.pop().unwrap();
+                            debug!("D2I");
+                            if let Value::Double(double) = value {
+                                self.stack.push(Value::Integer(double as i32));
+                            } else {
+                                warn!("D2I Conversion failed, because {value:?} is not of type Double")
                             }
                         }
                         Instruction::MONITORENTER => {
@@ -644,6 +679,18 @@ impl<'a> CallFrame<'a>{
             self.stack.push(Value::Float(res))
         } else {
             warn!("dat sin nich zwee floatse to keck");
+        }
+    }
+
+    fn execute_d_arithmetic<F: FnOnce(f64, f64) -> f64>(&mut self, f: F){
+        let value2 = self.stack.pop();
+        let value1 = self.stack.pop();
+        if let (Some(Value::Double(val1)), Some(Value::Double(val2))) = (value1, value2){
+            let res = f(val1, val2);
+            debug!("Double ARITHMETIC {}&{}={}", val1, val2, res);
+            self.stack.push(Value::Double(res))
+        } else {
+            warn!("dat sin nich zwee doppelte to keck");
         }
     }
 
