@@ -1,6 +1,6 @@
 use strum_macros::FromRepr;
 
-#[derive(Debug, PartialEq, FromRepr)]
+#[derive(Debug, PartialEq, FromRepr, Clone)]
 #[repr(u16)]
 pub enum ClassFlag{
     Public     = 0x0001,

@@ -151,7 +151,7 @@ pub fn parse_instruction(code_bytes: &Vec<u8>, mut pc: usize) -> Result<(Instruc
             ASTORE0 | ASTORE1 | ASTORE2 | ASTORE3 | IASTORE | BASTORE | CASTORE | SASTORE | LASTORE | FASTORE | DASTORE | AASTORE |
             LSTORE0 | LSTORE1 | LSTORE2 | LSTORE3 |
             DSTORE0 | DSTORE1 | DSTORE2 | DSTORE3 |
-            DUP | DUPX1 | LCMP | ATHROW | 
+            DUP | DUPX1 | DUP2 | LCMP | ATHROW |
             IADD | LADD | DADD | FADD | ISUB | LSUB | FSUB | DSUB | IMUL | LMUL | FMUL | DMUL | IDIV | LDIV | FDIV | DDIV |
             ARRAYLENGTH | POP | NOP |
             LUSHR | ISHL | ISHR | IUSHR | IOR | LOR | IXOR | LXOR | IAND | LAND | INEG | LNEG | FNEG | IREM |

@@ -29,7 +29,7 @@ mod java_error;
 pub mod value;
 mod call_frame;
 mod callstack;
-mod class;
+pub mod class;
 mod gc;
 mod java_native_method_impl;
 
@@ -38,7 +38,9 @@ pub struct VM<'a>{
     pub call_stack: CallStack<'a>,
     pub object_allocator: ObjectAllocator<'a>,
     pub static_class_objects: HashMap<ClassId, Reference<'a>>,
+    pub string_objects: HashMap<String, Reference<'a>>,
     pub native_method_registry: NativeMethodRegistry<'a>,
+    pub current_thread: Option<Reference<'a>>
 }
 
 impl<'a> VM<'a>{
@@ -51,7 +53,9 @@ impl<'a> VM<'a>{
             object_allocator: ObjectAllocator::new(),
             call_stack: CallStack::new(),
             static_class_objects: HashMap::new(),
+            string_objects: HashMap::new(),
             native_method_registry,
+            current_thread: None
         }
     }
 
@@ -68,7 +72,7 @@ impl<'a> VM<'a>{
             
             info!("INVRETURN {} returned: {:?}", method_signature, result);
 
-            //self.call_stack.pop_call_frame();
+            self.call_stack.pop_call_frame();
 
             Ok(result)
         } else {
@@ -113,31 +117,6 @@ impl<'a> VM<'a>{
             }
         }
 
-        /*if class.name == "java/lang/System"{
-            if let Some(setout0_method) = class.find_method("setOut0", "(Ljava/io/PrintStream;)V"){
-                let class_and_method = ClassAndMethod{
-                    class,
-                    method: setout0_method,
-                };
-                let file_descriptor = self.new_object("java/io/FileDescriptor")?;
-                let static_file_descriptor = self.get_static_class_object(file_descriptor.id).unwrap();
-                //public static final FileDescriptor out = new FileDescriptor(1);
-                let file_descriptor_out = static_file_descriptor.get_field(3);
-                let file_output_stream = self.new_object("java/io/FileOutputStream")?;
-                let file_output_stream_init = self.resolve_class_method("java/io/FileOutputStream", "<init>", "(Ljava/io/FileDescriptor;)V")?;
-                self.invoke(file_output_stream_init, Some(file_output_stream), vec![file_descriptor_out])?;
-
-                let buffered_output_stream = self.new_object("java/io/BufferedOutputStream")?;
-                let buffered_output_stream_init = self.resolve_class_method("java/io/BufferedOutputStream", "<init>", "(Ljava/io/OutputStream;I)V")?;
-                self.invoke(buffered_output_stream_init, Some(buffered_output_stream), vec![Value::Object(file_output_stream), Value::Integer(128)])?;
-
-                let print_stream = self.new_object("java/io/PrintStream")?;
-                let print_stream_init = self.resolve_class_method("java/io/PrintStream", "<init>", "(Ljava/io/OutputStream;I)V")?;
-                self.invoke(print_stream_init, Some(print_stream), vec![Value::Object(buffered_output_stream), Value::Integer(1)])?;
-
-                self.invoke(class_and_method, Some(static_object), vec![Value::Object(print_stream)])?;
-            }
-        }*/
         Ok(())
     }
 
@@ -181,7 +160,13 @@ impl<'a> VM<'a>{
         string_object.set_field(1, Value::Integer(0));
         string_object.set_field(6, Value::Integer(0));
 
-        Ok(string_object)
+        if !self.string_objects.contains_key(&string){
+            self.string_objects.insert(string, string_object);
+            Ok(string_object)
+        } else {
+            Ok(self.string_objects[&string])
+        }
+
     }
 
     pub fn extract_string_from_object(&self, value: &Value<'a>) -> Result<String, VmError>{
@@ -207,8 +192,20 @@ impl<'a> VM<'a>{
         Ok(class_object)
     }
 
+    pub fn extract_class_from_class_object(&mut self, object: Reference<'a>) -> Result<ClassRef<'a>, VmError>{
+        let name_object = object.get_field(5);
+        let name = self.extract_string_from_object(&name_object)?;
+        let name = name.replace(".", "/");
+        let class = self.get_or_resolve_class(name.as_str())?;
+        Ok(class)
+    }
+
     pub fn find_class_by_id(&self, class_id: ClassId) -> Option<ClassRef<'a>>{
         self.class_manager.find_class_by_id(class_id)
+    }
+
+    pub fn find_class_by_name(&self, name: String) -> Option<ClassRef<'a>>{
+        self.class_manager.find_class_by_name(name.as_str())
     }
 }
 

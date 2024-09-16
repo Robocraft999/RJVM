@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use typed_arena::Arena;
 
 use crate::{ClassFile, parse_class_file};
+use crate::field_info::field_type_from_str;
 use crate::vm::class::{Class, ClassId, ClassRef};
 use crate::vm::class_path::ClassPath;
 use crate::vm::VmError;

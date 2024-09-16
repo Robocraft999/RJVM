@@ -1,6 +1,6 @@
 use std::fmt::{Debug, Formatter};
 
-use crate::access_flags::ClassFlags;
+use crate::access_flags::{ClassFlag, ClassFlags};
 use crate::constants::{ConstantPool, ConstantPoolEntry};
 use crate::field_info::{FieldInfo, FieldType, PrimitiveType};
 use crate::method_info::MethodInfo;
@@ -39,6 +39,14 @@ impl<'a> Class<'a>{
                     None
                 }
             })
+    }
+
+    pub fn is_interface(&self) -> bool {
+        self.flags.contains(&ClassFlag::Interface)
+    }
+
+    pub fn is_array(&self) -> bool {
+        self.name.starts_with("[")
     }
 
     pub fn get_constant(&self, index: u16) -> Option<ConstantPoolEntry>{
@@ -92,6 +100,16 @@ impl<'a> Class<'a>{
 
         superclass_values.extend(local_values);
         superclass_values
+    }
+
+    pub fn get_constructors(&self) -> Vec<&MethodInfo>{
+        let mut constructors = Vec::new();
+        for method in &self.methods{
+            if method.name == "<init>"{
+                constructors.push(method);
+            }
+        }
+        constructors
     }
 
     pub fn field_at_index(&self, index: usize) -> Option<&FieldInfo>{

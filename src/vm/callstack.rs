@@ -11,6 +11,7 @@ use crate::vm::value::Reference;
 
 pub struct CallStack<'a>{
     frames: Vec<CallFrame<'a>>,
+    frames_infos : Vec<String>,
     current_frame: Option<RefCell<CallFrame<'a>>>
 }
 
@@ -18,6 +19,7 @@ impl<'a> CallStack<'a> {
     pub fn new() -> Self{
         CallStack{
             frames: Vec::new(),
+            frames_infos : Vec::new(),
             current_frame: None,
         }
     }
@@ -51,12 +53,15 @@ impl<'a> CallStack<'a> {
         };*/
         //self.frames.push(frame_ref);
         //Ok(call_frame)
+        //let last_frame = self.frames.last().unwrap();
+        self.frames_infos.push(format!("{:?} {}", call_frame.pc, call_frame.class_and_method.format()));
         self.frames.push(call_frame);
         Ok(())
     }
 
     pub fn pop_call_frame(&mut self){
-        self.frames.pop();
+        //self.frames.pop();
+        self.frames_infos.pop();
     }
 
     // Execute the last frame on the stack
@@ -88,9 +93,9 @@ impl<'a> CallStack<'a> {
     }
 
     pub fn print_call_stack(&self) {
-        for (index, call_frame) in self.frames.iter().enumerate(){
+        for (index, call_frame_info) in self.frames_infos.iter().enumerate(){
             //error!("[{}]: {:?}, stack={}, locals={}", index, call_frame.pc, call_frame.stack, call_frame.locals);
-            error!("[{}]: {:?} {}", index, call_frame.pc, call_frame.class_and_method.format());
+            error!("[{}]: {}", index, call_frame_info);
         }
     }
 }

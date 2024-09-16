@@ -167,13 +167,17 @@ impl<'a> CallFrame<'a>{
                         }
                         Instruction::ARRAYLENGTH => {
                             debug!("ARRAYLENGTH");
-                            if let Value::Reference(reference) = self.stack.pop().unwrap(){
+                            let popped = self.stack.pop();
+                            if let Some(Value::Reference(reference)) = popped{
                                 if let ReferenceType::Array(_, _, content) = &reference.reference_type{
                                     self.stack.push(Value::Integer(content.borrow().len() as i32));
+                                } else {
+                                    return Err(VmError::ValidationError("Expected an Array ref but found: Object ref".to_string()))
                                 }
-
+                            } else if let Some(Value::Null) = popped{
+                                return Err(VmError::JavaException(JavaError::NullPointerException("Expected an array".to_string())))
                             } else {
-                                warn!("Not an array");
+                                return Err(VmError::ValidationError(format!("Expected an array ref but found: {:?}", &popped)))
                             }
                         }
                         Instruction::DUP => {
@@ -187,6 +191,21 @@ impl<'a> CallFrame<'a>{
                             let value = self.stack.pop().unwrap();
                             self.stack.insert(self.stack.len() - 1, value.clone());
                             self.stack.push(value);
+                        }
+                        Instruction::DUP2 => {
+                            let optional_value1 = self.stack.pop();
+                            let optional_value2 = self.stack.pop();
+                            if let (Some(value1), Some(value2)) = (optional_value1.clone(), optional_value2) {
+                                debug!("DUP2 Comp type 1");
+                                self.stack.push(value2.clone());
+                                self.stack.push(value1.clone());
+                                self.stack.push(value2);
+                                self.stack.push(value1);
+                            } else if let Some(value) = optional_value1{
+                                debug!("DUP2 Comp type 2");
+                                self.stack.push(value.clone());
+                                self.stack.push(value);
+                            }
                         }
                         Instruction::POP => {
                             debug!("POP");
@@ -334,6 +353,9 @@ impl<'a> CallFrame<'a>{
                         Instruction::ICONST4 => { self.execute_iconst(4) }
                         Instruction::ICONST5 => { self.execute_iconst(5) }
 
+                        Instruction::LCONST0 => { self.execute_lconst(0) }
+                        Instruction::LCONST1 => { self.execute_lconst(1) }
+
                         Instruction::FCONST0 => { self.execute_fconst(0) }
                         Instruction::FCONST1 => { self.execute_fconst(1) }
                         Instruction::FCONST2 => { self.execute_fconst(2) }
@@ -347,6 +369,7 @@ impl<'a> CallFrame<'a>{
                         Instruction::ILOAD2 => { self.execute_iload(2)? }
                         Instruction::ILOAD3 => { self.execute_iload(3)? }
 
+                        Instruction::LLOAD(index) => { self.execute_lload(index as usize)? }
                         Instruction::LLOAD0 => { self.execute_lload(0)? }
                         Instruction::LLOAD1 => { self.execute_lload(1)? }
                         Instruction::LLOAD2 => { self.execute_lload(2)? }
@@ -387,40 +410,56 @@ impl<'a> CallFrame<'a>{
                                 self.stack.push(array_ref.get_element(index as usize));
                             }
                         }
-                        Instruction::ISUB => { self.execute_i_arithmetic(|val1, val2| val1.wrapping_sub(val2)) }
-                        Instruction::IMUL => { self.execute_i_arithmetic(|val1, val2| val1.wrapping_mul(val2)) }
-                        Instruction::IADD => { self.execute_i_arithmetic(|val1, val2| val1.wrapping_add(val2)) }
+                        Instruction::ISUB => { self.execute_i_arithmetic(|val1, val2| Ok(val1.wrapping_sub(val2)))? }
+                        Instruction::IMUL => { self.execute_i_arithmetic(|val1, val2| Ok(val1.wrapping_mul(val2)))? }
+                        Instruction::IADD => { self.execute_i_arithmetic(|val1, val2| Ok(val1.wrapping_add(val2)))? }
                         //TODO check if val2 is zero -> error
-                        Instruction::IREM => { self.execute_i_arithmetic(|val1, val2| val1.wrapping_rem(val2)) }
-                        Instruction::IDIV => { self.execute_i_arithmetic(|val1, val2| val1.wrapping_div(val2)) }
+                        Instruction::IREM => { self.execute_i_arithmetic(|val1, val2| Ok(val1.wrapping_rem(val2)))? }
+                        Instruction::IDIV => { self.execute_i_arithmetic(|val1, val2| Ok(val1.wrapping_div(val2)))? }
                         Instruction::INEG => {
                             let value = self.pop_int()?;
                             debug!("INEG");
                             self.stack.push(Value::Integer(-value))
                         }
-                        Instruction::IXOR => { self.execute_i_arithmetic(|val1, val2| val1 ^ val2) }
-                        Instruction::IAND => { self.execute_i_arithmetic(|val1, val2| val1 & val2) }
-                        Instruction::IOR  => { self.execute_i_arithmetic(|val1, val2| val1 | val2) }
-                        Instruction::ISHL => { self.execute_i_arithmetic(|val1, val2| val1 << (val2 & 0x1f)) }
-                        Instruction::ISHR => { self.execute_i_arithmetic(|val1, val2| val1 >> (val2 & 0x1f)) }
+                        Instruction::IXOR => { self.execute_i_arithmetic(|val1, val2| Ok(val1 ^ val2))? }
+                        Instruction::IAND => { self.execute_i_arithmetic(|val1, val2| Ok(val1 & val2))? }
+                        Instruction::IOR  => { self.execute_i_arithmetic(|val1, val2| Ok(val1 | val2))? }
+                        Instruction::ISHL => { self.execute_i_arithmetic(|val1, val2| Ok(val1 << (val2 & 0x1f)))? }
+                        Instruction::ISHR => { self.execute_i_arithmetic(|val1, val2| Ok(val1 >> (val2 & 0x1f)))? }
                         Instruction::IUSHR => { self.execute_i_arithmetic(|val1, val2| {
                             if val1 > 0{
-                                val1 >> (val2 & 0x1f)
+                                Ok(val1 >> (val2 & 0x1f))
                             } else {
-                                ((val1 as u32) >> (val2 & 0x1f)) as i32
+                                Ok(((val1 as u32) >> (val2 & 0x1f)) as i32)
                             }
-                        })}
-                        Instruction::LAND => { self.execute_j_arithmetic(|val1, val2| val1 & val2) },
+                        })?}
+                        Instruction::LADD => { self.execute_j_arithmetic(|val1, val2| Ok(val1.wrapping_add(val2)))? }
+                        Instruction::LAND => { self.execute_j_arithmetic(|val1, val2| Ok(val1 & val2))? },
                         Instruction::LUSHR => { self.execute_ji_arithmetic(|val1, val2| {
                             if val1 > 0{
-                                val1 >> (val2 & 0x1f)
+                                Ok(val1 >> (val2 & 0x1f))
                             } else {
-                                ((val1 as u64) >> (val2 & 0x1f)) as i64
+                                Ok(((val1 as u64) >> (val2 & 0x1f)) as i64)
                             }
-                        })}
-                        Instruction::FMUL => { self.execute_f_arithmetic(|val1, val2| val1 * val2) }
-                        Instruction::DADD => { self.execute_d_arithmetic(|val1, val2| val1 + val2) }
-                        Instruction::DDIV => { self.execute_d_arithmetic(|val1, val2| val1 / val2) }
+                        })?}
+                        Instruction::FMUL => { self.execute_f_arithmetic(|val1, val2| Ok(val1 * val2))? }
+                        Instruction::FDIV => { self.execute_f_arithmetic(
+                            |val1, val2|
+                            if val2 != 0.0 {
+                                Ok(val1 / val2)
+                            } else {
+                                Err(VmError::JavaException(JavaError::DivisionByZero))
+                            }
+                        )?}
+                        Instruction::DADD => { self.execute_d_arithmetic(|val1, val2| Ok(val1 + val2))? }
+                        Instruction::DDIV => { self.execute_d_arithmetic(
+                            |val1, val2|
+                            if val2 != 0.0 {
+                                Ok(val1 / val2)
+                            } else {
+                                Err(VmError::JavaException(JavaError::DivisionByZero))
+                            }
+                        )?}
 
                         Instruction::I2L => {
                             let value = self.stack.pop().unwrap();
@@ -624,6 +663,11 @@ impl<'a> CallFrame<'a>{
         self.stack.push(Value::Integer(value as i32))
     }
 
+    fn execute_lconst(&mut self, value: isize){
+        debug!("LCONST {:?}", value);
+        self.stack.push(Value::Long(value as i64))
+    }
+
     fn execute_fconst(&mut self, value: usize){
         debug!("FCONST {:?}", value);
         self.stack.push(Value::Float(value as f32))
@@ -634,63 +678,73 @@ impl<'a> CallFrame<'a>{
         self.stack.push(Value::Double(value as f64))
     }
 
-    fn execute_i_arithmetic<F: FnOnce(i32, i32) -> i32>(&mut self, f: F){
+    fn execute_i_arithmetic<F: FnOnce(i32, i32) -> Result<i32, VmError>>(&mut self, f: F) -> Result<(), VmError>{
         let value2 = self.stack.pop();
         let value1 = self.stack.pop();
         if let (Some(Value::Integer(val1)), Some(Value::Integer(val2))) = (value1, value2){
-            let res = f(val1, val2);
+            let res = f(val1, val2)?;
             debug!("Integer ARITHMETIC {}&{}={}", val1, val2, res);
-            self.stack.push(Value::Integer(res))
+            self.stack.push(Value::Integer(res));
+            Ok(())
         } else {
             warn!("dat sin nich zwee ints to keck");
+            Err(VmError::ValidationError("Expected two ints".to_string()))
         }
     }
 
-    fn execute_ji_arithmetic<F: FnOnce(i64, i32) -> i64>(&mut self, f: F){
+    fn execute_ji_arithmetic<F: FnOnce(i64, i32) -> Result<i64, VmError>>(&mut self, f: F) -> Result<(), VmError>{
         let value2 = self.stack.pop();
         let value1 = self.stack.pop();
         if let (Some(Value::Long(val1)), Some(Value::Integer(val2))) = (value1, value2){
-            let res = f(val1, val2);
+            let res = f(val1, val2)?;
             debug!("LongInt ARITHMETIC {}&{}={}", val1, val2, res);
-            self.stack.push(Value::Long(res))
+            self.stack.push(Value::Long(res));
+            Ok(())
         } else {
             warn!("dat sin nich eene long und eene int du keck");
+            Err(VmError::ValidationError("Expected an int and a long".to_string()))
         }
     }
 
-    fn execute_j_arithmetic<F: FnOnce(i64, i64) -> i64>(&mut self, f: F){
+    fn execute_j_arithmetic<F: FnOnce(i64, i64) -> Result<i64, VmError>>(&mut self, f: F) -> Result<(), VmError>{
         let value2 = self.stack.pop();
         let value1 = self.stack.pop();
         if let (Some(Value::Long(val1)), Some(Value::Long(val2))) = (value1, value2){
-            let res = f(val1, val2);
+            let res = f(val1, val2)?;
             debug!("Long ARITHMETIC {}&{}={}", val1, val2, res);
-            self.stack.push(Value::Long(res))
+            self.stack.push(Value::Long(res));
+            Ok(())
         } else {
             warn!("dat sin nich zwee longse to keck");
+            Err(VmError::ValidationError("Expected two longs".to_string()))
         }
     }
 
-    fn execute_f_arithmetic<F: FnOnce(f32, f32) -> f32>(&mut self, f: F){
+    fn execute_f_arithmetic<F: FnOnce(f32, f32) -> Result<f32, VmError>>(&mut self, f: F) -> Result<(), VmError>{
         let value2 = self.stack.pop();
         let value1 = self.stack.pop();
         if let (Some(Value::Float(val1)), Some(Value::Float(val2))) = (value1, value2){
-            let res = f(val1, val2);
+            let res = f(val1, val2)?;
             debug!("Float ARITHMETIC {}&{}={}", val1, val2, res);
-            self.stack.push(Value::Float(res))
+            self.stack.push(Value::Float(res));
+            Ok(())
         } else {
             warn!("dat sin nich zwee floatse to keck");
+            Err(VmError::ValidationError("Expected two floats".to_string()))
         }
     }
 
-    fn execute_d_arithmetic<F: FnOnce(f64, f64) -> f64>(&mut self, f: F){
+    fn execute_d_arithmetic<F: FnOnce(f64, f64) -> Result<f64, VmError>>(&mut self, f: F) -> Result<(), VmError>{
         let value2 = self.stack.pop();
         let value1 = self.stack.pop();
         if let (Some(Value::Double(val1)), Some(Value::Double(val2))) = (value1, value2){
-            let res = f(val1, val2);
+            let res = f(val1, val2)?;
             debug!("Double ARITHMETIC {}&{}={}", val1, val2, res);
-            self.stack.push(Value::Double(res))
+            self.stack.push(Value::Double(res));
+            Ok(())
         } else {
             warn!("dat sin nich zwee doppelte to keck");
+            Err(VmError::ValidationError("Expected two doubles".to_string()))
         }
     }
 
@@ -723,6 +777,25 @@ impl<'a> CallFrame<'a>{
             }
             args.insert(0, popped);
         }
+        if class_name.starts_with("["){
+            let receiver = self.stack.pop().unwrap();
+            return if let Value::Reference(array_ref) = receiver{
+                if method_name == "clone"{
+                    if let ReferenceType::Array(dims, field_type, content) = &array_ref.reference_type{
+                        debug!("Cloning array: {:?}", receiver);
+                        self.stack.push(Value::Reference(vm.new_array(*dims, field_type.clone(), content.clone())?));
+                        Ok(())
+                    } else {
+                        Err(VmError::ValidationError("Expected array to be cloned".to_string()))
+                    }
+                } else {
+                    Err(VmError::MethodCallError(format!("Method {} not supported for arrays", method_name)))
+                }
+            } else {
+                Err(VmError::ValidationError("Expected array as receiver".to_string()))
+            };
+        }
+
         trace!("loading class to execute on: '{}'", class_name.as_str());
         let class = vm.get_or_resolve_class(class_name.as_str())?;
         trace!("finished loading class to execute on: '{}'", class_name.as_str());
@@ -741,8 +814,7 @@ impl<'a> CallFrame<'a>{
             if let Some(Value::Reference(reference)) = popped{
                 Some(reference)
             } else {
-                warn!("Expected object or array");
-                None
+                return Err(VmError::ValidationError(format!("Expected object or array as receiver for {} but found: {:?}", class_and_method.format(), popped)));
             }
         };
         let class_and_method = match kind {
@@ -771,7 +843,7 @@ impl<'a> CallFrame<'a>{
         for (index, value) in self.locals.iter().enumerate(){
             trace!("    [{}] {:?}", index, value);
         }
-        debug!("INVOKE{:?}: {}{} {:?}", kind, method_name, descriptor, receiver);
+        debug!("INVOKE{:?}: {}{} on {:?}", kind, method_name, descriptor, receiver);
         let res = vm.invoke(class_and_method, receiver, args)?;
         if res.is_some(){
             self.stack.push(res.unwrap())
