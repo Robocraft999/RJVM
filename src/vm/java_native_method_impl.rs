@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::time::{SystemTime, UNIX_EPOCH};
 use log::{debug, warn};
-use crate::field_info::{FieldType, PrimitiveType};
+use crate::field_info::{field_type_from_str, FieldType, PrimitiveType};
 use crate::method_info::MethodDescriptor;
 use crate::vm::class::{ClassAndMethod, ClassRef};
 use crate::vm::java_error::JavaError;
@@ -147,8 +147,13 @@ fn delegate_get_primitive_class<'a>(vm: &mut VM<'a>, _ : ClassRef<'a>, _: Option
     }
 }
 
-fn delegate_get_component_type<'a>(vm: &mut VM<'a>, _ : ClassRef<'a>, class_object: Option<Reference<'a>>, args: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
-    debug!("getComponentType");
+fn delegate_get_component_type<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, class_object: Option<Reference<'a>>, args: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
+    debug!("getComponentType \n'{:?}'\n'{:?}'", class_object, args);
+    let class_name = vm.extract_string_from_object(&class_object.unwrap().get_field(5))?;
+    let field_type = field_type_from_str(class_name.as_str());
+    debug!("getComponentType '{:?}'", field_type);
+
+    Ok(None)
 }
 
 fn delegate_get_classloader<'a>(vm: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{

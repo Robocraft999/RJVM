@@ -1,11 +1,13 @@
 use std::collections::HashMap;
-
+use regex::Regex;
 use typed_arena::Arena;
 
 use crate::{ClassFile, parse_class_file};
-use crate::field_info::field_type_from_str;
-use crate::vm::class::{Class, ClassId, ClassRef};
+use crate::error::ClassParseError;
+use crate::field_info::{field_type_from_str, parse_field_type};
+use crate::vm::class::{ArrayInfo, Class, ClassId, ClassRef};
 use crate::vm::class_path::ClassPath;
+use crate::vm::class_path_entry::ClassLoadingError;
 use crate::vm::VmError;
 
 #[derive(Debug, Clone)]
@@ -58,6 +60,7 @@ impl<'a> ClassManager<'a>{
     }
 
     pub fn resolve_class(&mut self, class_name: &str) -> Result<ClassesToInitialize<'a>, VmError>{
+        let (class_name, array_info) = self.try_create_array_class(class_name)?;
         let parsed_class = parse_class_file(&self.class_path, class_name)?;
         let next_id = self.next_id;
         self.next_id += 1;
@@ -124,6 +127,24 @@ impl<'a> ClassManager<'a>{
             resolved_classes.insert(interface_name.clone(), resolved_class);
         }
         Ok(resolved_classes)
+    }
+
+    fn try_create_array_class(&self, class_name: &str) -> Result<(&str, Option<ArrayInfo>), VmError>{
+        let r = Regex::new(r"(?<array>\[+)?(?:(?<primitive>[ZBSIJFDC])|(?<object>[/a-zA-Z$0-9]+))").unwrap();
+        if let Some(cap) = r.captures(class_name){
+            if let Some(arr) = cap.name("array"){
+                let dims = arr.len();
+                let array_info = ArrayInfo{
+                    dims,
+                    component_type: parse_field_type(cap.name("object").map(|m| m.as_str()), cap.name("primitive").map(|m| m.as_str()), cap.name("array").map(|m| m.as_str()))
+                };
+                Ok((class_name, Some(array_info)))
+            } else {
+                Ok((class_name, None))
+            }
+        } else {
+            Err(VmError::ValidationError("ClassParseError".to_string()))
+        }
     }
 
     pub fn find_class_by_name(&self, class_name: &str) -> Option<ClassRef<'a>>{

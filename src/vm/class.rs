@@ -19,6 +19,7 @@ pub struct Class<'a>{
     pub methods: Vec<MethodInfo>,
     pub transitive_field_count: usize,
     pub first_field_index: usize,
+    pub array_info: Option<ArrayInfo>
 }
 
 impl<'a> Class<'a>{
@@ -137,6 +138,11 @@ pub type ClassRef<'a> = &'a Class<'a>;
 
 #[derive(Debug, PartialEq, Clone, Copy, Eq, Hash)]
 pub struct ClassId(pub u32);
+
+pub struct ArrayInfo{
+    pub(crate) dims: usize,
+    pub(crate) component_type: FieldType
+}
 
 #[derive(Debug, Clone)]
 pub struct ClassAndMethod<'a> {
