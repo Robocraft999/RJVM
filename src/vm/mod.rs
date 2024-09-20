@@ -20,6 +20,7 @@ use crate::vm::class_manager::ResolvedClass;
 use crate::vm::gc::ObjectAllocator;
 use crate::vm::java_error::JavaError;
 use crate::vm::java_native_method_impl::{NativeMethodRegistry, register_all_natives};
+use crate::vm::r#unsafe::Unsafe;
 use crate::vm::value::{Reference, ReferenceType};
 
 pub mod class_path;
@@ -32,13 +33,16 @@ mod callstack;
 pub mod class;
 mod gc;
 mod java_native_method_impl;
+mod r#unsafe;
 
 pub struct VM<'a>{
     pub class_manager: ClassManager<'a>,
     pub call_stack: CallStack<'a>,
     pub object_allocator: ObjectAllocator<'a>,
+    pub unsafe_allocator: Unsafe,
     pub static_class_objects: HashMap<ClassId, Reference<'a>>,
     pub string_objects: HashMap<String, Reference<'a>>,
+    pub class_objects: HashMap<ClassId, Reference<'a>>,
     pub native_method_registry: NativeMethodRegistry<'a>,
     pub current_thread: Option<Reference<'a>>
 }
@@ -48,12 +52,15 @@ impl<'a> VM<'a>{
         let class_manager = ClassManager::new(class_path);
         let mut native_method_registry = NativeMethodRegistry::new();
         register_all_natives(&mut native_method_registry);
+        let unsafe_allocator = Unsafe::new();
         Self{
             class_manager,
             object_allocator: ObjectAllocator::new(),
+            unsafe_allocator,
             call_stack: CallStack::new(),
             static_class_objects: HashMap::new(),
             string_objects: HashMap::new(),
+            class_objects: HashMap::new(),
             native_method_registry,
             current_thread: None
         }
@@ -145,7 +152,23 @@ impl<'a> VM<'a>{
     }
 
     pub fn new_array(&mut self, dims: usize, field_type: FieldType, content: RefCell<Vec<Value<'a>>>) -> Result<Reference<'a>, VmError>{
-        let class_name = field_type.to_class_name();
+        let class_name = match field_type.clone(){
+            FieldType::Object(class_name) => {
+                "[L".to_string() + &class_name + ";"
+            }
+            FieldType::Primitive(primitive_type) => {
+                "[".to_string() + match primitive_type {
+                    PrimitiveType::Boolean => "Z",
+                    PrimitiveType::Byte => "B",
+                    PrimitiveType::Char => "C",
+                    PrimitiveType::Short => "S",
+                    PrimitiveType::Integer => "I",
+                    PrimitiveType::Long => "J",
+                    PrimitiveType::Float => "F",
+                    PrimitiveType::Double => "D",
+                }
+            }
+        };
         let class = self.get_or_resolve_class(class_name.as_str())?;
         Ok(self.object_allocator.allocate_array(class, dims, field_type, content))
     }
@@ -185,11 +208,20 @@ impl<'a> VM<'a>{
     }
 
     pub fn new_class_object(&mut self, class_name: String) -> Result<Reference<'a>, VmError>{
-        let class_object = self.new_object("java/lang/Class")?;
-        let string_object = self.new_string_object(class_name)?;
+        let class = self.get_or_resolve_class(class_name.as_str())?;
+        let class_id = class.id;
 
-        class_object.set_field(5, Value::Reference(string_object));
-        Ok(class_object)
+        if !self.class_objects.contains_key(&class_id){
+            let class_object = self.new_object("java/lang/Class")?;
+            let string_object = self.new_string_object(class_name)?;
+
+            class_object.set_field(5, Value::Reference(string_object));
+
+            self.class_objects.insert(class_id, class_object);
+            Ok(class_object)
+        } else {
+            Ok(self.class_objects[&class_id])
+        }
     }
 
     pub fn extract_class_from_class_object(&mut self, object: Reference<'a>) -> Result<ClassRef<'a>, VmError>{

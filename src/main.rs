@@ -465,8 +465,6 @@ fn main() {
     class_path.push("resources;resources/rt.jar").expect("TODO: panic message");
 
     let mut vm = VM::new(class_path);
-    //vm.get_or_resolve_class("java/lang/CharacterDataLatin1").expect("msg");
-    //return;
 
     match init_vm(&mut vm) {
         Ok(_) => {}

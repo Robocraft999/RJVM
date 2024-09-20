@@ -60,8 +60,8 @@ impl<'a> ClassManager<'a>{
     }
 
     pub fn resolve_class(&mut self, class_name: &str) -> Result<ClassesToInitialize<'a>, VmError>{
-        let (class_name, array_info) = self.try_create_array_class(class_name)?;
-        let parsed_class = parse_class_file(&self.class_path, class_name)?;
+        let (class_to_load_name, array_info) = self.try_create_array_class(class_name)?;
+        let parsed_class = parse_class_file(&self.class_path, class_to_load_name.as_str())?;
         let next_id = self.next_id;
         self.next_id += 1;
 
@@ -77,7 +77,7 @@ impl<'a> ClassManager<'a>{
 
         let class = Class {
             id: ClassId(next_id),
-            name: parsed_class.name,
+            name: class_name.to_string(),
             source_file: parsed_class.source_file,
             constants: parsed_class.constant_pool,
             flags: parsed_class.access_flags,
@@ -87,6 +87,7 @@ impl<'a> ClassManager<'a>{
             methods: parsed_class.methods,
             transitive_field_count: superclass_field_count + fields_count,
             first_field_index: superclass_field_count,
+            array_info
         };
 
         let class_ref = self.classes.alloc(class);
@@ -101,6 +102,13 @@ impl<'a> ClassManager<'a>{
         for resolved_class in resolved_classes.values() {
             if let ResolvedClass::NewClass(new_class) = resolved_class {
                 for to_initialize in new_class.to_initialize.iter() {
+                    classes_to_init.push(to_initialize)
+                }
+            }
+        }
+        if class_ref.array_info.is_some() {
+            if let ResolvedClass::NewClass(array_class) = self.get_or_resolve_class(class_to_load_name.as_str())? {
+                for to_initialize in array_class.to_initialize.iter() {
                     classes_to_init.push(to_initialize)
                 }
             }
@@ -129,21 +137,24 @@ impl<'a> ClassManager<'a>{
         Ok(resolved_classes)
     }
 
-    fn try_create_array_class(&self, class_name: &str) -> Result<(&str, Option<ArrayInfo>), VmError>{
-        let r = Regex::new(r"(?<array>\[+)?(?:(?<primitive>[ZBSIJFDC])|(?<object>[/a-zA-Z$0-9]+))").unwrap();
+    fn try_create_array_class(&self, class_name: &str) -> Result<(String, Option<ArrayInfo>), VmError>{
+        let r = Regex::new(r"(?<array>\[+)?(?:(?<primitive>[ZBSIJFDC])|L(?<object>[/a-zA-Z$0-9]+);)").unwrap();
         if let Some(cap) = r.captures(class_name){
             if let Some(arr) = cap.name("array"){
                 let dims = arr.len();
+                let component_type = parse_field_type(cap.name("object").map(|m| m.as_str()), cap.name("primitive").map(|m| m.as_str()), None);
+                let new_class_name = component_type.to_class_name();
+                println!("{}", new_class_name);
                 let array_info = ArrayInfo{
                     dims,
-                    component_type: parse_field_type(cap.name("object").map(|m| m.as_str()), cap.name("primitive").map(|m| m.as_str()), cap.name("array").map(|m| m.as_str()))
+                    component_type,
                 };
-                Ok((class_name, Some(array_info)))
+                Ok((new_class_name, Some(array_info)))
             } else {
-                Ok((class_name, None))
+                Ok((class_name.to_string(), None))
             }
         } else {
-            Err(VmError::ValidationError("ClassParseError".to_string()))
+            Ok((class_name.to_string(), None))
         }
     }
 

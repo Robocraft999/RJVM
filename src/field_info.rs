@@ -26,10 +26,10 @@ pub fn field_type_from_str(string: &str) -> FieldType{
 
 //FIXME not sure about this tbo
 pub fn parse_field_type(object: Option<&str>, primitive: Option<&str>, array: Option<&str>) -> FieldType{
-    let field_type = if let Some(prim) = primitive{
-        FieldType::Primitive(PrimitiveType::from_str(prim).unwrap())
-    } else if let Some(obj) = object{
+    let field_type = if let Some(obj) = object{
         FieldType::Object(String::from(obj))
+    }else if let Some(prim) = primitive{
+        FieldType::Primitive(PrimitiveType::from_str(prim).unwrap())
     } else {
         unreachable!("Type is neither object nor primitive")
     };
@@ -81,6 +81,35 @@ impl FieldType {
         }
     }
 }
+pub fn get_primitive_class(short_name: &str) -> String{
+    match short_name {
+        "Z" => "java/lang/Boolean",
+        "B" => "java/lang/Byte",
+        "C" => "java/lang/Character",
+        "S" => "java/lang/Short",
+        "I" => "java/lang/Integer",
+        "J" => "java/lang/Long",
+        "F" => "java/lang/Float",
+        "D" => "java/lang/Double",
+        _   => unreachable!("Type is not primitive")
+    }.to_string()
+}
+/**
+* class_name without L{class_name};
+*/
+pub fn get_class_descriptor(class_name: &str) -> String{
+    match class_name {
+        "java/lang/Boolean" => "Z".to_string(),
+        "java/lang/Byte" => "B".to_string(),
+        "java/lang/Character" => "C".to_string(),
+        "java/lang/Short" => "S".to_string(),
+        "java/lang/Integer" => "I".to_string(),
+        "java/lang/Long" => "J".to_string(),
+        "java/lang/Float" => "F".to_string(),
+        "java/lang/Double" => "D".to_string(),
+        _ => "L".to_string() + class_name + ";"
+    }
+}
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum PrimitiveType{
@@ -107,7 +136,9 @@ impl FromStr for PrimitiveType{
             "F" => Ok(Self::Float),
             "D" => Ok(Self::Double),
             "C" => Ok(Self::Char),
-            _   => unreachable!()
+            //FIXME böse böse böse
+            _ => Err(())
+            //_   => unreachable!()
         }
     }
 }

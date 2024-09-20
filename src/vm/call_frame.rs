@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
 use std::rc::Rc;
 use log::{debug, error, info, trace, warn};
@@ -50,10 +51,10 @@ impl<'a> CallFrame<'a>{
                         }
                         Instruction::PUTSTATIC(index) => {
                             let (class_name, field_name, descriptor) = self.class_and_method.get_constant_field_info_descriptor(index).expect("GIB MICH DIE FELD");
-                            let (field_index, info) = self.class_and_method.class.find_field(field_name.as_str()).unwrap();
+                            let (field_index, info, class_id) = self.class_and_method.class.find_field_static(field_name.as_str()).unwrap();
                             debug!("PUTSTATIC {} {} {} {:?}", field_name, descriptor, field_index, info);
                             let value = self.stack.pop().unwrap();
-                            let class_id = vm.class_manager.find_class_by_name(class_name.as_str()).unwrap().id;
+                            //let class_id = vm.class_manager.find_class_by_name(class_name.as_str()).unwrap().id;
                             let object = vm.get_static_class_object(class_id).unwrap();
                             object.set_field(field_index, value);
                         }
@@ -62,8 +63,8 @@ impl<'a> CallFrame<'a>{
                             //let (field_index, info) = self.class_and_method.class.find_field(field_name.as_str()).unwrap();
                             //let class = vm.class_manager.find_class_by_name(class_name.as_str()).unwrap();
                             let class = vm.get_or_resolve_class(class_name.as_str())?;
-                            let (field_index, info) = class.find_field(field_name.as_str()).unwrap();
-                            let object = vm.get_static_class_object(class.id).unwrap();
+                            let (field_index, info, class_id) = class.find_field_static(field_name.as_str()).unwrap();
+                            let object = vm.get_static_class_object(class_id).unwrap();
                             debug!("GETSTATIC {} {} {} {:?}", field_name, descriptor, field_index, info);
                             self.stack.push(object.get_field(field_index));
                         }
@@ -223,6 +224,10 @@ impl<'a> CallFrame<'a>{
                                         self.pc.0 = offset
                                     }
                                 }
+                                /*(Value::Reference(_), Value::Null) | (Value::Null, Value::Reference(_)) => {
+                                    debug!("IF_ACMPNE One is null");
+                                    self.pc.0 = offset
+                                }*/
                                 _ => {}
                             };
                         }
@@ -235,6 +240,10 @@ impl<'a> CallFrame<'a>{
                                     if obj1.id == obj2.id {
                                         self.pc.0 = offset
                                     }
+                                }
+                                (Value::Null, Value::Null) => {
+                                    debug!("IF_ACMPEQ Both Null");
+                                    self.pc.0 = offset
                                 }
                                 _ => {}
                             };
@@ -319,6 +328,22 @@ impl<'a> CallFrame<'a>{
                             debug!("GOTO {}", offset);
                             self.pc.0 = offset
                         }
+                        Instruction::LOOKUPSWITCH(default, pair_stream) => {
+                            let popped = self.pop_int()?;
+                            debug!("LOOKUPSWITCH: {}", popped);
+                            let mut use_default = true;
+                            for chunk in pair_stream.chunks(2){
+                                let (int_match, offset) = (chunk[0], chunk[1]);
+                                if int_match == popped{
+                                    self.pc.0 = offset as u16;
+                                    use_default = false;
+                                    break;
+                                }
+                            }
+                            if use_default{
+                                self.pc.0 = default as u16;
+                            }
+                        }
                         Instruction::ISTORE(index) => { self.execute_istore(index as usize)? }
                         Instruction::ISTORE0 => { self.execute_istore(0)? }
                         Instruction::ISTORE1 => { self.execute_istore(1)? }
@@ -335,12 +360,12 @@ impl<'a> CallFrame<'a>{
                         Instruction::ASTORE1 => { self.execute_astore(1)? }
                         Instruction::ASTORE2 => { self.execute_astore(2)? }
                         Instruction::ASTORE3 => { self.execute_astore(3)? }
-                        Instruction::IASTORE | Instruction::AASTORE | Instruction::CASTORE => {
+                        Instruction::IASTORE | Instruction::AASTORE | Instruction::CASTORE | Instruction::BASTORE => {
                             //TODO validate type of value to fit instruction
                             let value = self.stack.pop().unwrap();
                             let index = self.pop_int()?;
                             let popped = self.stack.pop().unwrap();
-                            debug!("{:?}", popped);
+                            debug!("XASTORE: {:?}", popped);
                             if let Value::Reference(array_ref) = popped{
                                 array_ref.set_element(index as usize, value);
                             }
@@ -460,14 +485,22 @@ impl<'a> CallFrame<'a>{
                                 Err(VmError::JavaException(JavaError::DivisionByZero))
                             }
                         )?}
-
+                        Instruction::I2B => {
+                            let value = self.stack.pop().unwrap();
+                            debug!("I2B");
+                            if let Value::Integer(int) = value {
+                                self.stack.push(Value::Integer(int));
+                            } else {
+                                warn!("I2B Conversion failed, because {value:?} is not of type Int")
+                            }
+                        }
                         Instruction::I2L => {
                             let value = self.stack.pop().unwrap();
                             debug!("I2L");
                             if let Value::Integer(long) = value {
                                 self.stack.push(Value::Long(long as i64));
                             } else {
-                                warn!("I2L Conversion failed, because {value:?} is not of type Integet")
+                                warn!("I2L Conversion failed, because {value:?} is not of type Int")
                             }
                         }
                         Instruction::I2F => {
@@ -572,7 +605,7 @@ impl<'a> CallFrame<'a>{
             self.locals[index] = popped.unwrap();
             Ok(())
         } else {
-            Err(VmError::ValidationError(format!("ISTORE{} failed, because stack[{}] was {:?} and not and Integer", index, index, popped)))
+            Err(VmError::ValidationError(format!("ISTORE{} failed, because stack[{}] was {:?} and not Integer", index, index, popped)))
         }
     }
     fn execute_lstore(&mut self, index: usize) -> Result<(), VmError>{
@@ -582,7 +615,7 @@ impl<'a> CallFrame<'a>{
             self.locals[index] = popped.unwrap();
             Ok(())
         } else {
-            Err(VmError::ValidationError(format!("LSTORE{} failed, because stack[{}] was {:?} and not and Long", index, index, popped)))
+            Err(VmError::ValidationError(format!("LSTORE{} failed, because stack[{}] was {:?} and not Long", index, index, popped)))
         }
     }
 
@@ -594,7 +627,7 @@ impl<'a> CallFrame<'a>{
             self.locals[index] = value;
             Ok(())
         } else {
-            Err(VmError::ValidationError(format!("ASTORE{} failed, because stack[{}] was {:?} and not and Object", index, index, popped)))
+            Err(VmError::ValidationError(format!("ASTORE{} failed, because stack[{}] was {:?} and not Object", index, index, popped)))
         }
     }
 
@@ -605,7 +638,7 @@ impl<'a> CallFrame<'a>{
             debug!("ILOAD{} {:?}", index, value);
             Ok(())
         } else {
-            Err(VmError::ValidationError(format!("ILOAD{} failed, because locals[{}] was {:?} and not and Integer", index, index, local)))
+            Err(VmError::ValidationError(format!("ILOAD{} failed, because locals[{}] was {:?} and not Integer", index, index, local)))
         }
     }
 
@@ -616,7 +649,7 @@ impl<'a> CallFrame<'a>{
             debug!("LLOAD{} {:?}", index, value);
             Ok(())
         } else {
-            Err(VmError::ValidationError(format!("LLOAD{} failed, because locals[{}] was {:?} and not and Long", index, index, local)))
+            Err(VmError::ValidationError(format!("LLOAD{} failed, because locals[{}] was {:?} and not Long", index, index, local)))
         }
     }
 
@@ -627,7 +660,7 @@ impl<'a> CallFrame<'a>{
             debug!("FLOAD{} {:?}", index, value);
             Ok(())
         } else {
-            Err(VmError::ValidationError(format!("FLOAD{} failed, because locals[{}] was {:?} and not and Float", index, index, local)))
+            Err(VmError::ValidationError(format!("FLOAD{} failed, because locals[{}] was {:?} and not Float", index, index, local)))
         }
     }
 
@@ -638,7 +671,7 @@ impl<'a> CallFrame<'a>{
             debug!("DLOAD{} {:?}", index, value);
             Ok(())
         } else {
-            Err(VmError::ValidationError(format!("DLOAD{} failed, because locals[{}] was {:?} and not and Double", index, index, local)))
+            Err(VmError::ValidationError(format!("DLOAD{} failed, because locals[{}] was {:?} and not Double", index, index, local)))
         }
     }
 

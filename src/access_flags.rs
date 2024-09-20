@@ -28,7 +28,7 @@ pub fn parse_class_flags(flags: u16) -> ClassFlags{
     flags_parsed
 }
 
-#[derive(Debug, PartialEq, FromRepr)]
+#[derive(Debug, PartialEq, FromRepr, Clone)]
 #[repr(u16)]
 pub enum FieldFlag{
     Public     = 0x0001,
@@ -56,7 +56,7 @@ pub fn parse_field_flags(flags: u16) -> FieldFlags{
     flags_parsed
 }
 
-#[derive(Debug, PartialEq, FromRepr)]
+#[derive(Debug, PartialEq, FromRepr, Clone)]
 #[repr(u16)]
 pub enum MethodFlag{
     Public       = 0x0001,

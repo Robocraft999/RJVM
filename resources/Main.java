@@ -29,6 +29,8 @@ public class Main{
 
 		X res = map.get(firstKey);
 
+		System.out.println("Test");
+
         //Car car = new Car();
 	}
 

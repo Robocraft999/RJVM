@@ -28,14 +28,22 @@ impl<'a> Class<'a>{
     }
 
     pub fn find_field(&self, field_name: &str) -> Option<(usize, &FieldInfo)>{
+        if let Some((index, info, _)) = self.find_field_static(field_name){
+            Some((index, info))
+        } else {
+            None
+        }
+    }
+
+    pub fn find_field_static(&self, field_name: &str) -> Option<(usize, &FieldInfo, ClassId)>{
         self.fields
             .iter()
             .enumerate()
             .find(|(i, f)| f.name == field_name)
-            .map(|(index, field)| (index + self.first_field_index, field))
+            .map(|(index, field)| (index + self.first_field_index, field, self.id))
             .or_else(|| {
                 if let Some(superclass) = &self.superclass{
-                    superclass.find_field(field_name)
+                    superclass.find_field_static(field_name)
                 } else {
                     None
                 }
@@ -130,6 +138,7 @@ impl<'a> Debug for Class<'a>{
             .field("source_file", &self.source_file)
             .field("constants", &self.constants)
             .field("flags", &self.flags)
+            .field("array_info", &self.array_info)
             .finish()
     }
 }
@@ -139,6 +148,7 @@ pub type ClassRef<'a> = &'a Class<'a>;
 #[derive(Debug, PartialEq, Clone, Copy, Eq, Hash)]
 pub struct ClassId(pub u32);
 
+#[derive(Debug)]
 pub struct ArrayInfo{
     pub(crate) dims: usize,
     pub(crate) component_type: FieldType

@@ -74,20 +74,23 @@ pub fn parse_instruction(code_bytes: &Vec<u8>, mut pc: usize) -> Result<(Instruc
 
                 TABLESWITCH
             }
-            LOOKUPSWITCH => {
+            LOOKUPSWITCH(_, _) => {
                 let padding = (4 - (pc % 4)) % 4;
+                let instruction_pc = pc - 1;
                 for _ in 0..padding{
                     parse_u1(code_bytes, &mut pc)?;
                 }
 
-                let default = parse_i4(code_bytes, &mut pc)?;
+                let default = (instruction_pc as i32 + parse_i4(code_bytes, &mut pc)?) as u32;
                 let npairs = parse_i4(code_bytes, &mut pc)?;
 
                 let mut offsets = Vec::new();
                 for _ in 0..npairs{
                     offsets.push(parse_i4(code_bytes, &mut pc)?);
+                    //TODO check if this could overflow
+                    offsets.push(instruction_pc as i32 + parse_i4(code_bytes, &mut pc)?) ;
                 }
-                LOOKUPSWITCH
+                LOOKUPSWITCH(default, offsets)
             }
             INVOKEVIRTUAL(_) => INVOKEVIRTUAL(parse_u2(code_bytes, &mut pc)?),
             INVOKESPECIAL(_) => INVOKESPECIAL(parse_u2(code_bytes, &mut pc)?),
@@ -166,7 +169,7 @@ pub fn parse_instruction(code_bytes: &Vec<u8>, mut pc: usize) -> Result<(Instruc
     Ok((result, pc))
 }
 
-#[derive(Debug, PartialEq, FromRepr, Copy, Clone)]
+#[derive(Debug, PartialEq, FromRepr, Clone)]
 #[repr(u8)]
 pub enum Instruction{
     NOP         = 0x0,
@@ -370,7 +373,7 @@ pub enum Instruction{
     RET(u8)        = 0xa9,
 
     TABLESWITCH    = 0xaa,
-    LOOKUPSWITCH   = 0xab,
+    LOOKUPSWITCH(u32, Vec<i32>)   = 0xab,
 
     IRETURN  = 0xac,
     LRETURN  = 0xad,

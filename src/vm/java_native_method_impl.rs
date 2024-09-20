@@ -1,7 +1,8 @@
 use std::cell::RefCell;
+use std::str::FromStr;
 use std::time::{SystemTime, UNIX_EPOCH};
 use log::{debug, warn};
-use crate::field_info::{field_type_from_str, FieldType, PrimitiveType};
+use crate::field_info::{field_type_from_str, get_class_descriptor, FieldType, PrimitiveType};
 use crate::method_info::MethodDescriptor;
 use crate::vm::class::{ClassAndMethod, ClassRef};
 use crate::vm::java_error::JavaError;
@@ -60,9 +61,12 @@ pub fn register_all_natives(registry: &mut NativeMethodRegistry){
     registry.register("java/lang/Class", "desiredAssertionStatus0", "(Ljava/lang/Class;)Z", delegate_desired_assertion_status);
     registry.register("java/lang/Class", "getDeclaredFields0", "(Z)[Ljava/lang/reflect/Field;", delegate_get_declared_fields0);
     registry.register("java/lang/Class", "getDeclaredConstructors0", "(Z)[Ljava/lang/reflect/Constructor;", delegate_get_declared_constructors0);
+    registry.register("java/lang/Class", "getModifiers", "()I", delegate_get_class_modifiers);
+    registry.register("java/lang/Class", "getSuperclass", "()Ljava/lang/Class;", delegate_get_super_class);
     registry.register("java/lang/Class", "forName0", "(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/Class;", delegate_for_name0);
     registry.register("java/lang/Class", "isInterface", "()Z", delegate_is_interface);
     registry.register("java/lang/Class", "isArray", "()Z", delegate_is_array);
+    registry.register("java/lang/Class", "isPrimitive", "()Z", delegate_is_primitive);
     registry.register("java/lang/Float", "floatToRawIntBits", "(F)I", delegate_float_to_raw_bits);
     registry.register("java/lang/Double", "doubleToRawLongBits", "(D)J", delegate_double_to_raw_bits);
     registry.register("java/lang/Object", "getClass", "()Ljava/lang/Class;", delegate_get_class);
@@ -74,6 +78,9 @@ pub fn register_all_natives(registry: &mut NativeMethodRegistry){
     registry.register("sun/misc/Unsafe", "objectFieldOffset", "(Ljava/lang/reflect/Field;)J", delegate_object_field_offset);
     registry.register("sun/misc/Unsafe", "compareAndSwapObject", "(Ljava/lang/Object;JLjava/lang/Object;Ljava/lang/Object;)Z", delegate_compare_and_swap_object);
     registry.register("sun/misc/Unsafe", "compareAndSwapInt", "(Ljava/lang/Object;JII)Z", delegate_compare_and_swap_int);
+    registry.register("sun/misc/Unsafe", "allocateMemory", "(J)J", delegate_allocate_memory);
+    registry.register("sun/misc/Unsafe", "putLong", "(JJ)V", delegate_put_long);
+    registry.register("sun/misc/Unsafe", "getByte", "(J)B", delegate_get_byte);
     registry.register("sun/reflect/Reflection", "getCallerClass", "()Ljava/lang/Class;", delegate_get_caller_class);
     registry.register("sun/reflect/Reflection", "getClassAccessFlags", "(Ljava/lang/Class;)I", delegate_get_class_access_flags);
     registry.register("java/lang/Thread", "currentThread", "()Ljava/lang/Thread;", delegate_current_thread);
@@ -81,6 +88,7 @@ pub fn register_all_natives(registry: &mut NativeMethodRegistry){
     registry.register("java/security/AccessController", "getStackAccessControlContext", "()Ljava/security/AccessControlContext;", delegate_get_stack_access_control_context);
     registry.register("java/security/AccessController", "doPrivileged", "(Ljava/security/PrivilegedAction;)Ljava/lang/Object;", delegate_do_privileged);
     registry.register("java/lang/String", "intern", "()Ljava/lang/String;", delegate_string_intern);
+    registry.register("sun/reflect/NativeConstructorAccessorImpl", "newInstance0", "(Ljava/lang/reflect/Constructor;[Ljava/lang/Object;)Ljava/lang/Object;", delegate_new_instance0);
 }
 
 fn delegate_nano_time<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
@@ -143,6 +151,7 @@ fn delegate_get_primitive_class<'a>(vm: &mut VM<'a>, _ : ClassRef<'a>, _: Option
         "float"   => Ok(Some(Value::Reference(vm.new_class_object(    "java/lang/Float".to_string())?))),
         "double"  => Ok(Some(Value::Reference(vm.new_class_object(   "java/lang/Double".to_string())?))),
         "boolean" => Ok(Some(Value::Reference(vm.new_class_object(  "java/lang/Boolean".to_string())?))),
+        "void"    => Ok(Some(Value::Reference(vm.new_class_object(     "java/lang/Void".to_string())?))),
         _ => Err(VmError::ValidationError(format!("Expected extractable string")))
     }
 }
@@ -150,10 +159,16 @@ fn delegate_get_primitive_class<'a>(vm: &mut VM<'a>, _ : ClassRef<'a>, _: Option
 fn delegate_get_component_type<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, class_object: Option<Reference<'a>>, args: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
     debug!("getComponentType \n'{:?}'\n'{:?}'", class_object, args);
     let class_name = vm.extract_string_from_object(&class_object.unwrap().get_field(5))?;
-    let field_type = field_type_from_str(class_name.as_str());
-    debug!("getComponentType '{:?}'", field_type);
+    //let field_type = field_type_from_str(class_name.as_str());
+    debug!("getComponentType '{:?}'", class_name);
 
-    Ok(None)
+    let array_class = vm.get_or_resolve_class(class_name.as_str())?;
+    if let Some(array_info) = &array_class.array_info{
+        let component_class_object = vm.new_class_object(array_info.component_type.to_class_name())?;
+        Ok(Some(Value::Reference(component_class_object)))
+    } else {
+        Err(VmError::ValidationError(format!("Expected Array object but found '{:?}'", class_object)))
+    }
 }
 
 fn delegate_get_classloader<'a>(vm: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
@@ -206,9 +221,39 @@ fn delegate_get_declared_constructors0<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, cla
             //parameterTypes
             java_constructor.set_field(6, Value::Reference(vm.new_array(1, FieldType::Object("java/lang/Class".to_string()), RefCell::new(parameters))?));
 
+            let flags = constructor.flags.iter().map(|flag| flag.clone() as u16).reduce(|flag1, flag2| flag1 | flag2).unwrap_or(0);
+            //modifiers
+            java_constructor.set_field(8, Value::Integer(flags as i32));
+
             content.push(Value::Reference(java_constructor));
         }
         Ok(Some(Value::Reference(vm.new_array(1, FieldType::Object("java/lang/reflect/Constructor".to_string()), RefCell::new(content))?)))
+    } else {
+        Err(VmError::ValidationError("Expected Class object".to_string()))
+    }
+}
+
+fn delegate_get_class_modifiers<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, class_object: Option<Reference<'a>>, _: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
+    if let Some(obj) = class_object{
+        let class = vm.extract_class_from_class_object(obj)?;
+        let flags = class.flags.iter().cloned().map(|val| val as u16).reduce(|val1, val2| val1 | val2).unwrap_or(0) as i32;
+        Ok(Some(Value::Integer(flags)))
+    } else {
+        Err(VmError::ValidationError("Expected Class object".to_string()))
+    }
+}
+
+fn delegate_get_super_class<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, class_object: Option<Reference<'a>>, _: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
+    if let Some(obj) = class_object{
+        let class = vm.extract_class_from_class_object(obj)?;
+        match class.superclass {
+            Some(super_class) => {
+                let super_class_object = vm.new_class_object(super_class.name.clone())?;
+                Ok(Some(Value::Reference(super_class_object)))
+            }
+            None => Ok(Some(Value::Null))
+        }
+
     } else {
         Err(VmError::ValidationError("Expected Class object".to_string()))
     }
@@ -218,6 +263,7 @@ fn delegate_for_name0<'a>(vm: &mut VM<'a>,  _: ClassRef<'a>, _: Option<Reference
     debug!("forName0");
     if let Some(name) = args.get(0) {
         let name = vm.extract_string_from_object(&name)?;
+        let name = name.replace(".", "/");
         //let class = vm.find_class_by_name(name)?;
         Ok(Some(Value::Reference(vm.new_class_object(name)?)))
     } else {
@@ -242,6 +288,23 @@ fn delegate_is_array<'a>(vm: &mut VM<'a>,  _: ClassRef<'a>, obj: Option<Referenc
         let name = vm.extract_string_from_object(&name_object)?;
         let name = name.replace(".", "/");
         Ok(Some(Value::Integer(if name.starts_with("[") { 1 } else { 0 })))
+    } else {
+        Err(VmError::ValidationError("this is Null".to_string()))
+    }
+}
+
+fn delegate_is_primitive<'a>(vm: &mut VM<'a>,  _: ClassRef<'a>, obj: Option<Reference<'a>>, _: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
+    debug!("isPrimitive {:?}", obj);
+    if let Some(obj) = obj {
+        let name_object = obj.get_field(5);
+        let name = vm.extract_string_from_object(&name_object)?;
+        Ok(Some(Value::Integer(match name.as_str() {
+            "java/lang/Boolean" | "java/lang/Character" | "java/lang/Byte"  | "java/lang/Short"  |
+            "java/lang/Integer" | "java/lang/Long"      | "java/lang/Float" | "java/lang/Double" |
+            "java/lang/Void" => 1,
+            _ => 0,
+        })))
+        //Ok(Some(Value::Integer(if PrimitiveType::from_str(name.as_str()).is_ok() { 1 } else { 0 })))
     } else {
         Err(VmError::ValidationError("this is Null".to_string()))
     }
@@ -320,6 +383,35 @@ fn delegate_compare_and_swap_int<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, _: Option
     Ok(Some(Value::Integer(1)))
 }
 
+fn delegate_allocate_memory<'a>(vm: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
+    if let Some(Value::Long(num)) = args.get(0){
+        //return is address in memory
+        let ptr = vm.unsafe_allocator.allocate_memory(*num as usize);
+        Ok(Some(Value::Long(ptr)))
+    } else {
+        Err(VmError::ValidationError("Expected a long".to_string()))
+    }
+}
+
+fn delegate_put_long<'a>(vm: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
+    //because args = [Long, Dummy, Long, Dummy]
+    if let (Some(Value::Long(ptr)), Some(Value::Long(value))) = (args.get(0), args.get(2)){
+        vm.unsafe_allocator.put_long(*ptr, *value);
+        Ok(None)
+    } else {
+        Err(VmError::ValidationError("Expected a long as address and a long as value".to_string()))
+    }
+}
+
+fn delegate_get_byte<'a>(vm: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
+    if let Some(Value::Long(ptr)) = args.get(0){
+        let byte = vm.unsafe_allocator.get_byte(*ptr);
+        Ok(byte.map(|byte| Value::Integer(byte as i32)))
+    } else {
+        Err(VmError::ValidationError("Expected a long as address".to_string()))
+    }
+}
+
 fn delegate_get_caller_class<'a>(vm: &mut VM<'a>, class : ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
     Ok(Some(Value::Reference(vm.new_class_object(class.name.clone())?)))
 }
@@ -386,4 +478,79 @@ fn delegate_string_intern<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, object: Option<R
     } else {
         Err(VmError::ValidationError("Expected a string object reference".to_string()))
     }
+}
+
+fn delegate_new_instance0<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, object: Option<Reference<'a>>, args: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
+    debug!("newInstance0");
+    debug!("{:?}", args);
+    if let Some(Value::Reference(constructor)) = args.get(0){
+        let clazz = constructor.get_field(4);
+        let parameter_types = constructor.get_field(6);
+        if let (Value::Reference(class_ref), Value::Reference(parameter_array)) = (clazz, parameter_types){
+            if let ReferenceType::Array(_, _, type_content) = &parameter_array.reference_type{
+                let class = vm.extract_class_from_class_object(class_ref)?;
+                let mut descriptor = String::from("(");
+                for constructor_parameter_type in type_content.borrow().iter(){
+                    if let Value::Reference(parameter_type_ref) = constructor_parameter_type {
+                        let class = vm.extract_class_from_class_object(parameter_type_ref)?;
+                        if !class.is_array(){
+                            descriptor.push_str(&get_class_descriptor(&class.name));
+                        } else {
+                            descriptor.push_str(&class.name);
+                        }
+                    }
+                }
+                descriptor.push_str(")V");
+                if let Some(method) = class.find_method("<init>", descriptor.as_str()) {
+                    debug!("method: {:?}", method);
+                    let class_and_method = ClassAndMethod {class, method};
+                    let constructor_args = if let Some(Value::Reference(argument_array)) = args.get(1){
+                        if let ReferenceType::Array(_, _, args_content) = &argument_array.reference_type{
+                            args_content.borrow().clone()
+                        } else {
+                            Vec::new()
+                        }
+                    } else {
+                        Vec::new()
+                    };
+                    let object = vm.new_object(class_and_method.class.name.as_str())?;
+                    vm.invoke(class_and_method, Some(object), constructor_args)?;
+                    return Ok(Some(Value::Reference(object)))
+                }
+            }
+        }
+        Ok(None)
+    } else {
+        Err(VmError::ValidationError("Expected a constructor object and a array reference".to_string()))
+    }
+    /*if let (Some(Value::Reference(constructor)), Some(Value::Reference(argument_array))) = (args.get(0), args.get(1)){
+        if let ReferenceType::Array(_, _, args_content) = &argument_array.reference_type{
+            //TODO add something like Value.expect_reference
+            let class = constructor.get_field(4);
+            let parameter_types = constructor.get_field(6);
+            if let (Value::Reference(class_ref), Value::Reference(parameter_array)) = (class, parameter_types){
+                if let ReferenceType::Array(_, _, type_content) = &parameter_array.reference_type{
+                    let class = vm.extract_class_from_class_object(class_ref)?;
+                    let mut descriptor = String::from("(");
+                    for constructor_parameter_type in type_content.borrow().iter(){
+                        if let Value::Reference(parameter_type_ref) = constructor_parameter_type {
+                            let class = vm.extract_class_from_class_object(parameter_type_ref)?;
+                            if !class.is_array(){
+                                descriptor.push_str(&get_class_descriptor(&class.name));
+                            } else {
+                                descriptor.push_str(&class.name);
+                            }
+                        }
+                    }
+
+                }
+            }
+
+            Ok(None)
+        } else {
+            Err(VmError::ValidationError("Expected a constructor object and a array reference".to_string()))
+        }
+    } else {
+        Err(VmError::ValidationError("Expected a constructor object and a array reference".to_string()))
+    }*/
 }
