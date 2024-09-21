@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use log::info;
 use regex::Regex;
 use typed_arena::Arena;
 
@@ -144,7 +145,7 @@ impl<'a> ClassManager<'a>{
                 let dims = arr.len();
                 let component_type = parse_field_type(cap.name("object").map(|m| m.as_str()), cap.name("primitive").map(|m| m.as_str()), None);
                 let new_class_name = component_type.to_class_name();
-                println!("{}", new_class_name);
+                info!("{}", new_class_name);
                 let array_info = ArrayInfo{
                     dims,
                     component_type,

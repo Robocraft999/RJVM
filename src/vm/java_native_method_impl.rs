@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::str::FromStr;
 use std::time::{SystemTime, UNIX_EPOCH};
-use log::{debug, warn};
+use log::{debug, trace, warn};
 use crate::field_info::{field_type_from_str, get_class_descriptor, FieldType, PrimitiveType};
 use crate::method_info::MethodDescriptor;
 use crate::vm::class::{ClassAndMethod, ClassRef};
@@ -89,6 +89,7 @@ pub fn register_all_natives(registry: &mut NativeMethodRegistry){
     registry.register("java/security/AccessController", "doPrivileged", "(Ljava/security/PrivilegedAction;)Ljava/lang/Object;", delegate_do_privileged);
     registry.register("java/lang/String", "intern", "()Ljava/lang/String;", delegate_string_intern);
     registry.register("sun/reflect/NativeConstructorAccessorImpl", "newInstance0", "(Ljava/lang/reflect/Constructor;[Ljava/lang/Object;)Ljava/lang/Object;", delegate_new_instance0);
+    registry.register("java/io/FileOutputStream", "writeBytes", "([BIIZ)V", delegate_write_bytes)
 }
 
 fn delegate_nano_time<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
@@ -104,7 +105,7 @@ fn delegate_identity_hash_code<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, _: Option<R
     if let Some(Value::Reference(object)) = args.get(0){
         let addr = &object as *const _;
         let addr = addr as i32;
-        println!("HASH: {addr}");
+        trace!("HASH: {addr}");
         Ok(Some(Value::Integer(addr)))
     } else {
         Err(VmError::ValidationError(format!("Expected Object but found '{:?}'", args.get(0))))
@@ -336,7 +337,7 @@ fn delegate_hashcode<'a>(_: &mut VM<'a>, _: ClassRef<'a>, reference: Option<Refe
     if let Some(obj) = reference{
         let addr = &obj as *const _;
         let addr = addr as i32;
-        println!("HASHCODE: {addr}");
+        trace!("HASHCODE: {addr}");
         Ok(Some(Value::Integer(addr)))
     } else {
         Err(VmError::ValidationError("Expected object".to_string()))
@@ -523,34 +524,21 @@ fn delegate_new_instance0<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, object: Option<R
     } else {
         Err(VmError::ValidationError("Expected a constructor object and a array reference".to_string()))
     }
-    /*if let (Some(Value::Reference(constructor)), Some(Value::Reference(argument_array))) = (args.get(0), args.get(1)){
-        if let ReferenceType::Array(_, _, args_content) = &argument_array.reference_type{
-            //TODO add something like Value.expect_reference
-            let class = constructor.get_field(4);
-            let parameter_types = constructor.get_field(6);
-            if let (Value::Reference(class_ref), Value::Reference(parameter_array)) = (class, parameter_types){
-                if let ReferenceType::Array(_, _, type_content) = &parameter_array.reference_type{
-                    let class = vm.extract_class_from_class_object(class_ref)?;
-                    let mut descriptor = String::from("(");
-                    for constructor_parameter_type in type_content.borrow().iter(){
-                        if let Value::Reference(parameter_type_ref) = constructor_parameter_type {
-                            let class = vm.extract_class_from_class_object(parameter_type_ref)?;
-                            if !class.is_array(){
-                                descriptor.push_str(&get_class_descriptor(&class.name));
-                            } else {
-                                descriptor.push_str(&class.name);
-                            }
-                        }
-                    }
+}
 
-                }
-            }
-
+fn delegate_write_bytes<'a>(_: &mut VM<'a>, _: ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
+    if let (Some(Value::Reference(bytes_ref)), Some(Value::Integer(offset)), Some(Value::Integer(amount)), Some(Value::Integer(should_append))) =
+        (args.get(0), args.get(1), args.get(2), args.get(3))
+    {
+        if let ReferenceType::Array(_, _, data) = &bytes_ref.reference_type{
+            let data = &data.borrow()[*offset as usize..(*offset + *amount) as usize];
+            let string: String = data.iter().map(|value| if let Value::Integer(int) = value { (*int as u8) as char} else { '?' }).collect();
+            print!("{}", string);
             Ok(None)
         } else {
-            Err(VmError::ValidationError("Expected a constructor object and a array reference".to_string()))
+            Err(VmError::ValidationError("Expected a byte array as first arg".to_string()))
         }
     } else {
-        Err(VmError::ValidationError("Expected a constructor object and a array reference".to_string()))
-    }*/
+        Err(VmError::ValidationError("Expected a byte array, offset, amount and boolean".to_string()))
+    }
 }

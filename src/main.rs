@@ -2,7 +2,7 @@ use std::fmt::{Debug, Formatter};
 use std::io::Read;
 use std::str::FromStr;
 use cesu8::from_java_cesu8;
-use log::{error, warn, LevelFilter};
+use log::{error, info, warn, LevelFilter};
 use access_flags::{parse_class_flags, parse_field_flags, parse_method_flags};
 use attribute::{Attribute, Code};
 use vm::class_path::ClassPath;
@@ -197,7 +197,7 @@ fn parse_class_file(class_path: &ClassPath, class_name: &str) -> Result<ClassFil
     let constant_pool = ConstantPool(constant_pool_entries);
     let access_flags = parse_class_flags(parse_u2(&mut bytes)?);
     let name = get_constant_printable(&constant_pool, parse_u2(&mut bytes)?);
-    println!("Class name: {}", &name);
+    info!("Class name: {}", &name);
     let super_class_index = parse_u2(&mut bytes)?;
     let super_class = if super_class_index > 0{
         Some(get_constant_printable(&constant_pool, super_class_index))
@@ -390,10 +390,10 @@ fn parse_class_file(class_path: &ClassPath, class_name: &str) -> Result<ClassFil
         source_file
     };
 
-    println!("------------------------------------");
+    info!("------------------------------------");
     //println!("{:#?}", class_file);
 
-    println!("------------------------------------");
+    info!("------------------------------------");
     for i in 0..class_file.constant_pool.0.len(){
         //println!("[{}] {} {:?}", i+1, get_constant_printable(&class_file.constant_pool, i as u16 + 1), &class_file.constant_pool.0.get(i).unwrap());
     }
@@ -429,6 +429,11 @@ fn init_system(vm: &mut VM) -> Result<(), VmError>{
     let propeties_set_method = vm.resolve_class_method("java/util/Properties", "setProperty", "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/Object;")?;
     vm.invoke(propeties_set_method, Some(properties_object), vec![Value::Reference(arg1), Value::Reference(arg2)])?;
 
+    let arg1 = vm.new_string_object("line.separator".to_string())?;
+    let arg2 = vm.new_string_object("\n".to_string())?;
+    let propeties_set_method = vm.resolve_class_method("java/util/Properties", "setProperty", "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/Object;")?;
+    vm.invoke(propeties_set_method, Some(properties_object), vec![Value::Reference(arg1), Value::Reference(arg2)])?;
+
     static_object.set_field(5, Value::Reference(properties_object));
 
     if let Some(setout0_method) = system_class.find_method("setOut0", "(Ljava/io/PrintStream;)V"){
@@ -459,7 +464,7 @@ fn init_system(vm: &mut VM) -> Result<(), VmError>{
 }
 
 fn main() {
-    simple_logger::SimpleLogger::new().with_level(LevelFilter::Debug).without_timestamps().init().unwrap();
+    simple_logger::SimpleLogger::new().with_level(LevelFilter::Info).without_timestamps().init().unwrap();
 
     let mut class_path = ClassPath::default();
     class_path.push("resources;resources/rt.jar").expect("TODO: panic message");
@@ -489,7 +494,7 @@ fn main() {
         Ok(res) => {
             println!("result: {res:?}");
             for (id, static_object) in vm.static_class_objects.iter(){
-                println!("[{}] {:?}", vm.find_class_by_id(id.clone()).unwrap().name, static_object);
+                //println!("[{}] {:?}", vm.find_class_by_id(id.clone()).unwrap().name, static_object);
             }
         }
         Err(error) => {

@@ -28,7 +28,6 @@ impl Unsafe {
     pub fn get_long(&self, ptr: i64) -> Option<i64> {
         let mut value: i64 = 0;
         for (index, element) in self.memory.get(ptr as usize, 8).iter().enumerate(){
-            println!("{}", element);
             value |= (*element as i64) << (8 * (7-index));
         }
         Some(value)
