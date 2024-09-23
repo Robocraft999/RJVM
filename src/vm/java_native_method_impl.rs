@@ -89,7 +89,8 @@ pub fn register_all_natives(registry: &mut NativeMethodRegistry){
     registry.register("java/security/AccessController", "doPrivileged", "(Ljava/security/PrivilegedAction;)Ljava/lang/Object;", delegate_do_privileged);
     registry.register("java/lang/String", "intern", "()Ljava/lang/String;", delegate_string_intern);
     registry.register("sun/reflect/NativeConstructorAccessorImpl", "newInstance0", "(Ljava/lang/reflect/Constructor;[Ljava/lang/Object;)Ljava/lang/Object;", delegate_new_instance0);
-    registry.register("java/io/FileOutputStream", "writeBytes", "([BIIZ)V", delegate_write_bytes)
+    registry.register("java/io/FileOutputStream", "writeBytes", "([BIIZ)V", delegate_write_bytes);
+    registry.register("java/io/FileSystem", "getFileSystem", "()Ljava/io/FileSystem;", delegate_get_file_system);
 }
 
 fn delegate_nano_time<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
@@ -541,4 +542,10 @@ fn delegate_write_bytes<'a>(_: &mut VM<'a>, _: ClassRef<'a>, _: Option<Reference
     } else {
         Err(VmError::ValidationError("Expected a byte array, offset, amount and boolean".to_string()))
     }
+}
+
+fn delegate_get_file_system<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
+    //Doesnt work because this gives a java.nio.FileSystem
+    let linux_file_system = vm.new_object("sun/nio/fs/LinuxFileSystem")?;
+    Ok(Some(Value::Reference(linux_file_system)))
 }

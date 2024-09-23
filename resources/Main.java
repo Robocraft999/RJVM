@@ -1,4 +1,4 @@
-import sub.*;
+//import sub.*;
 import java.lang.RuntimeException;
 import java.util.Properties;
 //import sun.misc.VM;
@@ -22,14 +22,15 @@ public class Main{
 		int x = answer * (empty.getNumber() - 1);
 		return x;*/
 
-		HashMap<Integer, X> map = new HashMap();
+		/*HashMap<Integer, X> map = new HashMap();
 		int firstKey = 5;
 		map.add(firstKey, new X());
 		map.add(8, new X());
 
-		X res = map.get(firstKey);
+		X res = map.get(firstKey);*/
 
-		System.out.println("Test");
+		//System.out.println("Test");
+		java.io.File file = new java.io.File("resources/javadump.txt");
 
         //Car car = new Car();
 	}
