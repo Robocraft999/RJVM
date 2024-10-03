@@ -37,6 +37,7 @@ impl FileSystemClassPathEntry{
 impl ClassPathEntry for FileSystemClassPathEntry{
     fn resolve(&self, class_name: &str) -> Result<Option<Vec<u8>>, ClassLoadingError>{
         let mut candidate = self.file_dir.clone();
+        let class_name = class_name.replace(".", "/");
         candidate.push(class_name);
         candidate.set_extension("class");
         if candidate.exists(){
@@ -74,7 +75,7 @@ impl JarClassPathEntry{
 
 impl ClassPathEntry for JarClassPathEntry{
     fn resolve(&self, class_name: &str) -> Result<Option<Vec<u8>>, ClassLoadingError>{
-        let class_file_name = class_name.to_string() + ".class";
+        let class_file_name = class_name.replace(".", "/").to_string() + ".class";
         match self.archive.borrow_mut().by_name(class_file_name.as_str()) {
             Ok(mut zip) => {
                 let mut buffer: Vec<u8> = Vec::with_capacity(zip.size() as usize);

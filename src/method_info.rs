@@ -26,6 +26,8 @@ impl MethodInfo{
     pub fn is_static(&self) -> bool{
         self.flags.contains(&MethodFlag::Static)
     }
+
+    pub fn is_abstract(&self) -> bool { self.flags.contains(&MethodFlag::Abstract) }
 }
 
 #[derive(Debug)]

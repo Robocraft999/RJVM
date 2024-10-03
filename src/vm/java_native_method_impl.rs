@@ -1,4 +1,6 @@
 use std::cell::RefCell;
+use std::fs::File;
+use std::path::Path;
 use std::str::FromStr;
 use std::time::{SystemTime, UNIX_EPOCH};
 use log::{debug, trace, warn};
@@ -91,6 +93,7 @@ pub fn register_all_natives(registry: &mut NativeMethodRegistry){
     registry.register("sun/reflect/NativeConstructorAccessorImpl", "newInstance0", "(Ljava/lang/reflect/Constructor;[Ljava/lang/Object;)Ljava/lang/Object;", delegate_new_instance0);
     registry.register("java/io/FileOutputStream", "writeBytes", "([BIIZ)V", delegate_write_bytes);
     registry.register("java/io/FileSystem", "getFileSystem", "()Ljava/io/FileSystem;", delegate_get_file_system);
+    registry.register("rjvm/io/UnixFileSystem", "getBooleanAttributes0", "(Ljava/io/File;)I", delegate_get_boolean_attribute)
 }
 
 fn delegate_nano_time<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
@@ -545,7 +548,29 @@ fn delegate_write_bytes<'a>(_: &mut VM<'a>, _: ClassRef<'a>, _: Option<Reference
 }
 
 fn delegate_get_file_system<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
-    //Doesnt work because this gives a java.nio.FileSystem
-    let linux_file_system = vm.new_object("sun/nio/fs/LinuxFileSystem")?;
+    let linux_file_system = vm.new_object("rjvm/io/UnixFileSystem")?;
     Ok(Some(Value::Reference(linux_file_system)))
+}
+
+const BA_EXISTS: i32 = 1;
+const BA_REGULAR: i32 = 2;
+const BA_DIRECTORY: i32 = 4;
+const BA_HIDDEN: i32 = 8;
+
+fn delegate_get_boolean_attribute<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, object: Option<Reference<'a>>, args: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
+    let path = if let Some(Value::Reference(path_val)) = args.get(0){
+        let string_val = path_val.get_field(1);
+        vm.extract_string_from_object(&string_val)?
+    } else {
+        String::new()
+    };
+    let path = Path::new(&path);
+    let mut attributes = 0;
+    if path.exists(){
+        attributes |= BA_EXISTS;
+        if path.is_dir(){
+            attributes |= BA_DIRECTORY;
+        }
+    }
+    Ok(Some(Value::Integer(attributes)))
 }

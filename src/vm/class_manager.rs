@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use log::info;
 use regex::Regex;
 use typed_arena::Arena;
-
-use crate::{ClassFile, parse_class_file};
+use crate::attribute::ElementValue;
+use crate::class_file::{parse_class_file, ClassFile};
 use crate::error::ClassParseError;
 use crate::field_info::{field_type_from_str, parse_field_type};
 use crate::vm::class::{ArrayInfo, Class, ClassId, ClassRef};
@@ -66,9 +66,18 @@ impl<'a> ClassManager<'a>{
         let next_id = self.next_id;
         self.next_id += 1;
 
-        let mut resolved_classes = self.resolve_super_and_interfaces(&parsed_class)?;
-        let super_class = parsed_class.super_class.map(|name| resolved_classes.get(&name).unwrap().get_class());
+        let mut resolved_classes = self.resolve_super_and_interfaces_and_annotations(&parsed_class)?;
+        let mut super_class = parsed_class.super_class.map(|name| resolved_classes.get(&name).unwrap().get_class());
         let interfaces = parsed_class.interfaces.iter().map(|name| resolved_classes.get(name).unwrap().get_class()).collect();
+        if let Some(extends) = parsed_class.runtime_visible_annotations.0.iter().find(|a| a.name == "Linternal/Extends;"){
+            if let Some(pair) = extends.values.iter().find(|values| values.0 == "value"){
+                if let ElementValue::String(string ) = &pair.1{
+                    let new_super_class = self.get_or_resolve_class(string)?;
+                    super_class = Some(new_super_class.get_class());
+                    resolved_classes.insert(string.clone(), new_super_class);
+                }
+            }
+        }
 
         let superclass_field_count = match super_class{
             Some(class) => class.transitive_field_count,
@@ -86,6 +95,7 @@ impl<'a> ClassManager<'a>{
             interfaces,
             fields: parsed_class.fields,
             methods: parsed_class.methods,
+            annotations: parsed_class.runtime_visible_annotations,
             transitive_field_count: superclass_field_count + fields_count,
             first_field_index: superclass_field_count,
             array_info
@@ -125,7 +135,7 @@ impl<'a> ClassManager<'a>{
         })
     }
 
-    fn resolve_super_and_interfaces(&mut self, class_file: &ClassFile) -> Result<HashMap<String, ResolvedClass<'a>>, VmError>{
+    fn resolve_super_and_interfaces_and_annotations(&mut self, class_file: &ClassFile) -> Result<HashMap<String, ResolvedClass<'a>>, VmError>{
         let mut resolved_classes = HashMap::new();
         if let Some(super_class_name) = &class_file.super_class{
             let resolved_class = self.get_or_resolve_class(super_class_name)?;
@@ -134,6 +144,11 @@ impl<'a> ClassManager<'a>{
         for interface_name in class_file.interfaces.iter(){
             let resolved_class = self.get_or_resolve_class(interface_name)?;
             resolved_classes.insert(interface_name.clone(), resolved_class);
+        }
+        for annotation in class_file.runtime_visible_annotations.0.iter(){
+            let parsed_name = field_type_from_str(annotation.name.as_str()).to_class_name();
+            let resolved_class = self.get_or_resolve_class(parsed_name.as_str())?;
+            resolved_classes.insert(parsed_name, resolved_class);
         }
         Ok(resolved_classes)
     }

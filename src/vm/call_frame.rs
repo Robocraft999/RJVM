@@ -5,9 +5,9 @@ use std::rc::Rc;
 use log::{debug, error, info, trace, warn};
 use crate::attribute::ProgramCounter;
 use crate::bytecode::{Instruction, parse_instruction, printable_instructions};
+use crate::class_file::get_constant_printable;
 use crate::constants::ConstantPoolEntry;
 use crate::field_info::{FieldType, PrimitiveType};
-use crate::get_constant_printable;
 use crate::method_info::MethodDescriptor;
 use crate::vm::java_error::JavaError;
 use crate::vm::{VM, VmError};
@@ -595,7 +595,11 @@ impl<'a> CallFrame<'a>{
                 }
             }
         }
-        Err(VmError::MethodCallError( format!("{}", self.class_and_method.method.name)))
+        if self.class_and_method.method.is_abstract(){
+            Err(VmError::MethodCallError(format!("abstract method {}", self.class_and_method.method.name)))
+        } else {
+            Err(VmError::MethodCallError(format!("{}", self.class_and_method.method.name)))
+        }
     }
 
     fn execute_istore(&mut self, index: usize) -> Result<(), VmError>{
@@ -893,7 +897,7 @@ impl<'a> CallFrame<'a>{
             if let Some(super_class) = current_class.superclass{
                 current_class = super_class
             } else {
-                return Err(VmError::JavaException(JavaError::MethodNotFoundException(method_name.to_string())));
+                return Err(VmError::JavaException(JavaError::MethodNotFoundException(method_name.to_string() + descriptor)));
             }
         }
     }

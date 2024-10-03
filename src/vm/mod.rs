@@ -66,6 +66,12 @@ impl<'a> VM<'a>{
         }
     }
 
+    pub fn dump_class_file(&mut self, class_name: &str) -> Result<(), VmError>{
+        let class = self.get_or_resolve_class(class_name)?;
+        info!("Class: {:?}", class);
+        Ok(())
+    }
+
     pub fn invoke(&mut self, class_and_method: ClassAndMethod<'a>, object: Option<Reference<'a>>, args: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
         if !class_and_method.method.is_native(){
             let method_signature = format!("{}.{}{}", class_and_method.class.name, class_and_method.method.name, class_and_method.method.descriptor.as_str());

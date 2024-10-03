@@ -31,6 +31,7 @@ public class Main{
 
 		//System.out.println("Test");
 		java.io.File file = new java.io.File("resources/javadump.txt");
+		System.out.println(file.exists());
 
         //Car car = new Car();
 	}
