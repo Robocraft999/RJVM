@@ -12,4 +12,6 @@ pub enum JavaError{
     DivisionByZero,
     #[error("NullPointerException {0}")]
     NullPointerException(String),
+    #[error("IOException {0}")]
+    IOException(String),
 }

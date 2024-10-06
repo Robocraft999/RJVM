@@ -34,7 +34,7 @@ pub(crate) struct ClassesToInitialize<'a> {
 
 
 pub struct ClassManager<'a>{
-    class_path: ClassPath,
+    pub class_path: ClassPath,
     classes_by_name: HashMap<String, ClassRef<'a>>,
     classes_by_id: HashMap<ClassId, ClassRef<'a>>,
     pub classes: Arena<Class<'a>>,

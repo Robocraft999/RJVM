@@ -11,10 +11,13 @@ use thiserror::Error;
 use zip::result::ZipError;
 use zip::ZipArchive;
 
-use crate::error::InvalidDirectoryError;
+use crate::error::{ClassParseError, InvalidDirectoryError};
+use crate::vm::java_error::JavaError;
+use crate::vm::VmError;
 
 pub trait ClassPathEntry : fmt::Debug{
     fn resolve(&self, class_name: &str) -> Result<Option<Vec<u8>>, ClassLoadingError>;
+    fn resolve_file(&self, file_name: &str) -> Result<Option<Vec<u8>>, VmError>;
 }
 
 #[derive(Debug)]
@@ -48,6 +51,18 @@ impl ClassPathEntry for FileSystemClassPathEntry{
             Ok(None)
         }
     }
+
+    fn resolve_file(&self, file_name: &str) -> Result<Option<Vec<u8>>, VmError> {
+        let mut candidate = self.file_dir.clone();
+        candidate.push(file_name);
+        if candidate.exists(){
+            std::fs::read(candidate)
+                .map(Some)
+                .map_err(|e| VmError::JavaException(JavaError::IOException(e.to_string())))
+        } else {
+            Ok(None)
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -76,17 +91,21 @@ impl JarClassPathEntry{
 impl ClassPathEntry for JarClassPathEntry{
     fn resolve(&self, class_name: &str) -> Result<Option<Vec<u8>>, ClassLoadingError>{
         let class_file_name = class_name.replace(".", "/").to_string() + ".class";
-        match self.archive.borrow_mut().by_name(class_file_name.as_str()) {
+        self.resolve_file(class_file_name.as_str()).map_err(|e| ClassLoadingError::new(std::io::Error::last_os_error()))
+    }
+
+    fn resolve_file(&self, file_name: &str) -> Result<Option<Vec<u8>>, VmError> {
+        match self.archive.borrow_mut().by_name(file_name) {
             Ok(mut zip) => {
                 let mut buffer: Vec<u8> = Vec::with_capacity(zip.size() as usize);
                 zip
                     .read_to_end(&mut buffer)
-                    .map_err(ClassLoadingError::new)?;
+                    .map_err(|e| VmError::JavaException(JavaError::IOException(e.to_string())))?;
                 Ok(Some(buffer))
             }
             Err(err) => match err{
                 ZipError::FileNotFound => Ok(None),
-                _ => Err(ClassLoadingError::new(err)),
+                _ => Err(VmError::ParseError(ClassParseError::LoadingError(ClassLoadingError::new(err)))),
             }
         }
     }

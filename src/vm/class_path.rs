@@ -1,6 +1,7 @@
 use thiserror::Error;
 
 use crate::vm::class_path_entry::{ClassLoadingError, ClassPathEntry, FileSystemClassPathEntry, JarClassPathEntry};
+use crate::vm::VmError;
 
 #[derive(Debug, Default)]
 pub struct ClassPath{
@@ -41,6 +42,16 @@ impl ClassPath{
     pub fn resolve(&self, class_name: &str) -> Result<Option<Vec<u8>>, ClassLoadingError>{
         for entry in self.entries.iter() {
             let entry_result = entry.resolve(class_name)?;
+            if let Some(class_bytes) = entry_result{
+                return Ok(Some(class_bytes))
+            }
+        }
+        Ok(None)
+    }
+
+    pub fn resolve_file(&self, file_name: &str) -> Result<Option<Vec<u8>>, VmError>{
+        for entry in self.entries.iter() {
+            let entry_result = entry.resolve_file(file_name)?;
             if let Some(class_bytes) = entry_result{
                 return Ok(Some(class_bytes))
             }

@@ -467,6 +467,8 @@ impl<'a> CallFrame<'a>{
                                 Ok(((val1 as u64) >> (val2 & 0x1f)) as i64)
                             }
                         })?}
+                        Instruction::FADD => { self.execute_f_arithmetic(|val1, val2| Ok(val1 + val2))? }
+                        Instruction::FSUB => { self.execute_f_arithmetic(|val1, val2| Ok(val1 - val2))? }
                         Instruction::FMUL => { self.execute_f_arithmetic(|val1, val2| Ok(val1 * val2))? }
                         Instruction::FDIV => { self.execute_f_arithmetic(
                             |val1, val2|
@@ -477,6 +479,8 @@ impl<'a> CallFrame<'a>{
                             }
                         )?}
                         Instruction::DADD => { self.execute_d_arithmetic(|val1, val2| Ok(val1 + val2))? }
+                        Instruction::DSUB => { self.execute_d_arithmetic(|val1, val2| Ok(val1 - val2))? }
+                        Instruction::DMUL => { self.execute_d_arithmetic(|val1, val2| Ok(val1 * val2))? }
                         Instruction::DDIV => { self.execute_d_arithmetic(
                             |val1, val2|
                             if val2 != 0.0 {
@@ -548,6 +552,11 @@ impl<'a> CallFrame<'a>{
                                 warn!("F2I Conversion failed, because {value:?} is not of type Float")
                             }
                         }
+                        Instruction::F2D => {
+                            debug!("F2D");
+                            let value = self.stack.pop().unwrap().expect_float()?;
+                            self.stack.push(Value::Double(value as f64));
+                        }
                         Instruction::D2I => {
                             let value = self.stack.pop().unwrap();
                             debug!("D2I");
@@ -576,8 +585,22 @@ impl<'a> CallFrame<'a>{
                             debug!("CHECKCAST {}", get_constant_printable(constants, constant_index));
                         }
                         Instruction::INSTANCEOF(constant_index) => {
-                            debug!("INSTANCEOF {}", get_constant_printable(constants, constant_index));
-                            self.stack.push(Value::Integer(1));
+
+                            let object = self.stack.pop().unwrap().expect_reference()?;
+                            let mut object_class = vm.find_class_by_id(object.class_id).unwrap();
+                            let of_class = vm.get_or_resolve_class(get_constant_printable(constants, constant_index).as_str())?;
+                            let mut instance_of = false;
+                            while let Some(super_class) = object_class.superclass{
+                                if object_class.id == of_class.id{
+                                    instance_of = true;
+                                    break;
+                                }
+                                object_class = super_class;
+                            }
+
+                            debug!("INSTANCEOF {} = {}", get_constant_printable(constants, constant_index), instance_of);
+
+                            self.stack.push(Value::Integer(if instance_of {1} else {0}));
                         }
                         Instruction::ATHROW => {
                             if let Some(Value::Reference(error)) = self.stack.pop(){

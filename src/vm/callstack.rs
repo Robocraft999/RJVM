@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use log::warn;
 use super::call_frame::CallFrame;
 use crate::VM;
 use crate::Value;
@@ -95,7 +96,7 @@ impl<'a> CallStack<'a> {
     pub fn print_call_stack(&self) {
         for (index, call_frame_info) in self.frames_infos.iter().enumerate(){
             //error!("[{}]: {:?}, stack={}, locals={}", index, call_frame.pc, call_frame.stack, call_frame.locals);
-            error!("[{}]: {}", index, call_frame_info);
+            warn!("[{}]: {}", index, call_frame_info);
         }
     }
 }

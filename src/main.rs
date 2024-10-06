@@ -94,10 +94,10 @@ fn init_system(vm: &mut VM) -> Result<(), VmError>{
 }
 
 fn main() {
-    //simple_logger::SimpleLogger::new().with_level(LevelFilter::Warn).without_timestamps().init().unwrap();
+    simple_logger::SimpleLogger::new().with_level(LevelFilter::Warn).without_timestamps().init().unwrap();
 
     let mut class_path = ClassPath::default();
-    class_path.push("resources;resources/rt.jar;resources/lib/unix;resources/lib").expect("TODO: panic message");
+    class_path.push("resources;resources/rt.jar;resources/LogicSim.jar;resources/lib/unix;resources/lib").expect("TODO: panic message");
 
     let mut vm = VM::new(class_path);
 
@@ -117,8 +117,10 @@ fn main() {
         }
     }
 
+    println!("Init complete. Starting Main Program");
+
     //vm.class_manager.get_or_resolve_class("Empty").expect("TODO: panic message");
-    let main_method = vm.resolve_class_method("Main", "main", "([Ljava/lang/String;)V").unwrap();
+    let main_method = vm.resolve_class_method("logicsim/App", "main", "([Ljava/lang/String;)V").unwrap();
     let result = vm.invoke(main_method, None, vec![Value::Null]);
     match result {
         Ok(res) => {

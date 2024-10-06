@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 use std::fs::File;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::time::{SystemTime, UNIX_EPOCH};
 use log::{debug, trace, warn};
@@ -92,6 +92,7 @@ pub fn register_all_natives(registry: &mut NativeMethodRegistry){
     registry.register("java/lang/String", "intern", "()Ljava/lang/String;", delegate_string_intern);
     registry.register("sun/reflect/NativeConstructorAccessorImpl", "newInstance0", "(Ljava/lang/reflect/Constructor;[Ljava/lang/Object;)Ljava/lang/Object;", delegate_new_instance0);
     registry.register("java/io/FileOutputStream", "writeBytes", "([BIIZ)V", delegate_write_bytes);
+    registry.register("java/io/FileInputStream", "readBytes", "([BII)I", delegate_read_bytes);
     registry.register("java/io/FileSystem", "getFileSystem", "()Ljava/io/FileSystem;", delegate_get_file_system);
     registry.register("rjvm/io/UnixFileSystem", "getBooleanAttributes0", "(Ljava/io/File;)I", delegate_get_boolean_attribute)
 }
@@ -130,19 +131,22 @@ fn delegate_set_out<'a>(vm: &mut VM<'a>, class : ClassRef<'a>, _: Option<Referen
 }
 
 fn delegate_arraycopy<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
-    if let (Some(Value::Reference(ref1)), Some(Value::Integer(src_pos)), Some(Value::Reference(ref2)), Some(Value::Integer(dst_pos))) =
-        (args.get(0), args.get(1), args.get(2), args.get(3)){
-        if let (Some(Value::Integer(length)), ReferenceType::Array(_, _, src), ReferenceType::Array(_, _, dst)) =
-            (args.get(4), &ref1.reference_type, &ref2.reference_type){
-            for i in 0..*length {
-                let src_index = *src_pos + i;
-                let dest_index = *dst_pos + i;
-                dst.borrow_mut()[dest_index as usize] = src.borrow()[src_index as usize].clone();
+    if let (Some(arg0), Some(arg1), Some(arg2), Some(arg3)) = (args.get(0), args.get(1), args.get(2), args.get(3)){
+        let ref1 = arg0.expect_reference()?;
+        let src_pos = arg1.expect_int()? as usize;
+        let ref2 = arg2.expect_reference()?;
+        let dst_pos = arg3.expect_int()? as usize;
+        if let (Some(arg4), ReferenceType::Array(_, _, src), ReferenceType::Array(_, _, dst)) = (args.get(4), &ref1.reference_type, &ref2.reference_type){
+            let length = arg4.expect_int()? as usize;
+            for i in 0..length {
+                let src_index = src_pos + i;
+                let dest_index = dst_pos + i;
+                dst.borrow_mut()[dest_index] = src.borrow()[src_index].clone();
             }
             return Ok(None)
         }
     }
-    return Err(VmError::ValidationError("Expected two arrays with indices".to_string()));
+    Err(VmError::ValidationError("Expected two arrays with indices".to_string()))
 }
 
 fn delegate_get_primitive_class<'a>(vm: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
@@ -547,6 +551,79 @@ fn delegate_write_bytes<'a>(_: &mut VM<'a>, _: ClassRef<'a>, _: Option<Reference
     }
 }
 
+
+fn delegate_read_bytes<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, obj: Option<Reference<'a>>, args: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
+    if let (Some(arg0), Some(arg1), Some(arg2)) = (args.get(0), args.get(1), args.get(2)) {
+        let data = arg0.expect_reference()?;
+        let offset = arg1.expect_int()?;
+        let length = arg2.expect_int()?;
+
+        if let Some(file_input_stream) = obj{
+            let path = vm.extract_string_from_object(&file_input_stream.get_field(2))?;
+            if !vm.currently_open_files.contains_key(&path){
+                //TODO do this on open0()
+                let file_content = vm.class_manager.class_path.resolve_file(path.as_str())?;
+                if let Some(file_content) = file_content{
+                    vm.currently_open_files.insert(path.clone(), (file_content, 0));
+                }
+            }
+
+            if let Some((content, index)) = vm.currently_open_files.remove(&path) {
+                //file: len 20, i 5
+                //buffer: blen 30, o 10, length 20
+                //start = 10, end = 25 = 10 + min(30 - 10, 20 - 5)
+
+                let start = offset as usize;
+                let end = start + std::cmp::min(length as usize, content.len() - index);
+                //println!("start={}, end={}, length={}, readable_bytes={}", start, end, length, content.len() - index);
+                (start..end).for_each(|i| data.set_element(i, Value::Integer(content[i - start + index] as i32)));
+
+                let new_index = index + end - start;
+                if new_index > index{
+                    if new_index == content.len(){
+                        //read >0 bytes to end
+                        vm.currently_open_files.insert(path.clone(), (content, new_index));
+                        //println!("read >0 bytes to end");
+                        Ok(Some(Value::Integer((new_index - index) as i32)))
+                    } else {
+                        //read >0 bytes
+                        vm.currently_open_files.insert(path.clone(), (content, new_index));
+                        //println!("read >0 bytes");
+                        Ok(Some(Value::Integer((end - start) as i32)))
+                    }
+                } else {
+                    if new_index == content.len(){
+                        //read 0 bytes from end to end
+                        vm.currently_open_files.insert(path.clone(), (content, new_index));
+                        //println!("read 0 bytes from end to end");
+                        Ok(Some(Value::Integer(-1)))
+                    } else {
+                        //read 0 bytes
+                        vm.currently_open_files.insert(path.clone(), (content, new_index));
+                        //println!("read 0 bytes");
+                        Ok(Some(Value::Integer(0)))
+                    }
+                }
+
+                //println!("{:?}", &content[start..end]);
+                /*if *index == content.len()-1{
+                    vm.currently_open_files.remove(&path);
+                    Ok(Some(Value::Integer(-1)))
+                } else {
+                    *index += end - start;
+                    Ok(Some(Value::Integer((end - start) as i32)))
+                }*/
+            } else {
+                Err(VmError::JavaException(JavaError::IOException(format!("File {} was not found", path))))
+            }
+        } else {
+            Err(VmError::ValidationError("Expected an object reference".to_string()))
+        }
+    } else {
+        Err(VmError::ValidationError("Expected a byte array, integer and integer as args".to_string()))
+    }
+}
+
 fn delegate_get_file_system<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
     let linux_file_system = vm.new_object("rjvm/io/UnixFileSystem")?;
     Ok(Some(Value::Reference(linux_file_system)))
@@ -573,4 +650,149 @@ fn delegate_get_boolean_attribute<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, object: 
         }
     }
     Ok(Some(Value::Integer(attributes)))
+}
+
+#[cfg(test)]
+mod tests{
+    use std::cell::RefCell;
+    use log::{error, info, LevelFilter};
+    use crate::field_info::{FieldType, PrimitiveType};
+    use crate::vm::class::ClassAndMethod;
+    use crate::vm::class_path::ClassPath;
+    use crate::vm::value::{Reference, Value};
+    use crate::vm::VM;
+
+    fn setup<'a>() -> VM<'a>{
+        //simple_logger::SimpleLogger::new().with_level(LevelFilter::Error).without_timestamps().init().unwrap();
+        let mut class_path = ClassPath::default();
+        class_path.push("resources;resources/rt.jar;resources/LogicSim.jar;resources/lib/unix;resources/lib").expect("TODO: panic message");
+
+        let mut vm = VM::new(class_path);
+        vm
+    }
+
+    fn array_copy_setup(src_index: i32, dst_index: i32, length: i32){
+        let mut vm = setup();
+        let test_method = vm.resolve_class_method("java/lang/System", "arraycopy", "(Ljava/lang/Object;ILjava/lang/Object;II)V");
+        assert!(test_method.is_ok());
+        let test_method = test_method.unwrap();
+
+        let src_array = vm.new_array(10, FieldType::Primitive(PrimitiveType::Integer), RefCell::new(vec![
+            Value::Integer(1),
+            Value::Integer(2),
+            Value::Integer(3),
+            Value::Integer(4),
+            Value::Null, Value::Null, Value::Null, Value::Null,Value::Null,Value::Null,
+        ]));
+        assert!(src_array.is_ok());
+        let src_array = src_array.unwrap();
+
+        let dst_array = vm.new_array(10, FieldType::Primitive(PrimitiveType::Integer), RefCell::new(vec![Value::Null; 10]));
+        assert!(dst_array.is_ok());
+        let dst_array = dst_array.unwrap();
+
+        println!("src: {:?}", src_array);
+        println!("dst: {:?}", dst_array);
+
+        let res = vm.invoke(test_method, None, vec![
+            Value::Reference(src_array), Value::Integer(src_index), Value::Reference(dst_array), Value::Integer(dst_index), Value::Integer(length)
+        ]);
+        assert!(res.is_ok());
+        let res = res.unwrap();
+        assert!(res.is_none());
+
+        for i in 0..length{
+            assert_eq!(src_array.get_element((src_index + i)  as usize), dst_array.get_element((dst_index + i)  as usize));
+        }
+        println!();
+        println!("src: {:?}", src_array);
+        println!("dst: {:?}", dst_array);
+    }
+
+    #[test]
+    fn test_array_copy_1(){
+        array_copy_setup(0, 0, 10);
+    }
+
+    #[test]
+    fn test_array_copy_2() {
+        array_copy_setup(1, 2, 2);
+    }
+
+    #[test]
+    fn test_read_bytes() {
+        let mut vm = setup();
+        let test_method = vm.resolve_class_method("java/io/FileInputStream", "readBytes", "([BII)I");
+        assert!(test_method.is_ok());
+        let test_method = test_method.unwrap();
+
+        let dst_array = vm.new_array(32, FieldType::Primitive(PrimitiveType::Integer), RefCell::new(vec![Value::Null; 32]));
+        assert!(dst_array.is_ok());
+        let dst_array = dst_array.unwrap();
+
+        let file_input_stream_obj = vm.new_object("java/io/FileInputStream");
+        assert!(file_input_stream_obj.is_ok());
+        let file_input_stream_obj = file_input_stream_obj.unwrap();
+
+        let path = vm.new_string_object("read_test.txt".to_string());
+        assert!(path.is_ok());
+        let path = path.unwrap();
+        file_input_stream_obj.set_field(2, Value::Reference(path));
+
+        let res = vm.invoke(test_method.clone(), Some(file_input_stream_obj), vec![
+            Value::Reference(dst_array), Value::Integer(0), Value::Integer(21)
+        ]);
+        //println!("array: {:?}", dst_array);
+
+        assert!(res.is_ok());
+        let res = res.unwrap();
+        assert!(res.is_some());
+        if let Some(Value::Integer(read)) = res{
+            assert_eq!(read, 21);
+        } else {
+            assert!(false);
+        }
+
+        let res = vm.invoke(test_method.clone(), Some(file_input_stream_obj), vec![
+            Value::Reference(dst_array), Value::Integer(21), Value::Integer(0)
+        ]);
+        //println!("array: {:?}", dst_array);
+
+        assert!(res.is_ok());
+        let res = res.unwrap();
+        assert!(res.is_some());
+        if let Some(Value::Integer(read)) = res{
+            assert_eq!(read, 0);
+        } else {
+            assert!(false);
+        }
+
+        let res = vm.invoke(test_method.clone(), Some(file_input_stream_obj), vec![
+            Value::Reference(dst_array), Value::Integer(21), Value::Integer(1)
+        ]);
+        //println!("array: {:?}", dst_array);
+
+        assert!(res.is_ok());
+        let res = res.unwrap();
+        assert!(res.is_some());
+        if let Some(Value::Integer(read)) = res{
+            assert_eq!(read, 1);
+        } else {
+            assert!(false);
+        }
+
+        let res = vm.invoke(test_method.clone(), Some(file_input_stream_obj), vec![
+            Value::Reference(dst_array), Value::Integer(22), Value::Integer(30)
+        ]);
+        //println!("array: {:?}", dst_array);
+
+        assert!(res.is_ok());
+        let res = res.unwrap();
+        assert!(res.is_some());
+        if let Some(Value::Integer(read)) = res{
+            assert_eq!(read, -1);
+        } else {
+            assert!(false);
+        }
+    }
 }

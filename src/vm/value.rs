@@ -2,6 +2,7 @@ use std::cell::{Ref, RefCell};
 use std::fmt::{Debug, Display, Formatter, Pointer};
 use crate::field_info::{FieldType, PrimitiveType};
 use crate::vm::class::ClassId;
+use crate::vm::VmError;
 
 #[derive(PartialEq, Default, Clone)]
 pub enum Value<'a>{
@@ -27,6 +28,48 @@ impl Debug for Value<'_>{
             Value::Long(value) => write!(f, "VLong ({})", value),
             Value::Float(value) => write!(f, "VFloat ({:.8})", value),
             Value::Double(value) => write!(f, "VDouble ({:.8})", value),
+        }
+    }
+}
+
+impl<'a> Value<'a>{
+    pub fn expect_int(&self) -> Result<i32, VmError> {
+        if let Value::Integer(value) = self{
+            Ok(*value)
+        } else {
+            Err(VmError::ValidationError(format!("Expected integer but found {:?}", self)))
+        }
+    }
+
+    pub fn expect_long(&self) -> Result<i64, VmError> {
+        if let Value::Long(value) = self{
+            Ok(*value)
+        } else {
+            Err(VmError::ValidationError(format!("Expected long but found {:?}", self)))
+        }
+    }
+
+    pub fn expect_float(&self) -> Result<f32, VmError> {
+        if let Value::Float(value) = self{
+            Ok(*value)
+        } else {
+            Err(VmError::ValidationError(format!("Expected float but found {:?}", self)))
+        }
+    }
+
+    pub fn expect_double(&self) -> Result<f64, VmError> {
+        if let Value::Double(value) = self{
+            Ok(*value)
+        } else {
+            Err(VmError::ValidationError(format!("Expected double but found {:?}", self)))
+        }
+    }
+
+    pub fn expect_reference(&self) -> Result<Reference<'a>, VmError> {
+        if let Value::Reference(value) = self{
+            Ok(*value)
+        } else {
+            Err(VmError::ValidationError(format!("Expected reference but found {:?}", self)))
         }
     }
 }
@@ -69,6 +112,13 @@ impl<'a> ReferenceValue<'a>{
         }
     }
 
+    pub fn get_length(&self) -> usize{
+        match &self.reference_type {
+            ReferenceType::Object(_) => {unimplemented!("This reference represents an object, please use 'get_field()'")}
+            ReferenceType::Array(_, _, content) => {content.borrow().len()}
+        }
+    }
+
     fn get_components_printable(&self) -> Vec<String>{
         let object = |field: &Value| match field {
             Value::Reference(rv) => format!("{}:{:?}", rv.id, rv.class_id),
@@ -81,7 +131,23 @@ impl<'a> ReferenceValue<'a>{
                     let chars: Vec<char> = content.borrow().iter().map(|e| if let Value::Integer(val) = e {char::from_u32(*val as u32).unwrap()} else {'?'}).collect();
                     vec![chars.iter().collect::<String>()]
                 } else {
-                    content.borrow().iter().map(object).collect()
+                    let mut vec = Vec::new();
+                    let mut null_counter = 0;
+                    for value in content.borrow().iter(){
+                        if let Value::Null = value{
+                            null_counter += 1;
+                        } else {
+                            if null_counter > 0{
+                                vec.push(format!("{}x{}", null_counter, object(&Value::Null)));
+                                null_counter = 0;
+                            }
+                            vec.push(object(&value));
+                        }
+                    }
+                    if null_counter > 0{
+                        vec.push(format!("{}x{}", null_counter, object(&Value::Null)));
+                    }
+                    vec
                 }
             }
         }

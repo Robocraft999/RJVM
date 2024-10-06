@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::fs::File;
 use std::rc::Rc;
 use std::str::Utf8Error;
 use cesu8::{from_java_cesu8, to_java_cesu8, Cesu8DecodingError};
@@ -44,6 +45,7 @@ pub struct VM<'a>{
     pub string_objects: HashMap<String, Reference<'a>>,
     pub class_objects: HashMap<ClassId, Reference<'a>>,
     pub native_method_registry: NativeMethodRegistry<'a>,
+    pub currently_open_files: HashMap<String, (Vec<u8>, usize)>,
     pub current_thread: Option<Reference<'a>>
 }
 
@@ -62,6 +64,7 @@ impl<'a> VM<'a>{
             string_objects: HashMap::new(),
             class_objects: HashMap::new(),
             native_method_registry,
+            currently_open_files: HashMap::new(),
             current_thread: None
         }
     }
@@ -91,12 +94,13 @@ impl<'a> VM<'a>{
         } else {
             let class_name = class_and_method.class.name.clone();
             let method_name = class_and_method.method.name.clone();
+            let method_descriptor = class_and_method.method.descriptor.as_str();
             let try_native = NativeMethodRegistry::invoke(self, &class_and_method, object, args);
             if let Some(native) = try_native{
                 return native;
             } else {
                 if class_and_method.method.descriptor.return_type.is_some(){
-                    error!("Native Method {}.{} wont get executed but return value is probably expected", class_name, method_name);
+                    error!("Native Method {}.{}{} wont get executed but return value is probably expected", class_name, method_name, method_descriptor);
                 } else {
                     info!("Native Method {}.{} wont get executed", class_name, method_name);
                 }
