@@ -585,22 +585,37 @@ impl<'a> CallFrame<'a>{
                             debug!("CHECKCAST {}", get_constant_printable(constants, constant_index));
                         }
                         Instruction::INSTANCEOF(constant_index) => {
-
-                            let object = self.stack.pop().unwrap().expect_reference()?;
-                            let mut object_class = vm.find_class_by_id(object.class_id).unwrap();
+                            let object = self.stack.pop().unwrap();
+                            if object == Value::Null{
+                                self.stack.push(Value::from(false));
+                                continue;
+                            }
+                            let object = object.expect_reference()?;
+                            let object_class = vm.find_class_by_id(object.class_id).unwrap();
                             let of_class = vm.get_or_resolve_class(get_constant_printable(constants, constant_index).as_str())?;
                             let mut instance_of = false;
-                            while let Some(super_class) = object_class.superclass{
+                            let mut to_check = vec![object_class];
+                            while let Some(next_class) = to_check.pop() {
+                                if next_class.id == of_class.id{
+                                    instance_of = true;
+                                    break;
+                                }
+                                if let Some(super_class) = next_class.superclass{
+                                    to_check.push(super_class);
+                                }
+                                next_class.interfaces.iter().for_each(|class| to_check.push(class));
+                            }
+                            /*while let Some(super_class) = object_class.superclass{
                                 if object_class.id == of_class.id{
                                     instance_of = true;
                                     break;
                                 }
                                 object_class = super_class;
-                            }
+                            }*/
 
                             debug!("INSTANCEOF {} = {}", get_constant_printable(constants, constant_index), instance_of);
 
-                            self.stack.push(Value::Integer(if instance_of {1} else {0}));
+                            self.stack.push(Value::from(instance_of));
                         }
                         Instruction::ATHROW => {
                             if let Some(Value::Reference(error)) = self.stack.pop(){

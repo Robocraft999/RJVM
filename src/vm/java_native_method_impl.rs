@@ -194,16 +194,28 @@ fn delegate_desired_assertion_status<'a>(vm: &mut VM<'a>, _ : ClassRef<'a>, _: O
 
 fn delegate_get_declared_fields0<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, class_object: Option<Reference<'a>>, _: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
     debug!("getDeclaredFields");
-    if let Some(obj) = class_object {
-        let class_name = vm.extract_string_from_object(&obj.get_field(5))?;
+    if let Some(clazz) = class_object {
+        let class_name = vm.extract_string_from_object(&clazz.get_field(5))?;
         debug!("class name: {}", class_name);
         let mut content = Vec::new();
         for field in vm.get_or_resolve_class(class_name.as_str())?.fields.iter(){
             let java_field = vm.new_object("java/lang/reflect/Field")?;
             //name
             java_field.set_field(6, Value::Reference(vm.new_string_object(field.name.clone())?));
+            //clazz
+            java_field.set_field(4, Value::Reference(clazz));
             debug!("field name: {}", field.name);
             content.push(Value::Reference(java_field));
+        }
+        for field in content.iter(){
+            if let Value::Reference(java_field) = field {
+                warn!("field : {:?}", java_field);
+                if let ReferenceType::Object(fields) = &java_field.reference_type{
+                    for field_field in fields.borrow().iter(){
+                        warn!("field_: {:?}", field_field);
+                    }
+                }
+            }
         }
         Ok(Some(Value::Reference(vm.new_array(1, FieldType::Object("java/lang/reflect/Field".to_string()), RefCell::new(content))?)))
     } else {

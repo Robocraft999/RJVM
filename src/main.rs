@@ -94,7 +94,7 @@ fn init_system(vm: &mut VM) -> Result<(), VmError>{
 }
 
 fn main() {
-    simple_logger::SimpleLogger::new().with_level(LevelFilter::Warn).without_timestamps().init().unwrap();
+    simple_logger::SimpleLogger::new().with_level(LevelFilter::Trace).without_timestamps().init().unwrap();
 
     let mut class_path = ClassPath::default();
     class_path.push("resources;resources/rt.jar;resources/LogicSim.jar;resources/lib/unix;resources/lib").expect("TODO: panic message");

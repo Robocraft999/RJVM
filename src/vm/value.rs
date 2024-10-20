@@ -74,6 +74,12 @@ impl<'a> Value<'a>{
     }
 }
 
+impl From<bool> for Value<'_>{
+    fn from(value: bool) -> Self{
+        Self::Integer(if value { 1 } else { 0 })
+    }
+}
+
 pub type Reference<'a> = &'a ReferenceValue<'a>;
 
 #[derive(PartialEq, Clone)]
