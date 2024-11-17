@@ -46,7 +46,7 @@ impl ClassPathEntry for FileSystemClassPathEntry{
         if candidate.exists(){
             std::fs::read(candidate)
                 .map(Some)
-                .map_err(ClassLoadingError::new)
+                .map_err(From::from)
         } else {
             Ok(None)
         }
@@ -91,7 +91,7 @@ impl JarClassPathEntry{
 impl ClassPathEntry for JarClassPathEntry{
     fn resolve(&self, class_name: &str) -> Result<Option<Vec<u8>>, ClassLoadingError>{
         let class_file_name = class_name.replace(".", "/").to_string() + ".class";
-        self.resolve_file(class_file_name.as_str()).map_err(|e| ClassLoadingError::new(std::io::Error::last_os_error()))
+        self.resolve_file(class_file_name.as_str()).map_err(|e| ClassLoadingError::from(std::io::Error::last_os_error()))
     }
 
     fn resolve_file(&self, file_name: &str) -> Result<Option<Vec<u8>>, VmError> {
@@ -105,47 +105,40 @@ impl ClassPathEntry for JarClassPathEntry{
             }
             Err(err) => match err{
                 ZipError::FileNotFound => Ok(None),
-                _ => Err(VmError::ParseError(ClassParseError::LoadingError(ClassLoadingError::new(err)))),
+                _ => Err(VmError::ParseError(ClassParseError::LoadingError(ClassLoadingError::from(err)))),
             }
         }
     }
 }
 
 #[derive(Debug)]
-pub struct ClassLoadingError {
+pub struct ClassLoadingErrorr {
     message: String,
     source: Box<dyn Error>,
 }
 
-impl PartialEq for ClassLoadingError{
-    fn eq(&self, other: &Self) -> bool {
-        self.message.eq(&other.message)
+#[derive(Debug, Clone, Error, PartialEq)]
+pub enum ClassLoadingError {
+    #[error("IOError: {0}")]
+    IOError(String),
+    #[error("ZipError: {0}")]
+    ZipError(String)
+}
+
+impl From<ZipError> for ClassLoadingError{
+    fn from(value: ZipError) -> Self {
+        ClassLoadingError::ZipError(value.to_string())
     }
 }
 
-impl ClassLoadingError {
-    pub fn new(error: impl Error + 'static) -> Self {
-        Self {
-            message: error.to_string(),
-            source: Box::new(error),
-        }
-    }
-}
-
-impl Display for ClassLoadingError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.message)
-    }
-}
-
-impl Error for ClassLoadingError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        Some(self.source.as_ref())
+impl From<std::io::Error> for ClassLoadingError{
+    fn from(value: std::io::Error) -> Self {
+        ClassLoadingError::IOError(value.to_string())
     }
 }
 
 /// Error returned if searching a class inside a Jar fails
-#[derive(Error, Debug, PartialEq)]
+#[derive(Error, Debug, PartialEq, Clone)]
 pub enum JarFileError {
     /// The jar file does not exist!
     #[error("file {0} not found")]

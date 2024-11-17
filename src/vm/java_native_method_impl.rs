@@ -10,6 +10,8 @@ use crate::vm::class::{ClassAndMethod, ClassRef};
 use crate::vm::java_error::JavaError;
 use crate::vm::value::{Reference, ReferenceType, Value};
 use crate::vm::{VM, VmError};
+use crate::vm::callstack::CallStack;
+use crate::vm::result::{VMPartialResult, VMResultType};
 
 pub struct NativeMethodRegistry<'a>{
     methods: Vec<NativeMethod<'a>>
@@ -31,7 +33,7 @@ impl <'a>NativeMethodRegistry<'a>{
         })
     }
 
-    pub fn invoke(vm: &mut VM<'a>, class_and_method: &ClassAndMethod<'a>, object: Option<Reference<'a>>, args: Vec<Value<'a>>) -> Option<Result<Option<Value<'a>>, VmError>>{
+    pub fn invoke(vm: &mut VM<'a>, class_and_method: &ClassAndMethod<'a>, object: Option<Reference<'a>>, args: Vec<Value<'a>>) -> Option<VMPartialResult<'a, Option<Value<'a>>>>{
         for method in &vm.native_method_registry.methods{
             if method.method_name == class_and_method.method.name && method.method_descriptor == class_and_method.method.descriptor{
                 return Some((method.delegate)(vm, class_and_method.class, object, args))
@@ -49,7 +51,7 @@ pub struct NativeMethod<'a>{
     delegate: NativeMethodDelegate<'a>
 }
 
-type NativeMethodDelegate<'a> = fn(&mut VM<'a>, ClassRef<'a>, Option<Reference<'a>>, Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>;
+type NativeMethodDelegate<'a> = fn(&mut VM<'a>, ClassRef<'a>, Option<Reference<'a>>, Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>;
 
 pub fn register_all_natives(registry: &mut NativeMethodRegistry){
     registry.register("java/lang/System", "nanoTime", "()J", delegate_nano_time);
@@ -97,31 +99,39 @@ pub fn register_all_natives(registry: &mut NativeMethodRegistry){
     registry.register("rjvm/io/UnixFileSystem", "getBooleanAttributes0", "(Ljava/io/File;)I", delegate_get_boolean_attribute)
 }
 
-fn delegate_nano_time<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
-    let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos() as i64;
-    Ok(Some(Value::Long(nanos)))
-}
-fn delegate_millis_time<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
-    let millis = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as i64;
-    Ok(Some(Value::Long(millis)))
+fn non_failing_some<'a>(value: Value<'a>) -> VMPartialResult<'a, Option<Value<'a>>>{
+    Ok(VMResultType::Ok(Some(value)))
 }
 
-fn delegate_identity_hash_code<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
+fn non_failing_none<'a>() -> VMPartialResult<'a, Option<Value<'a>>> {
+    Ok(VMResultType::Ok(None))
+}
+
+fn delegate_nano_time<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
+    let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos() as i64;
+    non_failing_some(Value::Long(nanos))
+}
+fn delegate_millis_time<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
+    let millis = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as i64;
+    non_failing_some(Value::Long(millis))
+}
+
+fn delegate_identity_hash_code<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
     if let Some(Value::Reference(object)) = args.get(0){
         let addr = &object as *const _;
         let addr = addr as i32;
         trace!("HASH: {addr}");
-        Ok(Some(Value::Integer(addr)))
+        non_failing_some(Value::Integer(addr))
     } else {
         Err(VmError::ValidationError(format!("Expected Object but found '{:?}'", args.get(0))))
     }
 }
 
-fn delegate_set_out<'a>(vm: &mut VM<'a>, class : ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
+fn delegate_set_out<'a>(vm: &mut VM<'a>, class : ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
     if let Some(static_object) = vm.get_static_class_object(class.id){
         if let Some(Value::Reference(object)) = args.get(0){
             static_object.set_field(2, Value::Reference(object));
-            Ok(None)
+            non_failing_none()
         } else {
             Err(VmError::ValidationError(format!("Expected Object but found '{:?}'", args.get(0))))
         }
@@ -130,7 +140,7 @@ fn delegate_set_out<'a>(vm: &mut VM<'a>, class : ClassRef<'a>, _: Option<Referen
     }
 }
 
-fn delegate_arraycopy<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
+fn delegate_arraycopy<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
     if let (Some(arg0), Some(arg1), Some(arg2), Some(arg3)) = (args.get(0), args.get(1), args.get(2), args.get(3)){
         let ref1 = arg0.expect_reference()?;
         let src_pos = arg1.expect_int()? as usize;
@@ -143,29 +153,29 @@ fn delegate_arraycopy<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<
                 let dest_index = dst_pos + i;
                 dst.borrow_mut()[dest_index] = src.borrow()[src_index].clone();
             }
-            return Ok(None)
+            return non_failing_none()
         }
     }
     Err(VmError::ValidationError("Expected two arrays with indices".to_string()))
 }
 
-fn delegate_get_primitive_class<'a>(vm: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
+fn delegate_get_primitive_class<'a>(vm: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
     let string = vm.extract_string_from_object(args.get(0).unwrap())?;
     match string.as_str() {
-        "int"     => Ok(Some(Value::Reference(vm.new_class_object(  "java/lang/Integer".to_string())?))),
-        "long"    => Ok(Some(Value::Reference(vm.new_class_object(     "java/lang/Long".to_string())?))),
-        "short"   => Ok(Some(Value::Reference(vm.new_class_object(    "java/lang/Short".to_string())?))),
-        "char"    => Ok(Some(Value::Reference(vm.new_class_object("java/lang/Character".to_string())?))),
-        "byte"    => Ok(Some(Value::Reference(vm.new_class_object(     "java/lang/Byte".to_string())?))),
-        "float"   => Ok(Some(Value::Reference(vm.new_class_object(    "java/lang/Float".to_string())?))),
-        "double"  => Ok(Some(Value::Reference(vm.new_class_object(   "java/lang/Double".to_string())?))),
-        "boolean" => Ok(Some(Value::Reference(vm.new_class_object(  "java/lang/Boolean".to_string())?))),
-        "void"    => Ok(Some(Value::Reference(vm.new_class_object(     "java/lang/Void".to_string())?))),
+        "int"     => non_failing_some(Value::Reference(vm.new_class_object(  "java/lang/Integer".to_string())?)),
+        "long"    => non_failing_some(Value::Reference(vm.new_class_object(     "java/lang/Long".to_string())?)),
+        "short"   => non_failing_some(Value::Reference(vm.new_class_object(    "java/lang/Short".to_string())?)),
+        "char"    => non_failing_some(Value::Reference(vm.new_class_object("java/lang/Character".to_string())?)),
+        "byte"    => non_failing_some(Value::Reference(vm.new_class_object(     "java/lang/Byte".to_string())?)),
+        "float"   => non_failing_some(Value::Reference(vm.new_class_object(    "java/lang/Float".to_string())?)),
+        "double"  => non_failing_some(Value::Reference(vm.new_class_object(   "java/lang/Double".to_string())?)),
+        "boolean" => non_failing_some(Value::Reference(vm.new_class_object(  "java/lang/Boolean".to_string())?)),
+        "void"    => non_failing_some(Value::Reference(vm.new_class_object(     "java/lang/Void".to_string())?)),
         _ => Err(VmError::ValidationError(format!("Expected extractable string")))
     }
 }
 
-fn delegate_get_component_type<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, class_object: Option<Reference<'a>>, args: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
+fn delegate_get_component_type<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, class_object: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
     debug!("getComponentType \n'{:?}'\n'{:?}'", class_object, args);
     let class_name = vm.extract_string_from_object(&class_object.unwrap().get_field(5))?;
     //let field_type = field_type_from_str(class_name.as_str());
@@ -174,25 +184,25 @@ fn delegate_get_component_type<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, class_objec
     let array_class = vm.get_or_resolve_class(class_name.as_str())?;
     if let Some(array_info) = &array_class.array_info{
         let component_class_object = vm.new_class_object(array_info.component_type.to_class_name())?;
-        Ok(Some(Value::Reference(component_class_object)))
+        non_failing_some(Value::Reference(component_class_object))
     } else {
         Err(VmError::ValidationError(format!("Expected Array object but found '{:?}'", class_object)))
     }
 }
 
-fn delegate_get_classloader<'a>(vm: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
+fn delegate_get_classloader<'a>(vm: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
     //TODO check
     debug!("getClassLoader0");
-    Ok(Some(Value::Null))
+    non_failing_some(Value::Null)
 }
 
-fn delegate_desired_assertion_status<'a>(vm: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
+fn delegate_desired_assertion_status<'a>(vm: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
     //TODO check
     debug!("desiredAssertionStatus0");
-    Ok(Some(Value::Integer(1)))
+    non_failing_some(Value::Integer(1))
 }
 
-fn delegate_get_declared_fields0<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, class_object: Option<Reference<'a>>, _: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
+fn delegate_get_declared_fields0<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, class_object: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
     debug!("getDeclaredFields");
     if let Some(clazz) = class_object {
         let class_name = vm.extract_string_from_object(&clazz.get_field(5))?;
@@ -217,13 +227,14 @@ fn delegate_get_declared_fields0<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, class_obj
                 }
             }
         }
-        Ok(Some(Value::Reference(vm.new_array(1, FieldType::Object("java/lang/reflect/Field".to_string()), RefCell::new(content))?)))
+        non_failing_some(Value::Reference(vm.new_array(1, FieldType::Object("java/lang/reflect/Field".to_string()), RefCell::new(content))?))
     } else {
-        Ok(None)
+        //FIXME i dont know if this should be none
+        non_failing_none()
     }
 }
 
-fn delegate_get_declared_constructors0<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, class_object: Option<Reference<'a>>, _: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
+fn delegate_get_declared_constructors0<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, class_object: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
     debug!("getDeclaredConstructors");
     if let Some(class_ref) = class_object{
         let class = vm.extract_class_from_class_object(class_ref)?;
@@ -248,31 +259,31 @@ fn delegate_get_declared_constructors0<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, cla
 
             content.push(Value::Reference(java_constructor));
         }
-        Ok(Some(Value::Reference(vm.new_array(1, FieldType::Object("java/lang/reflect/Constructor".to_string()), RefCell::new(content))?)))
+        non_failing_some(Value::Reference(vm.new_array(1, FieldType::Object("java/lang/reflect/Constructor".to_string()), RefCell::new(content))?))
     } else {
         Err(VmError::ValidationError("Expected Class object".to_string()))
     }
 }
 
-fn delegate_get_class_modifiers<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, class_object: Option<Reference<'a>>, _: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
+fn delegate_get_class_modifiers<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, class_object: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
     if let Some(obj) = class_object{
         let class = vm.extract_class_from_class_object(obj)?;
         let flags = class.flags.iter().cloned().map(|val| val as u16).reduce(|val1, val2| val1 | val2).unwrap_or(0) as i32;
-        Ok(Some(Value::Integer(flags)))
+        non_failing_some(Value::Integer(flags))
     } else {
         Err(VmError::ValidationError("Expected Class object".to_string()))
     }
 }
 
-fn delegate_get_super_class<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, class_object: Option<Reference<'a>>, _: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
+fn delegate_get_super_class<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, class_object: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
     if let Some(obj) = class_object{
         let class = vm.extract_class_from_class_object(obj)?;
         match class.superclass {
             Some(super_class) => {
                 let super_class_object = vm.new_class_object(super_class.name.clone())?;
-                Ok(Some(Value::Reference(super_class_object)))
+                non_failing_some(Value::Reference(super_class_object))
             }
-            None => Ok(Some(Value::Null))
+            None => non_failing_some(Value::Null)
         }
 
     } else {
@@ -280,174 +291,172 @@ fn delegate_get_super_class<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, class_object: 
     }
 }
 
-fn delegate_for_name0<'a>(vm: &mut VM<'a>,  _: ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
+fn delegate_for_name0<'a>(vm: &mut VM<'a>,  _: ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
     debug!("forName0");
     if let Some(name) = args.get(0) {
         let name = vm.extract_string_from_object(&name)?;
         let name = name.replace(".", "/");
         //let class = vm.find_class_by_name(name)?;
-        Ok(Some(Value::Reference(vm.new_class_object(name)?)))
+        non_failing_some(Value::Reference(vm.new_class_object(name)?))
     } else {
         Err(VmError::ValidationError("no name".to_string()))
     }
 }
 
-fn delegate_is_interface<'a>(vm: &mut VM<'a>,  _: ClassRef<'a>, obj: Option<Reference<'a>>, _: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
+fn delegate_is_interface<'a>(vm: &mut VM<'a>,  _: ClassRef<'a>, obj: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
     debug!("isInterface {:?}", obj);
     if let Some(obj) = obj {
         let class = vm.extract_class_from_class_object(obj)?;
-        Ok(Some(Value::Integer(if class.is_interface() { 1 } else { 0 })))
+        non_failing_some(Value::from(class.is_interface()))
     } else {
         Err(VmError::ValidationError("this is Null".to_string()))
     }
 }
 
-fn delegate_is_array<'a>(vm: &mut VM<'a>,  _: ClassRef<'a>, obj: Option<Reference<'a>>, _: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
+fn delegate_is_array<'a>(vm: &mut VM<'a>,  _: ClassRef<'a>, obj: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
     debug!("isArray {:?}", obj);
     if let Some(obj) = obj {
-        let name_object = obj.get_field(5);
-        let name = vm.extract_string_from_object(&name_object)?;
-        let name = name.replace(".", "/");
-        Ok(Some(Value::Integer(if name.starts_with("[") { 1 } else { 0 })))
+        non_failing_some(Value::from(obj.is_array()))
     } else {
         Err(VmError::ValidationError("this is Null".to_string()))
     }
 }
 
-fn delegate_is_primitive<'a>(vm: &mut VM<'a>,  _: ClassRef<'a>, obj: Option<Reference<'a>>, _: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
+fn delegate_is_primitive<'a>(vm: &mut VM<'a>,  _: ClassRef<'a>, obj: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
     debug!("isPrimitive {:?}", obj);
     if let Some(obj) = obj {
         let name_object = obj.get_field(5);
         let name = vm.extract_string_from_object(&name_object)?;
-        Ok(Some(Value::Integer(match name.as_str() {
+        non_failing_some(Value::Integer(match name.as_str() {
             "java/lang/Boolean" | "java/lang/Character" | "java/lang/Byte"  | "java/lang/Short"  |
             "java/lang/Integer" | "java/lang/Long"      | "java/lang/Float" | "java/lang/Double" |
             "java/lang/Void" => 1,
             _ => 0,
-        })))
+        }))
         //Ok(Some(Value::Integer(if PrimitiveType::from_str(name.as_str()).is_ok() { 1 } else { 0 })))
     } else {
         Err(VmError::ValidationError("this is Null".to_string()))
     }
 }
 
-fn delegate_float_to_raw_bits<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
+fn delegate_float_to_raw_bits<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
     if let Some(Value::Float(value)) = args.get(0){
-        return Ok(Some(Value::Integer(value.to_bits() as i32)))
+        return non_failing_some(Value::Integer(value.to_bits() as i32))
     }
     Err(VmError::ValidationError(format!("Expected float")))
 }
 
-fn delegate_double_to_raw_bits<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
+fn delegate_double_to_raw_bits<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
     if let Some(Value::Double(value)) = args.get(0){
-        return Ok(Some(Value::Long(value.to_bits() as i64)))
+        return non_failing_some(Value::Long(value.to_bits() as i64))
     }
     Err(VmError::ValidationError(format!("Expected double")))
 }
 
-fn delegate_get_class<'a>(vm: &mut VM<'a>, class : ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
+fn delegate_get_class<'a>(vm: &mut VM<'a>, class : ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
     //TODO check
     debug!("getClass");
     debug!("{}", class.name);
-    Ok(Some(Value::Reference(vm.new_class_object(class.name.clone())?)))
+    non_failing_some(Value::Reference(vm.new_class_object(class.name.clone())?))
 }
 
-fn delegate_hashcode<'a>(_: &mut VM<'a>, _: ClassRef<'a>, reference: Option<Reference<'a>>, _: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
+fn delegate_hashcode<'a>(_: &mut VM<'a>, _: ClassRef<'a>, reference: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
     //FIXME hash string not address
     if let Some(obj) = reference{
         let addr = &obj as *const _;
         let addr = addr as i32;
         trace!("HASHCODE: {addr}");
-        Ok(Some(Value::Integer(addr)))
+        non_failing_some(Value::Integer(addr))
     } else {
         Err(VmError::ValidationError("Expected object".to_string()))
     }
 }
 
-fn delegate_fill_in_stacktrace<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, object: Option<Reference<'a>>, _: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
+fn delegate_fill_in_stacktrace<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, object: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
     if let Some(receiver) = object{
-        return Ok(Some(Value::Reference(receiver)));
+        return non_failing_some(Value::Reference(receiver));
     }
-    return Err(VmError::ValidationError("Expected a Throwable".to_string()));
+    Err(VmError::ValidationError("Expected a Throwable".to_string()))
 }
 
-fn delegate_array_base_offset<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
+fn delegate_array_base_offset<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
     if let Some(Value::Reference(class)) = args.get(0){
-        Ok(Some(Value::Integer(16)))
+        non_failing_some(Value::Integer(16))
     } else {
         Err(VmError::ValidationError("Expected a class object reference".to_string()))
     }
 }
 
-fn delegate_array_index_scale<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
+fn delegate_array_index_scale<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
     if let Some(Value::Reference(class)) = args.get(0){
-        Ok(Some(Value::Integer(1)))
+        non_failing_some(Value::Integer(1))
     } else {
         Err(VmError::ValidationError("Expected a class object reference".to_string()))
     }
 }
 
-fn delegate_address_size<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
-    Ok(Some(Value::Integer(8)))
+fn delegate_address_size<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
+    non_failing_some(Value::Integer(8))
 }
 
-fn delegate_object_field_offset<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
+fn delegate_object_field_offset<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
     //FIXME calc real offset
-    Ok(Some(Value::Long(0)))
+    non_failing_some(Value::Long(0))
 }
 
-fn delegate_compare_and_swap_object<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
-    Ok(Some(Value::Integer(1)))
+fn delegate_compare_and_swap_object<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
+    non_failing_some(Value::Integer(1))
 }
 
-fn delegate_compare_and_swap_int<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
-    Ok(Some(Value::Integer(1)))
+fn delegate_compare_and_swap_int<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
+    non_failing_some(Value::Integer(1))
 }
 
-fn delegate_allocate_memory<'a>(vm: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
+fn delegate_allocate_memory<'a>(vm: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
     if let Some(Value::Long(num)) = args.get(0){
         //return is address in memory
         let ptr = vm.unsafe_allocator.allocate_memory(*num as usize);
-        Ok(Some(Value::Long(ptr)))
+        non_failing_some(Value::Long(ptr))
     } else {
         Err(VmError::ValidationError("Expected a long".to_string()))
     }
 }
 
-fn delegate_put_long<'a>(vm: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
+fn delegate_put_long<'a>(vm: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
     //because args = [Long, Dummy, Long, Dummy]
     if let (Some(Value::Long(ptr)), Some(Value::Long(value))) = (args.get(0), args.get(2)){
         vm.unsafe_allocator.put_long(*ptr, *value);
-        Ok(None)
+        non_failing_none()
     } else {
         Err(VmError::ValidationError("Expected a long as address and a long as value".to_string()))
     }
 }
 
-fn delegate_get_byte<'a>(vm: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
+fn delegate_get_byte<'a>(vm: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
     if let Some(Value::Long(ptr)) = args.get(0){
         let byte = vm.unsafe_allocator.get_byte(*ptr);
-        Ok(byte.map(|byte| Value::Integer(byte as i32)))
+        Ok(VMResultType::Ok(byte.map(|byte| Value::Integer(byte as i32))))
     } else {
         Err(VmError::ValidationError("Expected a long as address".to_string()))
     }
 }
 
-fn delegate_get_caller_class<'a>(vm: &mut VM<'a>, class : ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
-    Ok(Some(Value::Reference(vm.new_class_object(class.name.clone())?)))
+fn delegate_get_caller_class<'a>(vm: &mut VM<'a>, class : ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
+    //FIXME this is bad
+    non_failing_some(Value::Reference(vm.new_class_object(class.name.clone())?))
 }
 
-fn delegate_get_class_access_flags<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
+fn delegate_get_class_access_flags<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
     if let Some(Value::Reference(obj)) = args.get(0){
         let class = vm.extract_class_from_class_object(obj)?;
         let flags = class.flags.iter().cloned().map(|val| val as u16).reduce(|val1, val2| val1 | val2).unwrap_or(0) as i32;
-        Ok(Some(Value::Integer(flags)))
+        non_failing_some(Value::Integer(flags))
     } else {
         Err(VmError::ValidationError("Expected Class object".to_string()))
     }
 }
 
-fn delegate_current_thread<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
+fn delegate_current_thread<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
     if vm.current_thread.is_none(){
         let thread = vm.new_object("java/lang/Thread")?;
         //let thread_init = vm.resolve_class_method("java/lang/Thread", "<init>", "()V")?;
@@ -457,51 +466,53 @@ fn delegate_current_thread<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, _: Option<Refer
 
         let group = vm.new_object("java/lang/ThreadGroup")?;
         let group_init = vm.resolve_class_method("java/lang/ThreadGroup", "<init>", "()V")?;
-        vm.invoke(group_init, Some(group), vec![])?;
+        vm.invoke_new_frame(group_init, Some(group), vec![])?;
 
         thread.set_field(0, name_char_array);
         thread.set_field(1, Value::Integer(10));
         thread.set_field(8, Value::Reference(group));
         vm.current_thread = Some(thread);
-        Ok(Some(Value::Reference(thread)))
+        non_failing_some(Value::Reference(thread))
     } else {
-        Ok(Some(Value::Reference(vm.current_thread.unwrap())))
+        non_failing_some(Value::Reference(vm.current_thread.unwrap()))
     }
 }
 
-fn delegate_is_alive<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, object: Option<Reference<'a>>, _: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
-    Ok(Some(object.unwrap().get_field(5)))
+fn delegate_is_alive<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, object: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
+    non_failing_some(object.unwrap().get_field(5))
 }
 
-fn delegate_get_stack_access_control_context<'a>(_: &mut VM<'a>, _: ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
-    Ok(Some(Value::Null))
+fn delegate_get_stack_access_control_context<'a>(_: &mut VM<'a>, _: ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
+    non_failing_some(Value::Null)
 }
 
-fn delegate_do_privileged<'a>(vm: &mut VM<'a>, class: ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
+fn delegate_do_privileged<'a>(vm: &mut VM<'a>, class: ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
     if let Some(Value::Reference(action)) = args.get(0){
         let class_name = vm.find_class_by_id(action.class_id).unwrap().name.as_str();
         let run = vm.resolve_class_method(class_name, "run", "()Ljava/lang/Object;")?;
-        Ok(vm.invoke(run, Some(action), vec![])?)
+        let frame = CallStack::create_call_frame(run, Some(action), vec![])?;
+        Ok(VMResultType::CallPaused(frame))
+        //Ok(vm.invoke_new_frame(run, Some(action), vec![])?)
     } else {
         Err(VmError::ValidationError("Expected a action object reference".to_string()))
     }
 }
 
-fn delegate_string_intern<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, object: Option<Reference<'a>>, _: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
+fn delegate_string_intern<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, object: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
     if let Some(obj) = object{
         let content = vm.extract_string_from_object(&Value::Reference(obj))?;
         warn!("String {} exists already? '{}'", content, vm.string_objects.contains_key(&content));
         if vm.string_objects.contains_key(&content){
-            Ok(Some(Value::Reference(vm.string_objects[&content])))
+            non_failing_some(Value::Reference(vm.string_objects[&content]))
         } else {
-            Ok(Some(Value::Reference(obj)))
+            non_failing_some(Value::Reference(obj))
         }
     } else {
         Err(VmError::ValidationError("Expected a string object reference".to_string()))
     }
 }
 
-fn delegate_new_instance0<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, object: Option<Reference<'a>>, args: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
+fn delegate_new_instance0<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, object: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
     debug!("newInstance0");
     debug!("{:?}", args);
     if let Some(Value::Reference(constructor)) = args.get(0){
@@ -535,18 +546,18 @@ fn delegate_new_instance0<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, object: Option<R
                         Vec::new()
                     };
                     let object = vm.new_object(class_and_method.class.name.as_str())?;
-                    vm.invoke(class_and_method, Some(object), constructor_args)?;
-                    return Ok(Some(Value::Reference(object)))
+                    vm.invoke_new_frame(class_and_method, Some(object), constructor_args)?;
+                    return non_failing_some(Value::Reference(object))
                 }
             }
         }
-        Ok(None)
+        non_failing_none()
     } else {
         Err(VmError::ValidationError("Expected a constructor object and a array reference".to_string()))
     }
 }
 
-fn delegate_write_bytes<'a>(_: &mut VM<'a>, _: ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
+fn delegate_write_bytes<'a>(_: &mut VM<'a>, _: ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
     if let (Some(Value::Reference(bytes_ref)), Some(Value::Integer(offset)), Some(Value::Integer(amount)), Some(Value::Integer(should_append))) =
         (args.get(0), args.get(1), args.get(2), args.get(3))
     {
@@ -554,7 +565,7 @@ fn delegate_write_bytes<'a>(_: &mut VM<'a>, _: ClassRef<'a>, _: Option<Reference
             let data = &data.borrow()[*offset as usize..(*offset + *amount) as usize];
             let string: String = data.iter().map(|value| if let Value::Integer(int) = value { (*int as u8) as char} else { '?' }).collect();
             print!("{}", string);
-            Ok(None)
+            non_failing_none()
         } else {
             Err(VmError::ValidationError("Expected a byte array as first arg".to_string()))
         }
@@ -564,7 +575,7 @@ fn delegate_write_bytes<'a>(_: &mut VM<'a>, _: ClassRef<'a>, _: Option<Reference
 }
 
 
-fn delegate_read_bytes<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, obj: Option<Reference<'a>>, args: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
+fn delegate_read_bytes<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, obj: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
     if let (Some(arg0), Some(arg1), Some(arg2)) = (args.get(0), args.get(1), args.get(2)) {
         let data = arg0.expect_reference()?;
         let offset = arg1.expect_int()?;
@@ -596,24 +607,24 @@ fn delegate_read_bytes<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, obj: Option<Referen
                         //read >0 bytes to end
                         vm.currently_open_files.insert(path.clone(), (content, new_index));
                         //println!("read >0 bytes to end");
-                        Ok(Some(Value::Integer((new_index - index) as i32)))
+                        non_failing_some(Value::Integer((new_index - index) as i32))
                     } else {
                         //read >0 bytes
                         vm.currently_open_files.insert(path.clone(), (content, new_index));
                         //println!("read >0 bytes");
-                        Ok(Some(Value::Integer((end - start) as i32)))
+                        non_failing_some(Value::Integer((end - start) as i32))
                     }
                 } else {
                     if new_index == content.len(){
                         //read 0 bytes from end to end
                         vm.currently_open_files.insert(path.clone(), (content, new_index));
                         //println!("read 0 bytes from end to end");
-                        Ok(Some(Value::Integer(-1)))
+                        non_failing_some(Value::Integer(-1))
                     } else {
                         //read 0 bytes
                         vm.currently_open_files.insert(path.clone(), (content, new_index));
                         //println!("read 0 bytes");
-                        Ok(Some(Value::Integer(0)))
+                        non_failing_some(Value::Integer(0))
                     }
                 }
 
@@ -636,9 +647,9 @@ fn delegate_read_bytes<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, obj: Option<Referen
     }
 }
 
-fn delegate_get_file_system<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
+fn delegate_get_file_system<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
     let linux_file_system = vm.new_object("rjvm/io/UnixFileSystem")?;
-    Ok(Some(Value::Reference(linux_file_system)))
+    non_failing_some(Value::Reference(linux_file_system))
 }
 
 const BA_EXISTS: i32 = 1;
@@ -646,7 +657,7 @@ const BA_REGULAR: i32 = 2;
 const BA_DIRECTORY: i32 = 4;
 const BA_HIDDEN: i32 = 8;
 
-fn delegate_get_boolean_attribute<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, object: Option<Reference<'a>>, args: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
+fn delegate_get_boolean_attribute<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, object: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
     let path = if let Some(Value::Reference(path_val)) = args.get(0){
         let string_val = path_val.get_field(1);
         vm.extract_string_from_object(&string_val)?
@@ -661,7 +672,7 @@ fn delegate_get_boolean_attribute<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, object: 
             attributes |= BA_DIRECTORY;
         }
     }
-    Ok(Some(Value::Integer(attributes)))
+    non_failing_some(Value::Integer(attributes))
 }
 
 #[cfg(test)]
@@ -706,11 +717,11 @@ mod tests{
         println!("src: {:?}", src_array);
         println!("dst: {:?}", dst_array);
 
-        let res = vm.invoke(test_method, None, vec![
+        let res = vm.invoke_new_frame(test_method, None, vec![
             Value::Reference(src_array), Value::Integer(src_index), Value::Reference(dst_array), Value::Integer(dst_index), Value::Integer(length)
         ]);
         assert!(res.is_ok());
-        let res = res.unwrap();
+        let res = res.unwrap().to_option();
         assert!(res.is_none());
 
         for i in 0..length{
@@ -751,13 +762,13 @@ mod tests{
         let path = path.unwrap();
         file_input_stream_obj.set_field(2, Value::Reference(path));
 
-        let res = vm.invoke(test_method.clone(), Some(file_input_stream_obj), vec![
+        let res = vm.invoke_new_frame(test_method.clone(), Some(file_input_stream_obj), vec![
             Value::Reference(dst_array), Value::Integer(0), Value::Integer(21)
         ]);
         //println!("array: {:?}", dst_array);
 
         assert!(res.is_ok());
-        let res = res.unwrap();
+        let res = res.unwrap().to_option();
         assert!(res.is_some());
         if let Some(Value::Integer(read)) = res{
             assert_eq!(read, 21);
@@ -765,13 +776,13 @@ mod tests{
             assert!(false);
         }
 
-        let res = vm.invoke(test_method.clone(), Some(file_input_stream_obj), vec![
+        let res = vm.invoke_new_frame(test_method.clone(), Some(file_input_stream_obj), vec![
             Value::Reference(dst_array), Value::Integer(21), Value::Integer(0)
         ]);
         //println!("array: {:?}", dst_array);
 
         assert!(res.is_ok());
-        let res = res.unwrap();
+        let res = res.unwrap().to_option();
         assert!(res.is_some());
         if let Some(Value::Integer(read)) = res{
             assert_eq!(read, 0);
@@ -779,13 +790,13 @@ mod tests{
             assert!(false);
         }
 
-        let res = vm.invoke(test_method.clone(), Some(file_input_stream_obj), vec![
+        let res = vm.invoke_new_frame(test_method.clone(), Some(file_input_stream_obj), vec![
             Value::Reference(dst_array), Value::Integer(21), Value::Integer(1)
         ]);
         //println!("array: {:?}", dst_array);
 
         assert!(res.is_ok());
-        let res = res.unwrap();
+        let res = res.unwrap().to_option();
         assert!(res.is_some());
         if let Some(Value::Integer(read)) = res{
             assert_eq!(read, 1);
@@ -793,13 +804,13 @@ mod tests{
             assert!(false);
         }
 
-        let res = vm.invoke(test_method.clone(), Some(file_input_stream_obj), vec![
+        let res = vm.invoke_new_frame(test_method.clone(), Some(file_input_stream_obj), vec![
             Value::Reference(dst_array), Value::Integer(22), Value::Integer(30)
         ]);
         //println!("array: {:?}", dst_array);
 
         assert!(res.is_ok());
-        let res = res.unwrap();
+        let res = res.unwrap().to_option();
         assert!(res.is_some());
         if let Some(Value::Integer(read)) = res{
             assert_eq!(read, -1);

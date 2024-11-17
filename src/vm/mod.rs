@@ -22,6 +22,7 @@ use crate::vm::gc::ObjectAllocator;
 use crate::vm::java_error::JavaError;
 use crate::vm::java_native_method_impl::{NativeMethodRegistry, register_all_natives};
 use crate::vm::r#unsafe::Unsafe;
+use crate::vm::result::{VMPartialResult, VMResult, VMResultType};
 use crate::vm::value::{Reference, ReferenceType};
 
 pub mod class_path;
@@ -35,6 +36,7 @@ pub mod class;
 mod gc;
 mod java_native_method_impl;
 mod r#unsafe;
+mod result;
 
 pub struct VM<'a>{
     pub class_manager: ClassManager<'a>,
@@ -69,28 +71,98 @@ impl<'a> VM<'a>{
         }
     }
 
-    pub fn dump_class_file(&mut self, class_name: &str) -> Result<(), VmError>{
+    pub fn dump_class_file(&mut self, class_name: &str) -> VMResult<()>{
         let class = self.get_or_resolve_class(class_name)?;
         info!("Class: {:?}", class);
         Ok(())
     }
 
-    pub fn invoke(&mut self, class_and_method: ClassAndMethod<'a>, object: Option<Reference<'a>>, args: Vec<Value<'a>>) -> Result<Option<Value<'a>>, VmError>{
+    pub fn invoke_frame(&mut self, call_frame: CallFrame<'a>) -> VMPartialResult<'a, Option<Value<'a>>> {
+        let class_and_method = call_frame.class_and_method.clone();
         if !class_and_method.method.is_native(){
-            let method_signature = format!("{}.{}{}", class_and_method.class.name, class_and_method.method.name, class_and_method.method.descriptor.as_str());
-            info!("INVOKE {} on {:?} with {:?}", method_signature, object, args);
-            
-            /*let mut frame = */self.call_stack.push_call_frame(class_and_method, object, args)?;
+            info!("INVOKE FRAME OF {} at {:?}", class_and_method.format(), call_frame.pc);
+
+            self.call_stack.push_call_frame(call_frame);
+            self.call_stack.print_call_stack();
+            let vm_ptr: *mut VM = self;
+            let mut result = self.call_stack.execute_top(vm_ptr)?;
+            loop {
+                match result {
+                    VMResultType::Ok(value) => {
+                        return Ok(VMResultType::Ok(value))
+                    },
+                    VMResultType::CallPaused(new_frame) => {
+                        result = self.invoke_frame(new_frame)?;
+                        self.call_stack.pop_call_frame();
+                    }
+                }
+            }
+        } else {
+            let object = if class_and_method.method.is_static() {
+                None
+            } else {
+                match call_frame.locals.get(0) {
+                    Some(local) => {
+                        Some(local.expect_reference()?)
+                    },
+                    None => None
+                }
+            };
+            let args = call_frame.locals
+                .iter()
+                .cloned()
+                .skip(if object.is_none() {0} else {1})
+                .take_while(|value| value != &Value::Uninitialized)
+                .collect::<Vec<_>>();
+            let try_native = NativeMethodRegistry::invoke(self, &class_and_method, object, args);
+            if let Some(native) = try_native{
+                self.call_stack.push_call_frame(call_frame);
+                self.call_stack.print_call_stack();
+                native
+            } else {
+                if class_and_method.method.descriptor.return_type.is_some(){
+                    error!("Native Method {} wont get executed but return value is probably expected", class_and_method.format());
+                } else {
+                    info!("Native Method {} wont get executed", class_and_method.format());
+                }
+
+                Ok(VMResultType::Ok(None))
+            }
+        }
+    }
+
+    pub fn invoke_new_frame(&mut self, class_and_method: ClassAndMethod<'a>, object: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
+        if !class_and_method.method.is_native(){
+            let cam_formatted = class_and_method.format();
+            info!("INVOKE {} on {:?} with {:?}", cam_formatted, object, args);
+
+            let call_frame = CallStack::create_call_frame(class_and_method, object, args)?;
+            self.call_stack.push_call_frame(call_frame);
             self.call_stack.print_call_stack();
             let vm_ptr: *mut VM = self;
             //let result = frame.execute(self)?;
             let result = self.call_stack.execute_top(vm_ptr)?;
+            info!("INVRETURN {} returned: {:?}", cam_formatted, result);
+            match result {
+                VMResultType::Ok(value) => Ok(VMResultType::Ok(value)),
+                VMResultType::CallPaused(new_frame) => {
+                    let res = self.invoke_frame(new_frame)?;
+                    if let VMResultType::Ok(value) = res {
+                        let mut last_frame = self.call_stack.pop_call_frame();
+                        last_frame.prepare_reentry(value);
+                        self.invoke_frame(last_frame)
+                    } else {
+                        unreachable!()
+                        //Err(VmError::ValidationError("Not yet implemented".to_string()))
+                    }
+                }
+            }
+
+            //self.call_stack.pop_call_frame();
+
+            //Ok(result)
             
-            info!("INVRETURN {} returned: {:?}", method_signature, result);
 
-            self.call_stack.pop_call_frame();
-
-            Ok(result)
         } else {
             let class_name = class_and_method.class.name.clone();
             let method_name = class_and_method.method.name.clone();
@@ -105,13 +177,13 @@ impl<'a> VM<'a>{
                     info!("Native Method {}.{} wont get executed", class_name, method_name);
                 }
 
-                return Ok(None);
+                return Ok(VMResultType::Ok(None));
             }
             Err(VmError::JavaException(JavaError::MethodNotFoundException(method_name)))
         }
     }
 
-    pub fn get_or_resolve_class(&mut self, class_name: &str) -> Result<ClassRef<'a>, VmError>{
+    pub fn get_or_resolve_class(&mut self, class_name: &str) -> VMResult<ClassRef<'a>>{
         let resolved = self.class_manager.get_or_resolve_class(class_name)?;
         if let ResolvedClass::NewClass(to_init) = &resolved{
             for class in to_init.to_initialize.iter(){
@@ -121,7 +193,7 @@ impl<'a> VM<'a>{
         Ok(resolved.get_class())
     }
 
-    fn init_class(&mut self, class: ClassRef<'a>) -> Result<(), VmError>{
+    fn init_class(&mut self, class: ClassRef<'a>) -> VMResult<()>{
         if class.transitive_field_count > 0{
             let static_object = self.new_object_from_class(class);
             self.static_class_objects.insert(class.id, static_object);
@@ -130,14 +202,14 @@ impl<'a> VM<'a>{
                     class,
                     method: clinit_method,
                 };
-                self.invoke(class_and_method, Some(static_object), Vec::new())?;
+                self.invoke_new_frame(class_and_method, Some(static_object), Vec::new())?;
             }
         }
 
         Ok(())
     }
 
-    pub fn resolve_class_method(&mut self, class_name: &str, method_name: &str, descriptor: &str) -> Result<ClassAndMethod<'a>, VmError>{
+    pub fn resolve_class_method(&mut self, class_name: &str, method_name: &str, descriptor: &str) -> VMResult<ClassAndMethod<'a>>{
         self.get_or_resolve_class(class_name)
             .and_then(|class| {
                 class
@@ -147,7 +219,7 @@ impl<'a> VM<'a>{
             })
     }
 
-    pub fn new_object(&mut self, class_name: &str) -> Result<Reference<'a>, VmError>{
+    pub fn new_object(&mut self, class_name: &str) -> VMResult<Reference<'a>>{
         let class = self.get_or_resolve_class(class_name)?;
         Ok(self.new_object_from_class(class))
     }
@@ -161,7 +233,7 @@ impl<'a> VM<'a>{
         self.static_class_objects.get(&id).cloned()
     }
 
-    pub fn new_array(&mut self, dims: usize, field_type: FieldType, content: RefCell<Vec<Value<'a>>>) -> Result<Reference<'a>, VmError>{
+    pub fn new_array(&mut self, dims: usize, field_type: FieldType, content: RefCell<Vec<Value<'a>>>) -> VMResult<Reference<'a>>{
         let class_name = match field_type.clone(){
             FieldType::Object(class_name) => {
                 "[L".to_string() + &class_name + ";"
@@ -183,7 +255,7 @@ impl<'a> VM<'a>{
         Ok(self.object_allocator.allocate_array(class, dims, field_type, content))
     }
 
-    pub fn new_string_object(&mut self, string: String) -> Result<Reference<'a>, VmError>{
+    pub fn new_string_object(&mut self, string: String) -> VMResult<Reference<'a>>{
         let char_array: Vec<Value<'a>> = string.chars().map(|c| Value::Integer(c as i32)).collect();
         let char_array = RefCell::new(char_array);
         let char_array = Value::Reference(self.new_array(1, FieldType::Primitive(PrimitiveType::Char), char_array)?);
@@ -202,7 +274,7 @@ impl<'a> VM<'a>{
 
     }
 
-    pub fn extract_string_from_object(&self, value: &Value<'a>) -> Result<String, VmError>{
+    pub fn extract_string_from_object(&self, value: &Value<'a>) -> VMResult<String>{
         if let Value::Reference(reference) = value{
             let chars = reference.get_field(0);
             if let Value::Reference(char_ref) = chars {
@@ -217,7 +289,7 @@ impl<'a> VM<'a>{
         Err(VmError::ValidationError(format!( "Expected String Object but found: {:?}", value)))
     }
 
-    pub fn new_class_object(&mut self, class_name: String) -> Result<Reference<'a>, VmError>{
+    pub fn new_class_object(&mut self, class_name: String) -> VMResult<Reference<'a>>{
         let class = self.get_or_resolve_class(class_name.as_str())?;
         let class_id = class.id;
 
@@ -234,7 +306,7 @@ impl<'a> VM<'a>{
         }
     }
 
-    pub fn extract_class_from_class_object(&mut self, object: Reference<'a>) -> Result<ClassRef<'a>, VmError>{
+    pub fn extract_class_from_class_object(&mut self, object: Reference<'a>) -> VMResult<ClassRef<'a>>{
         let name_object = object.get_field(5);
         let name = self.extract_string_from_object(&name_object)?;
         let name = name.replace(".", "/");
@@ -251,7 +323,7 @@ impl<'a> VM<'a>{
     }
 }
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Clone)]
 pub enum VmError{
     #[error("{0}")]
     JavaException(#[from] JavaError),

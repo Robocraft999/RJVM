@@ -11,7 +11,9 @@ use crate::field_info::{FieldType, PrimitiveType};
 use crate::method_info::MethodDescriptor;
 use crate::vm::java_error::JavaError;
 use crate::vm::{VM, VmError};
+use crate::vm::callstack::CallStack;
 use crate::vm::class::{ClassAndMethod, ClassRef};
+use crate::vm::result::{VMPartialResult, VMResultType};
 use crate::vm::value::{ReferenceType, Value};
 
 #[derive(Clone)]
@@ -23,7 +25,7 @@ pub struct CallFrame<'a>{
 }
 
 impl<'a> CallFrame<'a>{
-    pub fn execute(&mut self, vm: &mut VM<'a>) -> Result<Option<Value<'a>>, VmError>{
+    pub fn execute(&mut self, vm: &mut VM<'a>) -> VMPartialResult<'a, Option<Value<'a>>>{
         if let Some(code) = &self.class_and_method.method.code{
             let constants = &self.class_and_method.class.constants;
             for class in vm.class_manager.classes.iter_mut(){
@@ -117,20 +119,20 @@ impl<'a> CallFrame<'a>{
                                 warn!("NAO");
                             }
                         }
-                        Instruction::INVOKEVIRTUAL(index) => { self.execute_invoke(vm, index, InvokeKind::VIRTUAL)? }
-                        Instruction::INVOKESPECIAL(index) => { self.execute_invoke(vm, index, InvokeKind::SPECIAL)? }
-                        Instruction::INVOKESTATIC(index) => { self.execute_invoke(vm, index, InvokeKind::STATIC)? }
-                        Instruction::INVOKEINTERFACE(index, _, _) => { self.execute_invoke(vm, index, InvokeKind::INTERFACE)? }
+                        Instruction::INVOKEVIRTUAL(index) => { return self.execute_invoke(vm, index, InvokeKind::VIRTUAL) }
+                        Instruction::INVOKESPECIAL(index) => { return self.execute_invoke(vm, index, InvokeKind::SPECIAL) }
+                        Instruction::INVOKESTATIC(index) => { return self.execute_invoke(vm, index, InvokeKind::STATIC) }
+                        Instruction::INVOKEINTERFACE(index, _, _) => { return self.execute_invoke(vm, index, InvokeKind::INTERFACE) }
 
                         Instruction::RETURN => {
                             info!("RETURN");
-                            return Ok(None);
+                            return Ok(VMResultType::Ok(None));
                         }
                         Instruction::IRETURN | Instruction::LRETURN | Instruction::FRETURN | Instruction::DRETURN | Instruction::ARETURN=> {
                             //TODO check for types
                             let value = self.stack.pop();
                             info!("RETURN {:?}", value);
-                            return Ok(value);
+                            return Ok(VMResultType::Ok(value));
                         }
                         Instruction::NEW(index) => {
                             let class_name = self.class_and_method.get_constant_utf8(index).unwrap();
@@ -173,12 +175,12 @@ impl<'a> CallFrame<'a>{
                                 if let ReferenceType::Array(_, _, content) = &reference.reference_type{
                                     self.stack.push(Value::Integer(content.borrow().len() as i32));
                                 } else {
-                                    return Err(VmError::ValidationError("Expected an Array ref but found: Object ref".to_string()))
+                                    return VMPartialResult::Err(VmError::ValidationError("Expected an Array ref but found: Object ref".to_string()))
                                 }
                             } else if let Some(Value::Null) = popped{
-                                return Err(VmError::JavaException(JavaError::NullPointerException("Expected an array".to_string())))
+                                return VMPartialResult::Err(VmError::JavaException(JavaError::NullPointerException("Expected an array".to_string())))
                             } else {
-                                return Err(VmError::ValidationError(format!("Expected an array ref but found: {:?}", &popped)))
+                                return VMPartialResult::Err(VmError::ValidationError(format!("Expected an array ref but found: {:?}", &popped)))
                             }
                         }
                         Instruction::DUP => {
@@ -636,7 +638,14 @@ impl<'a> CallFrame<'a>{
         if self.class_and_method.method.is_abstract(){
             Err(VmError::MethodCallError(format!("abstract method {}", self.class_and_method.method.name)))
         } else {
-            Err(VmError::MethodCallError(format!("{}", self.class_and_method.method.name)))
+            Err(VmError::MethodCallError(format!("{}", self.class_and_method.format())))
+        }
+    }
+
+    pub fn prepare_reentry(&mut self, add_to_stack: Option<Value<'a>>){
+        match add_to_stack {
+            Some(value) => self.stack.push(value),
+            None => {}
         }
     }
 
@@ -840,19 +849,19 @@ impl<'a> CallFrame<'a>{
         }
     }
 
-    fn execute_invoke(&mut self, vm: &mut VM<'a>, index: u16, kind: InvokeKind) -> Result<(), VmError> {
+    fn execute_invoke(&mut self, vm: &mut VM<'a>, index: u16, kind: InvokeKind) -> VMPartialResult<'a, Option<Value<'a>>> {
         let (class_name, method_name, descriptor) = self.class_and_method.get_constant_method_info_descriptor(index).expect("GIB MICH DIE METHODE");
         let args_count = MethodDescriptor::new(descriptor.clone()).args.len();
         let mut args = Vec::new();
         for _ in 0..args_count{
             let popped = self.stack.pop().unwrap();
             match popped {
-                Value::Long(_) | Value::Double(_) => {args.insert(0, Value::Uninitialized)}
+                Value::Long(_) | Value::Double(_) => {args.insert(0, Value::Dummy)}
                 _ => {}
             }
             args.insert(0, popped);
         }
-        if class_name.starts_with("["){
+        /*if class_name.starts_with("["){
             let receiver = self.stack.pop().unwrap();
             return if let Value::Reference(array_ref) = receiver{
                 if method_name == "clone"{
@@ -869,7 +878,7 @@ impl<'a> CallFrame<'a>{
             } else {
                 Err(VmError::ValidationError("Expected array as receiver".to_string()))
             };
-        }
+        }*/
 
         trace!("loading class to execute on: '{}'", class_name.as_str());
         let class = vm.get_or_resolve_class(class_name.as_str())?;
@@ -919,11 +928,14 @@ impl<'a> CallFrame<'a>{
             trace!("    [{}] {:?}", index, value);
         }
         debug!("INVOKE{:?}: {}{} on {:?}", kind, method_name, descriptor, receiver);
-        let res = vm.invoke(class_and_method, receiver, args)?;
+        let call_frame = CallStack::create_call_frame(class_and_method, receiver, args)?;
+        Ok(VMResultType::CallPaused(call_frame))
+        //Ok(VMResultType::Ok(Some(Value::Null)))
+        /*let res = vm.invoke(class_and_method, receiver, args)?.to_option();
         if res.is_some(){
             self.stack.push(res.unwrap())
         }
-        Ok(())
+        Ok(())*/
     }
 
     fn get_method_virtual(class: ClassRef<'a>, method_name: &str, descriptor: &str) -> Result<ClassAndMethod<'a>, VmError>{
@@ -982,7 +994,7 @@ impl<'a> CallFrame<'a>{
 
 impl Debug for CallFrame<'_>{
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Method: {}.{}{} at {:?}", self.class_and_method.class.name, self.class_and_method.method.name, self.class_and_method.method.descriptor.as_str(), self.pc)
+        write!(f, "Method: {} at {:?}", self.class_and_method.format(), self.pc)
     }
 }
 

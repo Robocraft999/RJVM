@@ -8,10 +8,11 @@ use crate::vm::ClassAndMethod;
 use crate::vm::info;
 use crate::error;
 use crate::ProgramCounter;
+use crate::vm::result::{VMPartialResult, VMResult, VMResultType};
 use crate::vm::value::Reference;
 
 pub struct CallStack<'a>{
-    frames: Vec<CallFrame<'a>>,
+    pub frames: Vec<CallFrame<'a>>,
     frames_infos : Vec<String>,
     current_frame: Option<RefCell<CallFrame<'a>>>
 }
@@ -25,27 +26,46 @@ impl<'a> CallStack<'a> {
         }
     }
 
-    pub fn push_call_frame(&mut self, class_and_method: ClassAndMethod<'a>, object: Option<Reference<'a>>, args: Vec<Value<'a>>) -> Result<()/*CallFrame<'a>*/, VmError>{
-        let mut empty_locals = vec![Value::Null; class_and_method.get_max_locals()];
-        for i in 0..args.len(){
-            empty_locals[i] = args.get(i).unwrap().clone();
-        }
-        if !class_and_method.method.is_static(){
-            if let Some(obj) = object {
-                empty_locals.insert(0, Value::Reference(obj));
-                empty_locals.pop();
+    pub fn create_call_frame<'frame>(class_and_method: ClassAndMethod<'frame>, object: Option<Reference<'frame>>, args: Vec<Value<'frame>>) -> VMResult<CallFrame<'frame>> {
+        let locals = if !class_and_method.method.is_native(){
+            let mut empty_locals = vec![Value::Uninitialized; class_and_method.get_max_locals()];
+            for i in 0..args.len(){
+                empty_locals[i] = args.get(i).unwrap().clone();
             }
-        }
-        let args_amount = args.iter().filter(|v| **v != Value::Uninitialized).count();
+            if !class_and_method.method.is_static(){
+                if let Some(obj) = object {
+                    empty_locals.insert(0, Value::Reference(obj));
+                    empty_locals.pop();
+                }
+            }
+            assert_eq!(empty_locals.len(), class_and_method.get_max_locals(), "Locals has not the correct length (was {}, expected {})", empty_locals.len(), class_and_method.get_max_locals());
+            empty_locals
+        } else {
+            let mut native_locals = Vec::new();
+            if !class_and_method.method.is_static() {
+                if let Some(obj) = object {
+                    native_locals.push(Value::Reference(obj));
+                }
+            }
+            for i in 0..args.len(){
+                native_locals.push(args.get(i).unwrap().clone());
+            }
+            native_locals
+        };
+
+        let args_amount = args.iter().filter(|v| **v != Value::Dummy).count();
         assert_eq!(args_amount, class_and_method.method.get_args_count(), "Args has not the correct length (was {}, expected {})", args_amount, class_and_method.method.get_args_count());
-        info!("NEW CALL FRAME with {:?} locals, \nobject=({:?}), \nargs=({:?}), \nmax_locals=[{}]", empty_locals, object, args, class_and_method.get_max_locals());
-        assert_eq!(empty_locals.len(), class_and_method.get_max_locals(), "Locals has not the correct length (was {}, expected {})", empty_locals.len(), class_and_method.get_max_locals());
-        let call_frame = CallFrame{
+        info!("NEW CALL FRAME with {:?} locals, \nobject=({:?}), \nargs=({:?}), \nmax_locals=[{}]", locals, object, args, class_and_method.get_max_locals());
+
+        Ok(CallFrame{
             class_and_method,
-            locals: empty_locals,
+            locals,
             pc: ProgramCounter(0),
             stack: Vec::new()
-        };
+        })
+    }
+
+    pub fn push_call_frame(&mut self, call_frame: CallFrame<'a>){
         //self.call_stack.push(call_frame);
         //self.call_stack.push_call_frame(call_frame);
         /*let frame_ref = unsafe {
@@ -57,16 +77,18 @@ impl<'a> CallStack<'a> {
         //let last_frame = self.frames.last().unwrap();
         self.frames_infos.push(format!("{:?} {}", call_frame.pc, call_frame.class_and_method.format()));
         self.frames.push(call_frame);
-        Ok(())
+        error!("PUSH {:?}", self.frames.last().unwrap());
     }
 
-    pub fn pop_call_frame(&mut self){
+    pub fn pop_call_frame(&mut self) -> CallFrame<'a>{
         //self.frames.pop();
+        error!("POP  {:?}", self.frames.last().unwrap());
         self.frames_infos.pop();
+        self.frames.pop().unwrap()
     }
 
     // Execute the last frame on the stack
-    pub fn execute_top(&mut self, vm: *mut VM<'a>) -> Result<Option<Value<'a>>, VmError>{
+    pub fn execute_top(&mut self, vm: *mut VM<'a>) -> VMPartialResult<'a, Option<Value<'a>>>{
         /*// Get a raw pointer to the last frame
         let frame_ptr: *mut CallFrame = self.frames.last_mut().unwrap();
 
@@ -76,20 +98,38 @@ impl<'a> CallStack<'a> {
             (*frame_ptr).execute(&mut *vm)
         }*/
 
-        let new_current_frame = if let Some(frame_cell) = self.current_frame.take(){
+        /*let new_current_frame = if let Some(frame_cell) = self.current_frame.take(){
             let top = self.frames.pop().unwrap();
             self.frames.push(frame_cell.into_inner());
             top
         } else {
             self.frames.pop().unwrap()
-        };
-        self.current_frame = Some(RefCell::new(new_current_frame));
+        };*/
+        //self.current_frame = Some(RefCell::new(new_current_frame));
         unsafe {
             //self.frames.last_mut().unwrap().execute(&mut *vm)
-            let c = self.current_frame.take().unwrap();
-            let res = c.borrow_mut().execute(&mut *vm);
+            //let c = self.current_frame.take().unwrap();
+            //let res = c.borrow_mut().execute(&mut *vm);
+            let mut frame = self.pop_call_frame();
+            let res = {
+                //let frame = self.frames.last_mut().unwrap();
+                frame.execute(&mut *vm)?.clone()
+            };
+            //let res = c.execute(&mut *vm);
             //self.frames.push(c.into_inner());
-            res
+            match res {
+                VMResultType::Ok(value) => {
+                    //self.pop_call_frame();
+                    Ok(VMResultType::Ok(value))
+                },
+                VMResultType::CallPaused(new_frame) => {
+                    self.push_call_frame(frame);
+                    Ok(VMResultType::CallPaused(new_frame))
+                    //self.push_call_frame(frame);
+                    //self.execute_top(vm)
+                }
+            }
+            //Ok(res)
         }
     }
 

@@ -14,6 +14,7 @@ pub enum Value<'a>{
     Long(i64),
     Float(f32),
     Double(f64),
+    Dummy,
 
     Null,
 }
@@ -28,6 +29,7 @@ impl Debug for Value<'_>{
             Value::Long(value) => write!(f, "VLong ({})", value),
             Value::Float(value) => write!(f, "VFloat ({:.8})", value),
             Value::Double(value) => write!(f, "VDouble ({:.8})", value),
+            Value::Dummy => write!(f, "VDummy")
         }
     }
 }
@@ -122,6 +124,20 @@ impl<'a> ReferenceValue<'a>{
         match &self.reference_type {
             ReferenceType::Object(_) => {unimplemented!("This reference represents an object, please use 'get_field()'")}
             ReferenceType::Array(_, _, content) => {content.borrow().len()}
+        }
+    }
+
+    pub fn is_array(&self) -> bool{
+        match self.reference_type {
+            ReferenceType::Array(_, _, _) => true,
+            ReferenceType::Object(_) => false
+        }
+    }
+
+    pub fn is_object(&self) -> bool{
+        match self.reference_type {
+            ReferenceType::Array(_, _, _) => false,
+            ReferenceType::Object(_) => true
         }
     }
 

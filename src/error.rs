@@ -19,7 +19,7 @@ impl fmt::Display for InvalidDirectoryError {
 
 impl std::error::Error for InvalidDirectoryError {}
 
-#[derive(Error, Debug, PartialEq)]
+#[derive(Error, Debug, PartialEq, Clone)]
 pub enum ClassParseError{
     #[error("Reached EOF when parsing a class")]
     ReadError,
