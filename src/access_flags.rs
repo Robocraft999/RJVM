@@ -87,3 +87,25 @@ pub fn parse_method_flags(flags: u16) -> MethodFlags{
     flags_parsed
 }
 
+mod tests{
+    use crate::access_flags::{parse_method_flags, MethodFlag};
+
+    #[test]
+    fn test_parse_method_flags(){
+        assert_eq!(parse_method_flags(0x1), vec!(MethodFlag::Public));
+        assert_eq!(parse_method_flags(0x2), vec!(MethodFlag::Private));
+        assert_eq!(parse_method_flags(0x4), vec!(MethodFlag::Protected));
+        assert_eq!(parse_method_flags(0x8), vec!(MethodFlag::Static));
+        assert_eq!(parse_method_flags(0x10), vec!(MethodFlag::Final));
+        assert_eq!(parse_method_flags(0x20), vec!(MethodFlag::Synchronized));
+        assert_eq!(parse_method_flags(0x40), vec!(MethodFlag::Bridge));
+        assert_eq!(parse_method_flags(0x80), vec!(MethodFlag::VarArgs));
+        assert_eq!(parse_method_flags(0x100), vec!(MethodFlag::Native));
+        assert_eq!(parse_method_flags(0x400), vec!(MethodFlag::Abstract));
+        assert_eq!(parse_method_flags(0x800), vec!(MethodFlag::Strict));
+        assert_eq!(parse_method_flags(0x1000), vec!(MethodFlag::Synthetic));
+
+        assert_eq!(parse_method_flags(0x10A), vec![MethodFlag::Private, MethodFlag::Static, MethodFlag::Native]);
+    }
+}
+
