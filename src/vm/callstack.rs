@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use log::warn;
+use log::{trace, warn};
 use super::call_frame::CallFrame;
 use crate::VM;
 use crate::Value;
@@ -86,6 +86,10 @@ impl<'a> CallStack<'a> {
         self.frames_infos.pop();
         self.frames.pop().unwrap()
     }
+    
+    pub fn add_to_top_stack(&mut self, value: Option<Value<'a>>){
+        self.frames.last_mut().unwrap().prepare_reentry(value);
+    }
 
     // Execute the last frame on the stack
     pub fn execute_top(&mut self, vm: *mut VM<'a>) -> VMPartialResult<'a, Option<Value<'a>>>{
@@ -106,10 +110,14 @@ impl<'a> CallStack<'a> {
             self.frames.pop().unwrap()
         };*/
         //self.current_frame = Some(RefCell::new(new_current_frame));
+        if self.frames.len() == 0 {
+            return Ok(VMResultType::Ok(None))
+        }
         unsafe {
             //self.frames.last_mut().unwrap().execute(&mut *vm)
             //let c = self.current_frame.take().unwrap();
             //let res = c.borrow_mut().execute(&mut *vm);
+            trace!("execute_top popping frame for execution");
             let mut frame = self.pop_call_frame();
             let res = {
                 //let frame = self.frames.last_mut().unwrap();
@@ -120,9 +128,11 @@ impl<'a> CallStack<'a> {
             match res {
                 VMResultType::Ok(value) => {
                     //self.pop_call_frame();
+                    trace!("et execution returned Ok, returning value");
                     Ok(VMResultType::Ok(value))
                 },
                 VMResultType::CallPaused(new_frame) => {
+                    trace!("et execution returned CallPaused, returning new_frame {:?}", new_frame);
                     self.push_call_frame(frame);
                     Ok(VMResultType::CallPaused(new_frame))
                     //self.push_call_frame(frame);

@@ -23,6 +23,13 @@ impl<'a, T> VMResultType<'a, T> {
             _ => false
         }
     }
+    
+    pub fn is_call_paused(&self) -> bool {
+        match self { 
+            VMResultType::CallPaused(..) => true,
+            _ => false
+        }
+    }
 }
 
 impl<'o, T> VMResultType<'o, Option<T>> {

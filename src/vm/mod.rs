@@ -5,7 +5,7 @@ use std::rc::Rc;
 use std::str::Utf8Error;
 use cesu8::{from_java_cesu8, to_java_cesu8, Cesu8DecodingError};
 use callstack::CallStack;
-use log::{debug, error, info};
+use log::{debug, error, info, trace};
 use thiserror::Error;
 
 use class_manager::ClassManager;
@@ -77,23 +77,28 @@ impl<'a> VM<'a>{
         Ok(())
     }
 
-    pub fn invoke_frame(&mut self, call_frame: CallFrame<'a>) -> VMPartialResult<'a, Option<Value<'a>>> {
+    pub fn invoke_new_frame(&mut self, class_and_method: ClassAndMethod<'a>, object: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
+        let frame = CallStack::create_call_frame(class_and_method, object, args)?;
+        self.invoke_frame(frame)
+    }
+    
+    pub fn invoke_frame(&mut self, call_frame: CallFrame<'a>) -> VMPartialResult<'a, Option<Value<'a>>>{
         let class_and_method = call_frame.class_and_method.clone();
         if !class_and_method.method.is_native(){
-            info!("INVOKE FRAME OF {} at {:?}", class_and_method.format(), call_frame.pc);
-
             self.call_stack.push_call_frame(call_frame);
             self.call_stack.print_call_stack();
             let vm_ptr: *mut VM = self;
-            let mut result = self.call_stack.execute_top(vm_ptr)?;
             loop {
-                match result {
-                    VMResultType::Ok(value) => {
-                        return Ok(VMResultType::Ok(value))
-                    },
+                let partial = self.call_stack.execute_top(vm_ptr)?;
+                match partial {
+                    VMResultType::Ok(optional_value) => {
+                        return Ok(VMResultType::Ok(optional_value));
+                    }
                     VMResultType::CallPaused(new_frame) => {
-                        result = self.invoke_frame(new_frame)?;
-                        self.call_stack.pop_call_frame();
+                        let result = self.invoke_frame(new_frame)?;
+                        if let VMResultType::Ok(returned_value) = result {
+                            self.call_stack.add_to_top_stack(returned_value);
+                        }
                     }
                 }
             }
@@ -116,70 +121,34 @@ impl<'a> VM<'a>{
                 .collect::<Vec<_>>();
             let try_native = NativeMethodRegistry::invoke(self, &class_and_method, object, args);
             if let Some(native) = try_native{
-                self.call_stack.push_call_frame(call_frame);
+                trace!("'Pushing' native method frame {:?}", call_frame);
+                //self.call_stack.push_call_frame(call_frame);
                 self.call_stack.print_call_stack();
-                native
+                //self.handle_result(native?)
+                trace!("native result is {:?}", native);
+                match native? {
+                    VMResultType::Ok(optional_value) => {
+                        Ok(VMResultType::Ok(optional_value))
+                    }
+                    VMResultType::CallPaused(new_frame) => {
+                        let result = self.invoke_frame(new_frame)?;
+                        //should always return VMResultType::Ok(None)
+                        assert!(result.is_ok());
+                        /*if let VMResultType::Ok(returned_value) = result {
+                            self.call_stack.add_to_top_stack(returned_value);
+                        }*/
+                        Ok(result)
+                    }
+                }
             } else {
                 if class_and_method.method.descriptor.return_type.is_some(){
                     error!("Native Method {} wont get executed but return value is probably expected", class_and_method.format());
+                    Err(VmError::MethodCallError(format!("Native {}", class_and_method.format())))
                 } else {
                     info!("Native Method {} wont get executed", class_and_method.format());
-                }
-
-                Ok(VMResultType::Ok(None))
-            }
-        }
-    }
-
-    pub fn invoke_new_frame(&mut self, class_and_method: ClassAndMethod<'a>, object: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
-        if !class_and_method.method.is_native(){
-            let cam_formatted = class_and_method.format();
-            info!("INVOKE {} on {:?} with {:?}", cam_formatted, object, args);
-
-            let call_frame = CallStack::create_call_frame(class_and_method, object, args)?;
-            self.call_stack.push_call_frame(call_frame);
-            self.call_stack.print_call_stack();
-            let vm_ptr: *mut VM = self;
-            //let result = frame.execute(self)?;
-            let result = self.call_stack.execute_top(vm_ptr)?;
-            info!("INVRETURN {} returned: {:?}", cam_formatted, result);
-            match result {
-                VMResultType::Ok(value) => Ok(VMResultType::Ok(value)),
-                VMResultType::CallPaused(new_frame) => {
-                    let res = self.invoke_frame(new_frame)?;
-                    if let VMResultType::Ok(value) = res {
-                        let mut last_frame = self.call_stack.pop_call_frame();
-                        last_frame.prepare_reentry(value);
-                        self.invoke_frame(last_frame)
-                    } else {
-                        unreachable!()
-                        //Err(VmError::ValidationError("Not yet implemented".to_string()))
-                    }
+                    Ok(VMResultType::Ok(None))
                 }
             }
-
-            //self.call_stack.pop_call_frame();
-
-            //Ok(result)
-            
-
-        } else {
-            let class_name = class_and_method.class.name.clone();
-            let method_name = class_and_method.method.name.clone();
-            let method_descriptor = class_and_method.method.descriptor.as_str();
-            let try_native = NativeMethodRegistry::invoke(self, &class_and_method, object, args);
-            if let Some(native) = try_native{
-                return native;
-            } else {
-                if class_and_method.method.descriptor.return_type.is_some(){
-                    error!("Native Method {}.{}{} wont get executed but return value is probably expected", class_name, method_name, method_descriptor);
-                } else {
-                    info!("Native Method {}.{} wont get executed", class_name, method_name);
-                }
-
-                return Ok(VMResultType::Ok(None));
-            }
-            Err(VmError::JavaException(JavaError::MethodNotFoundException(method_name)))
         }
     }
 
@@ -274,14 +243,13 @@ impl<'a> VM<'a>{
 
     }
 
-    pub fn extract_string_from_object(&self, value: &Value<'a>) -> VMResult<String>{
+    pub fn extract_string_from_object(value: &Value<'a>) -> VMResult<String>{
         if let Value::Reference(reference) = value{
             let chars = reference.get_field(0);
             if let Value::Reference(char_ref) = chars {
                 if let ReferenceType::Array(_, _, content) = &char_ref.reference_type{
                     let chars: Vec<u8> = content.borrow().iter().map(|v| if let Value::Integer(val) = v {*val as u8} else {0}).collect();
                     let string = from_java_cesu8(chars.as_slice())?.to_string();
-                    debug!("string from object: {:?}", string);
                     return Ok(string);
                 }
             }
@@ -308,7 +276,7 @@ impl<'a> VM<'a>{
 
     pub fn extract_class_from_class_object(&mut self, object: Reference<'a>) -> VMResult<ClassRef<'a>>{
         let name_object = object.get_field(5);
-        let name = self.extract_string_from_object(&name_object)?;
+        let name = VM::extract_string_from_object(&name_object)?;
         let name = name.replace(".", "/");
         let class = self.get_or_resolve_class(name.as_str())?;
         Ok(class)
