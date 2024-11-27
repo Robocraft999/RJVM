@@ -664,6 +664,7 @@ impl<'a> CallFrame<'a>{
         if let Some(Value::Long(value)) = popped{
             debug!("LSTORE{} {:?}", index, value);
             self.locals[index] = popped.unwrap();
+            self.locals[index+1] = Value::Dummy;
             Ok(())
         } else {
             Err(VmError::ValidationError(format!("LSTORE{} failed, because stack[{}] was {:?} and not Long", index, index, popped)))
@@ -695,6 +696,10 @@ impl<'a> CallFrame<'a>{
 
     fn execute_lload(&mut self, index: usize) -> Result<(), VmError>{
         let local = self.locals.get(index);
+        let dummy = self.locals.get(index + 1);
+        if dummy.unwrap() != &Value::Dummy{
+            return Err(VmError::ValidationError(format!("Expected a Dummy value at {} but got {:?}",index+1, dummy.unwrap())));
+        }
         if let Some(Value::Long(value)) = local{
             self.stack.push(Value::Long(*value));
             debug!("LLOAD{} {:?}", index, value);
@@ -717,6 +722,10 @@ impl<'a> CallFrame<'a>{
 
     fn execute_dload(&mut self, index: usize) -> Result<(), VmError>{
         let local = self.locals.get(index);
+        let dummy = self.locals.get(index + 1);
+        if dummy.unwrap() != &Value::Dummy{
+            return Err(VmError::ValidationError(format!("Expected a Dummy value at {} but got {:?}",index+1, dummy.unwrap())));
+        }
         if let Some(Value::Double(value)) = local{
             self.stack.push(Value::Double(*value));
             debug!("DLOAD{} {:?}", index, value);
@@ -759,7 +768,7 @@ impl<'a> CallFrame<'a>{
 
     fn execute_dconst(&mut self, value: usize){
         debug!("DCONST {:?}", value);
-        self.stack.push(Value::Double(value as f64))
+        self.stack.push(Value::Double(value as f64));
     }
 
     fn execute_i_arithmetic<F: FnOnce(i32, i32) -> Result<i32, VmError>>(&mut self, f: F) -> Result<(), VmError>{
@@ -861,24 +870,6 @@ impl<'a> CallFrame<'a>{
             }
             args.insert(0, popped);
         }
-        /*if class_name.starts_with("["){
-            let receiver = self.stack.pop().unwrap();
-            return if let Value::Reference(array_ref) = receiver{
-                if method_name == "clone"{
-                    if let ReferenceType::Array(dims, field_type, content) = &array_ref.reference_type{
-                        debug!("Cloning array: {:?}", receiver);
-                        self.stack.push(Value::Reference(vm.new_array(*dims, field_type.clone(), content.clone())?));
-                        Ok(())
-                    } else {
-                        Err(VmError::ValidationError("Expected array to be cloned".to_string()))
-                    }
-                } else {
-                    Err(VmError::MethodCallError(format!("Method {} not supported for arrays", method_name)))
-                }
-            } else {
-                Err(VmError::ValidationError("Expected array as receiver".to_string()))
-            };
-        }*/
 
         trace!("loading class to execute on: '{}'", class_name.as_str());
         let class = vm.get_or_resolve_class(class_name.as_str())?;
