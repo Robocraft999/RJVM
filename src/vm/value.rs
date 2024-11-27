@@ -1,8 +1,8 @@
 use std::cell::{Ref, RefCell};
-use std::fmt::{Debug, Display, Formatter, Pointer};
+use std::fmt::{format, Debug, Display, Formatter, Pointer};
 use crate::field_info::{FieldType, PrimitiveType};
 use crate::vm::class::ClassId;
-use crate::vm::VmError;
+use crate::vm::{VmError, VM};
 
 #[derive(PartialEq, Default, Clone)]
 pub enum Value<'a>{
@@ -88,6 +88,7 @@ pub type Reference<'a> = &'a ReferenceValue<'a>;
 pub struct ReferenceValue<'a>{
     pub(crate) id: u32,
     pub(crate) class_id: ClassId,
+    pub(crate) class_name: String,
     pub(crate) reference_type: ReferenceType<'a>,
 }
 
@@ -143,7 +144,13 @@ impl<'a> ReferenceValue<'a>{
 
     fn get_components_printable(&self) -> Vec<String>{
         let object = |field: &Value| match field {
-            Value::Reference(rv) => format!("{}:{:?}", rv.id, rv.class_id),
+            Value::Reference(rv) => {
+                if rv.class_name == "java/lang/String" {
+                    format!("{}:{}:{:?}->'{}'", rv.id, rv.class_name, rv.class_id.0, VM::extract_string_from_object(field).unwrap_or("VMError".to_string()))
+                } else {
+                    format!("{}:{}:{:?}", rv.id, rv.class_name, rv.class_id.0)
+                }
+            }
             _ => format!("{:?}", field)
         };
         match &self.reference_type {
@@ -180,7 +187,7 @@ impl Debug for ReferenceValue<'_>{
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("VRef")
             .field("object_id", &self.id)
-            .field("class_id", &self.class_id)
+            .field("class", &format_args!("{}:{}", &self.class_name, &self.class_id.0))
             .field("type", &match self.reference_type {
                 ReferenceType::Object(_) => "Object",
                 ReferenceType::Array(_, _, _) => "Array",

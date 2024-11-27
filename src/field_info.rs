@@ -38,6 +38,7 @@ pub fn parse_field_type(object: Option<&str>, primitive: Option<&str>, array: Op
         let mut name = String::new();
         name.push_str(dims);
         if let Some(obj) = object{
+            name.push_str("L");
             name.push_str(obj);
             name.push_str(";");
         }

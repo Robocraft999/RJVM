@@ -622,7 +622,7 @@ impl<'a> CallFrame<'a>{
                         Instruction::ATHROW => {
                             if let Some(Value::Reference(error)) = self.stack.pop(){
                                 let string_value = error.get_field(2);
-                                let string = vm.extract_string_from_object(&string_value)?;
+                                let string = VM::extract_string_from_object(&string_value)?;
                                 let exception_name = vm.class_manager.find_class_by_id(error.class_id).unwrap().name.clone();
                                 return Err(VmError::JavaException(JavaError::JavaExceptionThrown(exception_name, string)));
                             }
@@ -931,6 +931,12 @@ impl<'a> CallFrame<'a>{
 
     fn get_method_virtual(class: ClassRef<'a>, method_name: &str, descriptor: &str) -> Result<ClassAndMethod<'a>, VmError>{
         let mut current_class = class;
+        if current_class.is_array() && method_name == "clone"{
+            while let Some(super_class) = current_class.superclass{
+                current_class = super_class;
+            }
+            return Ok(ClassAndMethod{class: current_class, method: current_class.find_method(method_name, descriptor).unwrap()})
+        }
         loop {
             if let Some(method) = current_class.find_method(method_name, descriptor){
                 return Ok(ClassAndMethod{class: current_class, method});

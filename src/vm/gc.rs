@@ -32,6 +32,7 @@ impl<'a> ObjectAllocator<'a>{
         ReferenceValue{
             id: *self.next_object_id.borrow(),
             class_id: class.id,
+            class_name: class.name.to_string(),
             reference_type: ReferenceType::Object(RefCell::new(fields))
         }
     }
@@ -40,6 +41,7 @@ impl<'a> ObjectAllocator<'a>{
         let array = ReferenceValue{
             id: *self.next_object_id.borrow(),
             class_id: class.id,
+            class_name: class.name.to_string(),
             reference_type: ReferenceType::Array(dims, field_type, content),
         };
 
