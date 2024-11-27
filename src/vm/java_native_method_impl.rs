@@ -35,8 +35,13 @@ impl <'a>NativeMethodRegistry<'a>{
 
     pub fn invoke(vm: &mut VM<'a>, class_and_method: &ClassAndMethod<'a>, object: Option<Reference<'a>>, args: Vec<Value<'a>>) -> Option<VMPartialResult<'a, Option<Value<'a>>>>{
         for method in &vm.native_method_registry.methods{
-            if method.method_name == class_and_method.method.name && method.method_descriptor == class_and_method.method.descriptor{
-                return Some((method.delegate)(vm, class_and_method.class, object, args))
+            if method.method_name == class_and_method.method.name && method.method_descriptor == class_and_method.method.descriptor && class_and_method.class.name == method.class_name{
+                let needed_arg_count = class_and_method.method.descriptor.args.len();
+                let provided_arg_count = args.iter().filter(|v| v != &&Value::Dummy).count();
+                if needed_arg_count == provided_arg_count{
+                    return Some((method.delegate)(vm, class_and_method.class, object, args))
+                }
+                return Some(Err(VmError::ValidationError(format!("expected {} args but got: {}:{:?}", needed_arg_count, provided_arg_count, args))))
             }
         }
         //Some(Err(VmError::JavaException(JavaError::MethodNotFoundException(class_and_method.method.name.clone()))))
@@ -54,6 +59,7 @@ pub struct NativeMethod<'a>{
 type NativeMethodDelegate<'a> = fn(&mut VM<'a>, ClassRef<'a>, Option<Reference<'a>>, Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>;
 
 pub fn register_all_natives(registry: &mut NativeMethodRegistry){
+    registry.register("Test", "nop3", "()I", |_, _, _, _| non_failing_some(Value::Integer(-1)));
     registry.register("java/lang/System", "nanoTime", "()J", delegate_nano_time);
     registry.register("java/lang/System", "currentTimeMillis", "()J", delegate_millis_time);
     registry.register("java/lang/System", "identityHashCode", "(Ljava/lang/Object;)I", delegate_identity_hash_code);
@@ -75,11 +81,16 @@ pub fn register_all_natives(registry: &mut NativeMethodRegistry){
     registry.register("java/lang/Double", "doubleToRawLongBits", "(D)J", delegate_double_to_raw_bits);
     registry.register("java/lang/Object", "getClass", "()Ljava/lang/Class;", delegate_get_class);
     registry.register("java/lang/Object", "hashCode", "()I", delegate_hashcode);
+    registry.register("java/lang/Object", "clone", "()Ljava/lang/Object;", delegate_clone);
+    registry.register("[Ljava/lang/Object;", "getClass", "()Ljava/lang/Class;", delegate_get_class);
     registry.register("java/lang/Throwable", "fillInStackTrace", "(I)Ljava/lang/Throwable;", delegate_fill_in_stacktrace);
     registry.register("sun/misc/Unsafe", "arrayBaseOffset", "(Ljava/lang/Class;)I", delegate_array_base_offset);
     registry.register("sun/misc/Unsafe", "arrayIndexScale", "(Ljava/lang/Class;)I", delegate_array_index_scale);
     registry.register("sun/misc/Unsafe", "addressSize", "()I", delegate_address_size);
     registry.register("sun/misc/Unsafe", "objectFieldOffset", "(Ljava/lang/reflect/Field;)J", delegate_object_field_offset);
+    registry.register("sun/misc/Unsafe", "staticFieldOffset", "(Ljava/lang/reflect/Field;)J", delegate_static_field_offset);
+    registry.register("sun/misc/Unsafe", "getObjectVolatile", "(Ljava/lang/Object;J)Ljava/lang/Object;", delegate_get_object_volatile);
+    registry.register("sun/misc/Unsafe", "staticFieldBase", "(Ljava/lang/reflect/Field;)Ljava/lang/Object;", delegate_static_field_base);
     registry.register("sun/misc/Unsafe", "compareAndSwapObject", "(Ljava/lang/Object;JLjava/lang/Object;Ljava/lang/Object;)Z", delegate_compare_and_swap_object);
     registry.register("sun/misc/Unsafe", "compareAndSwapInt", "(Ljava/lang/Object;JII)Z", delegate_compare_and_swap_int);
     registry.register("sun/misc/Unsafe", "allocateMemory", "(J)J", delegate_allocate_memory);
@@ -160,7 +171,7 @@ fn delegate_arraycopy<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<
 }
 
 fn delegate_get_primitive_class<'a>(vm: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
-    let string = vm.extract_string_from_object(args.get(0).unwrap())?;
+    let string = VM::extract_string_from_object(args.get(0).unwrap())?;
     match string.as_str() {
         "int"     => non_failing_some(Value::Reference(vm.new_class_object(  "java/lang/Integer".to_string())?)),
         "long"    => non_failing_some(Value::Reference(vm.new_class_object(     "java/lang/Long".to_string())?)),
@@ -177,7 +188,7 @@ fn delegate_get_primitive_class<'a>(vm: &mut VM<'a>, _ : ClassRef<'a>, _: Option
 
 fn delegate_get_component_type<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, class_object: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
     debug!("getComponentType \n'{:?}'\n'{:?}'", class_object, args);
-    let class_name = vm.extract_string_from_object(&class_object.unwrap().get_field(5))?;
+    let class_name = VM::extract_string_from_object(&class_object.unwrap().get_field(5))?;
     //let field_type = field_type_from_str(class_name.as_str());
     debug!("getComponentType '{:?}'", class_name);
 
@@ -205,7 +216,7 @@ fn delegate_desired_assertion_status<'a>(vm: &mut VM<'a>, _ : ClassRef<'a>, _: O
 fn delegate_get_declared_fields0<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, class_object: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
     debug!("getDeclaredFields");
     if let Some(clazz) = class_object {
-        let class_name = vm.extract_string_from_object(&clazz.get_field(5))?;
+        let class_name = VM::extract_string_from_object(&clazz.get_field(5))?;
         debug!("class name: {}", class_name);
         let mut content = Vec::new();
         for field in vm.get_or_resolve_class(class_name.as_str())?.fields.iter(){
@@ -214,6 +225,11 @@ fn delegate_get_declared_fields0<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, class_obj
             java_field.set_field(6, Value::Reference(vm.new_string_object(field.name.clone())?));
             //clazz
             java_field.set_field(4, Value::Reference(clazz));
+            //modifiers
+            java_field.set_field(8, Value::Integer(field.flags.iter().cloned().map(|flag| flag as u16 as i32).reduce(|flag1, flag2| flag1 | flag2).unwrap_or(0)));
+            //type
+            let type_class_object = vm.new_class_object(field.field_type.to_class_name())?;
+            java_field.set_field(7, Value::Reference(type_class_object));
             debug!("field name: {}", field.name);
             content.push(Value::Reference(java_field));
         }
@@ -294,7 +310,7 @@ fn delegate_get_super_class<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, class_object: 
 fn delegate_for_name0<'a>(vm: &mut VM<'a>,  _: ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
     debug!("forName0");
     if let Some(name) = args.get(0) {
-        let name = vm.extract_string_from_object(&name)?;
+        let name = VM::extract_string_from_object(&name)?;
         let name = name.replace(".", "/");
         //let class = vm.find_class_by_name(name)?;
         non_failing_some(Value::Reference(vm.new_class_object(name)?))
@@ -326,7 +342,7 @@ fn delegate_is_primitive<'a>(vm: &mut VM<'a>,  _: ClassRef<'a>, obj: Option<Refe
     debug!("isPrimitive {:?}", obj);
     if let Some(obj) = obj {
         let name_object = obj.get_field(5);
-        let name = vm.extract_string_from_object(&name_object)?;
+        let name = VM::extract_string_from_object(&name_object)?;
         non_failing_some(Value::Integer(match name.as_str() {
             "java/lang/Boolean" | "java/lang/Character" | "java/lang/Byte"  | "java/lang/Short"  |
             "java/lang/Integer" | "java/lang/Long"      | "java/lang/Float" | "java/lang/Double" |
@@ -353,11 +369,16 @@ fn delegate_double_to_raw_bits<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, _: Option<R
     Err(VmError::ValidationError(format!("Expected double")))
 }
 
-fn delegate_get_class<'a>(vm: &mut VM<'a>, class : ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
+fn delegate_get_class<'a>(vm: &mut VM<'a>, class: ClassRef<'a>, object: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
     //TODO check
     debug!("getClass");
-    debug!("{}", class.name);
-    non_failing_some(Value::Reference(vm.new_class_object(class.name.clone())?))
+    if let Some(obj) = object {
+        debug!("{} obj: {:?}", class.name, obj.class_name);
+        let class_object = vm.new_class_object(obj.class_name.clone())?;
+        non_failing_some(Value::Reference(class_object))
+    } else {
+        Err(VmError::ValidationError("Object is Null".to_string()))
+    }
 }
 
 fn delegate_hashcode<'a>(_: &mut VM<'a>, _: ClassRef<'a>, reference: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
@@ -367,6 +388,25 @@ fn delegate_hashcode<'a>(_: &mut VM<'a>, _: ClassRef<'a>, reference: Option<Refe
         let addr = addr as i32;
         trace!("HASHCODE: {addr}");
         non_failing_some(Value::Integer(addr))
+    } else {
+        Err(VmError::ValidationError("Expected object".to_string()))
+    }
+}
+
+fn delegate_clone<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, reference: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
+    debug!("clone");
+    if let Some(obj) = reference{
+        if obj.is_array(){
+            if let ReferenceType::Array(dims, field_type, content) = &obj.reference_type{
+                debug!("Cloning array: {:?}", reference);
+                let new_array = Value::Reference(vm.new_array(*dims, field_type.clone(), content.clone())?);
+                non_failing_some(new_array)
+            } else {
+                Err(VmError::ValidationError("Expected array to be cloned".to_string()))
+            }
+        } else {
+            todo!("cloning objects not yet possible")
+        }
     } else {
         Err(VmError::ValidationError("Expected object".to_string()))
     }
@@ -399,9 +439,51 @@ fn delegate_address_size<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Referen
     non_failing_some(Value::Integer(8))
 }
 
-fn delegate_object_field_offset<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
+fn delegate_object_field_offset<'a>(vm: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
     //FIXME calc real offset
-    non_failing_some(Value::Long(0))
+    debug!("delegate_object_field_offset: '{:?}'", args);
+    if let Some(field) = args.get(0){
+        let field_ref = field.expect_reference()?;
+        let clazz = field_ref.get_field(4).expect_reference()?;
+        let class_ref = vm.extract_class_from_class_object(clazz)?;
+        let name_val = field_ref.get_field(6);
+        let name = VM::extract_string_from_object(&name_val)?;
+        if let Some((index, _)) = class_ref.find_field(name.as_str()){
+            non_failing_some(Value::Long(index as i64))
+        } else {
+            Err(VmError::ValidationError(format!("Field with name: '{}' does not exist", name)))
+        }
+    } else {
+        Err(VmError::ValidationError("Expected an Object field reference".to_string()))
+    }
+}
+
+fn delegate_static_field_offset<'a>(vm: &mut VM<'a>, class : ClassRef<'a>, object: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
+    //non_failing_some(Value::Long(0))
+    //TODO check if needed
+    delegate_object_field_offset(vm, class, object, args)
+}
+
+fn delegate_get_object_volatile<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
+    println!("args: {:?}", args);
+    if let (Some(Value::Reference(clazz)), Some(Value::Long(index))) = (args.get(0), args.get(1)) {
+        let class_ref = vm.extract_class_from_class_object(clazz)?;
+        //FIXME I assume that the field is static ig
+        let field_value = vm.static_class_objects.get(&class_ref.id).unwrap().get_field(*index as usize);
+        return non_failing_some(field_value);
+    }
+    non_failing_none()
+}
+
+fn delegate_static_field_base<'a>(_: &mut VM<'a>, _: ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
+    if let Some(field_object_value) = args.get(0){
+        let field_object = field_object_value.expect_reference()?;
+        println!("'{:?}'", field_object);
+        let class_object = field_object.get_field(4);
+        non_failing_some(class_object)
+    } else {
+        Err(VmError::ValidationError("Expected a field reference".to_string()))
+    }
 }
 
 fn delegate_compare_and_swap_object<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
@@ -500,7 +582,7 @@ fn delegate_do_privileged<'a>(vm: &mut VM<'a>, class: ClassRef<'a>, _: Option<Re
 
 fn delegate_string_intern<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, object: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
     if let Some(obj) = object{
-        let content = vm.extract_string_from_object(&Value::Reference(obj))?;
+        let content = VM::extract_string_from_object(&Value::Reference(obj))?;
         warn!("String {} exists already? '{}'", content, vm.string_objects.contains_key(&content));
         if vm.string_objects.contains_key(&content){
             non_failing_some(Value::Reference(vm.string_objects[&content]))
@@ -582,7 +664,7 @@ fn delegate_read_bytes<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, obj: Option<Referen
         let length = arg2.expect_int()?;
 
         if let Some(file_input_stream) = obj{
-            let path = vm.extract_string_from_object(&file_input_stream.get_field(2))?;
+            let path = VM::extract_string_from_object(&file_input_stream.get_field(2))?;
             if !vm.currently_open_files.contains_key(&path){
                 //TODO do this on open0()
                 let file_content = vm.class_manager.class_path.resolve_file(path.as_str())?;
@@ -660,7 +742,7 @@ const BA_HIDDEN: i32 = 8;
 fn delegate_get_boolean_attribute<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, object: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
     let path = if let Some(Value::Reference(path_val)) = args.get(0){
         let string_val = path_val.get_field(1);
-        vm.extract_string_from_object(&string_val)?
+        VM::extract_string_from_object(&string_val)?
     } else {
         String::new()
     };
@@ -678,7 +760,7 @@ fn delegate_get_boolean_attribute<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, object: 
 #[cfg(test)]
 mod tests{
     use std::cell::RefCell;
-    use log::{error, info, LevelFilter};
+    use log::{error, info, Level, LevelFilter};
     use crate::field_info::{FieldType, PrimitiveType};
     use crate::vm::class::ClassAndMethod;
     use crate::vm::class_path::ClassPath;
@@ -686,7 +768,8 @@ mod tests{
     use crate::vm::VM;
 
     fn setup<'a>() -> VM<'a>{
-        //simple_logger::SimpleLogger::new().with_level(LevelFilter::Error).without_timestamps().init().unwrap();
+        simple_logger::SimpleLogger::new().with_level(LevelFilter::Trace).without_timestamps().init().unwrap();
+        //simple_logger::init().unwrap();
         let mut class_path = ClassPath::default();
         class_path.push("resources;resources/rt.jar;resources/LogicSim.jar;resources/lib/unix;resources/lib").expect("TODO: panic message");
 
@@ -746,6 +829,7 @@ mod tests{
     fn test_read_bytes() {
         let mut vm = setup();
         let test_method = vm.resolve_class_method("java/io/FileInputStream", "readBytes", "([BII)I");
+        println!("Test: {:?}", test_method);
         assert!(test_method.is_ok());
         let test_method = test_method.unwrap();
 
