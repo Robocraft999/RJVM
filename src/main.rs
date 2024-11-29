@@ -111,29 +111,30 @@ fn run_and_catch_method(vm: &mut VM, class_name: &str, method_name: &str, method
 }
 
 fn main() {
-    simple_logger::SimpleLogger::new().with_level(LevelFilter::Trace).without_timestamps().init().unwrap();
+    simple_logger::SimpleLogger::new().with_level(LevelFilter::Debug).without_timestamps().init().unwrap();
 
     let mut class_path = ClassPath::default();
     class_path.push("resources;resources/rt.jar;resources/LogicSim.jar;resources/lib/unix;resources/lib").expect("TODO: panic message");
 
     let mut vm = VM::new(class_path);
-    run_and_catch_method(&mut vm, "Test", "main", "([Ljava/lang/String;)V");
+    /*run_and_catch_method(&mut vm, "Test", "main", "([Ljava/lang/String;)V");
     info!("frames: {:?}", vm.call_stack.frames);
-    return;
+    return;*/
 
     match init_vm(&mut vm) {
         Ok(_) => {}
         Err(error) => {
             error!("Init VM: {}", error);
-            panic!();
+            //panic!();
         }
     };
     //vm.get_or_resolve_class("java/lang/CharacterData").expect("msg");
     match init_system(&mut vm){
         Ok(_) => {}
         Err(error) => {
+            println!("'{}'", error);
             error!("Init System: {}", error);
-            panic!();
+            //panic!();
         }
     }
 

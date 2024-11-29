@@ -1,7 +1,7 @@
 use regex::Regex;
 
 use crate::access_flags::{MethodFlag, MethodFlags};
-use crate::attribute::{Attribute, Code};
+use crate::attribute::{Attribute, Code, ExceptionTable, ExceptionTableEntry};
 use crate::field_info::{FieldType, parse_field_type, PrimitiveType};
 
 #[derive(Debug)]
@@ -28,6 +28,22 @@ impl MethodInfo{
     }
 
     pub fn is_abstract(&self) -> bool { self.flags.contains(&MethodFlag::Abstract) }
+    
+    pub fn has_exception_handler(&self) -> bool {
+        if let Some(code) = &self.code {
+            code.exception_table.0.len() > 0
+        } else {
+            false
+        }
+    }
+    
+    pub fn get_exception_handlers(&self) -> ExceptionTable {
+        if let Some(code) = &self.code {
+            code.exception_table.clone()
+        } else {
+            unreachable!("No exception handlers, because Code block is missing");
+        }
+    }
 }
 
 #[derive(Debug)]

@@ -5,7 +5,6 @@ use crate::bytes::{parse_u1, parse_u2};
 use crate::class_file::get_constant_printable;
 use crate::constants::ConstantPool;
 use crate::error::ClassParseError;
-use crate::vm::VmError;
 
 #[derive(Debug, Clone)]
 pub struct Attribute{
@@ -24,9 +23,10 @@ pub struct Code{
     pub max_locals: u16,
     //TODO add proper struct
     pub code: Vec<u8>,
-    //TODO add remaining fields (https://docs.oracle.com/javase/specs/jvms/se7/html/jvms-4.html#jvms-4.7.3)
+    //TODO add remaining fields (https://docs.oracle.com/javase/specs/jvms/se22/html/jvms-4.html#jvms-4.7.3)
     pub attributes: Vec<Attribute>,
     pub line_number_table: Option<LineNumberTable>,
+    pub exception_table: ExceptionTable,
 }
 
 impl Debug for Code{
@@ -36,6 +36,7 @@ impl Debug for Code{
             .field("max_locals", &self.max_locals)
             .field("bytecode", &format_args!("{:?}", printable_instructions(&self.code)))
             .field("line_number_table", &format_args!("{:#?}", self.line_number_table))
+            .field("exception_table", &format_args!("{:#?}", self.exception_table))
             .field("attributes", &format_args!("{:#?}", self.attributes))
             .finish()
     }
@@ -63,6 +64,17 @@ impl LineNumberTableEntry{
             line_number,
         }
     }
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct ExceptionTable(pub Vec<ExceptionTableEntry>);
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct ExceptionTableEntry{
+    pub start_pc: ProgramCounter,
+    pub end_pc: ProgramCounter,
+    pub handler_pc: ProgramCounter,
+    pub catch_type: Option<String>,
 }
 
 #[derive(Debug, PartialEq, Clone)]

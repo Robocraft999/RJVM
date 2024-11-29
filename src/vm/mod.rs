@@ -98,6 +98,43 @@ impl<'a> VM<'a>{
                         let result = self.invoke_frame(new_frame)?;
                         if let VMResultType::Ok(returned_value) = result {
                             self.call_stack.add_to_top_stack(returned_value);
+                        } else if let VMResultType::ExceptionThrown(VmError::JavaException(JavaError::JavaExceptionThrown(thrown_class_name, message)), throwable) = result{
+                            let (mut is_handled, mut handler_option) = (false, None);
+                            for handler in class_and_method.method.get_exception_handlers().0 {
+                                let can_handle = match handler.catch_type {
+                                    Some(ref class_name) => {
+                                        self.check_if_subclass_of(class_name.as_str(), thrown_class_name.as_str())?
+                                    }
+                                    None => true
+                                };
+                                if can_handle{
+                                    is_handled = true;
+                                    handler_option = Some(handler);
+                                    break;
+                                }
+                            }
+                            if is_handled{
+                                let frame = self.call_stack.frames.last_mut().unwrap();
+                                frame.pc = handler_option.unwrap().handler_pc;
+                                frame.stack.push(throwable);
+                                debug!("Exception thrown handled by {}", frame.class_and_method.method.name.as_str());
+                            } else {
+                                debug!("Exception handler not in this function");
+                                return Ok(VMResultType::ExceptionThrown(VmError::JavaException(JavaError::JavaExceptionThrown(thrown_class_name, message)), throwable));
+                            }
+                        }
+                    }
+                    VMResultType::ExceptionThrown(error, throwable) => {
+                        if let VmError::JavaException(JavaError::JavaExceptionThrown(thrown_class_name, message)) = &error{
+                            let mut frame = self.call_stack.pop_call_frame();
+                            debug!("Exception thrown: {} in {:?}", thrown_class_name, class_and_method);
+                            if class_and_method.method.has_exception_handler() {
+                                todo!()
+                            } else {
+                                return Ok(VMResultType::ExceptionThrown(error, throwable));
+                            }
+                        } else {
+                            unreachable!("Could not handle {} thrown by a function", error);
                         }
                     }
                 }
@@ -138,6 +175,9 @@ impl<'a> VM<'a>{
                             self.call_stack.add_to_top_stack(returned_value);
                         }*/
                         Ok(result)
+                    }
+                    VMResultType::ExceptionThrown(error, throwable) => {
+                        Err(error)
                     }
                 }
             } else {
@@ -280,6 +320,20 @@ impl<'a> VM<'a>{
         let name = name.replace(".", "/");
         let class = self.get_or_resolve_class(name.as_str())?;
         Ok(class)
+    }
+    
+    pub fn check_if_subclass_of(&mut self, class_name: &str, of_name: &str) -> VMResult<bool>{
+        let mut current_class = self.get_or_resolve_class(of_name)?;
+        loop {
+            if current_class.name == class_name {
+                return Ok(true);
+            }
+            if let Some(super_class) = current_class.superclass {
+                current_class = super_class;
+            } else {
+                return Ok(false);
+            }
+        }
     }
 
     pub fn find_class_by_id(&self, class_id: ClassId) -> Option<ClassRef<'a>>{

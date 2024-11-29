@@ -624,7 +624,8 @@ impl<'a> CallFrame<'a>{
                                 let string_value = error.get_field(2);
                                 let string = VM::extract_string_from_object(&string_value)?;
                                 let exception_name = vm.class_manager.find_class_by_id(error.class_id).unwrap().name.clone();
-                                return Err(VmError::JavaException(JavaError::JavaExceptionThrown(exception_name, string)));
+                                return Ok(VMResultType::ExceptionThrown(VmError::JavaException(JavaError::JavaExceptionThrown(exception_name, string)), Value::Reference(error)));
+                                //return Err(VmError::JavaException(JavaError::JavaExceptionThrown(exception_name, string)));
                             }
                             return Err(VmError::JavaException(JavaError::JavaExceptionThrown("JavaException".to_string(), "Unknown".to_string())));
                         }

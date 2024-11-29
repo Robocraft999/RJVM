@@ -138,6 +138,11 @@ impl<'a> CallStack<'a> {
                     //self.push_call_frame(frame);
                     //self.execute_top(vm)
                 }
+                VMResultType::ExceptionThrown(error, throwable) => {
+                    trace!("et execution returned ExceptionThrown, returning frame {:?} and error {:?}", frame, error);
+                    //self.push_call_frame(frame);
+                    Ok(VMResultType::ExceptionThrown(error, throwable))
+                }
             }
             //Ok(res)
         }

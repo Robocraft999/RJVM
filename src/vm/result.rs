@@ -1,6 +1,5 @@
-use std::{convert, ops};
 use crate::vm::call_frame::CallFrame;
-use crate::vm::result::VMResultType::CallPaused;
+use crate::vm::value::Value;
 use crate::vm::VmError;
 
 pub type VMPartialResult<'a, T> = Result<VMResultType<'a, T>, VmError>;
@@ -9,7 +8,8 @@ pub type VMResult<T> = Result<T, VmError>;
 #[derive(Debug, Clone)]
 pub enum VMResultType<'f, T> {
     Ok(T),
-    CallPaused(CallFrame<'f>)
+    CallPaused(CallFrame<'f>),
+    ExceptionThrown(VmError, Value<'f>),
 }
 
 impl<'a, T> VMResultType<'a, T> {

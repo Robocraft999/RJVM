@@ -2,7 +2,7 @@ use std::fmt::{Debug, Formatter};
 use cesu8::from_java_cesu8;
 use log::info;
 use crate::access_flags::{parse_class_flags, parse_field_flags, parse_method_flags, ClassFlags};
-use crate::attribute::{Annotation, Attribute, Code, ConstantValue, LineNumber, LineNumberTable, LineNumberTableEntry, ProgramCounter, VisibleRuntimeAnnotations};
+use crate::attribute::{Annotation, Attribute, Code, ConstantValue, ExceptionTable, ExceptionTableEntry, LineNumber, LineNumberTable, LineNumberTableEntry, ProgramCounter, VisibleRuntimeAnnotations};
 use crate::bytes::{parse_u1, parse_u2, parse_u4, parse_u8};
 use crate::class_file_version::ClassFileVersion;
 use crate::constants::{ConstantPool, ConstantPoolEntry};
@@ -270,12 +270,28 @@ pub fn parse_class_file(class_path: &ClassPath, class_name: &str) -> Result<Clas
                     }
 
                     let exception_table_length = parse_u2(&mut bytes)?;
+                    let mut exception_table_entries = Vec::new();
                     for _ in 0..exception_table_length{
-                        let start_pc = parse_u2(&mut bytes)?;
-                        let end_pc = parse_u2(&mut bytes)?;
-                        let handler_pc = parse_u2(&mut bytes)?;
-                        let catch_type = parse_u2(&mut bytes)?;
+                        let start_pc = ProgramCounter(parse_u2(&mut bytes)?);
+                        let end_pc = ProgramCounter(parse_u2(&mut bytes)?);
+                        let handler_pc = ProgramCounter(parse_u2(&mut bytes)?);
+                        let catch_type = {
+                            let index = parse_u2(&mut bytes)?;
+                            if index > 0 {
+                                Some(get_constant_printable(&constant_pool, index))
+                            } else {
+                                None
+                            }
+                        };
+                        let exception_table_entry = ExceptionTableEntry{
+                            start_pc,
+                            end_pc,
+                            handler_pc,
+                            catch_type,
+                        };
+                        exception_table_entries.push(exception_table_entry);
                     }
+                    let exception_table = ExceptionTable(exception_table_entries);
                     let code_attribute_count = parse_u2(&mut bytes)?;
                     let mut code_attributes = Vec::new();
                     for _ in 0..code_attribute_count{
@@ -311,6 +327,7 @@ pub fn parse_class_file(class_path: &ClassPath, class_name: &str) -> Result<Clas
                         code: code_bytes,
                         attributes: code_attributes,
                         line_number_table,
+                        exception_table,
                     });
                 }
                 "Deprecated" => {
