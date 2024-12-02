@@ -141,7 +141,8 @@ fn main() {
     println!("Init complete. Starting Main Program");
 
     //vm.class_manager.get_or_resolve_class("Empty").expect("TODO: panic message");
-    run_and_catch_method(&mut vm, "logicsim/App", "main", "([Ljava/lang/String;)V");
+    run_and_catch_method(&mut vm, "Test", "main", "([Ljava/lang/String;)V");
+    //run_and_catch_method(&mut vm, "logicsim/App", "main", "([Ljava/lang/String;)V");
 
     //parse_class_file(&class_path, "java/lang/Exception");
 

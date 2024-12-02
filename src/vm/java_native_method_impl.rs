@@ -100,6 +100,7 @@ pub fn register_all_natives(registry: &mut NativeMethodRegistry){
     registry.register("sun/reflect/Reflection", "getClassAccessFlags", "(Ljava/lang/Class;)I", delegate_get_class_access_flags);
     registry.register("java/lang/Thread", "currentThread", "()Ljava/lang/Thread;", delegate_current_thread);
     registry.register("java/lang/Thread", "isAlive", "()Z", delegate_is_alive);
+    registry.register("java/lang/Runtime", "availableProcessors", "()I", delegate_available_processors);
     registry.register("java/security/AccessController", "getStackAccessControlContext", "()Ljava/security/AccessControlContext;", delegate_get_stack_access_control_context);
     registry.register("java/security/AccessController", "doPrivileged", "(Ljava/security/PrivilegedAction;)Ljava/lang/Object;", delegate_do_privileged);
     registry.register("java/lang/String", "intern", "()Ljava/lang/String;", delegate_string_intern);
@@ -562,6 +563,10 @@ fn delegate_current_thread<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, _: Option<Refer
 
 fn delegate_is_alive<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, object: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
     non_failing_some(object.unwrap().get_field(5))
+}
+
+fn delegate_available_processors<'a>(_: &mut VM<'a>, _: ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
+    non_failing_some(Value::Integer(1))
 }
 
 fn delegate_get_stack_access_control_context<'a>(_: &mut VM<'a>, _: ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{

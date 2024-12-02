@@ -898,7 +898,8 @@ impl<'a> CallFrame<'a>{
                 match receiver {
                     Some(obj) => {
                         let receiver_class = vm.find_class_by_id(obj.class_id).unwrap();
-                        let resolved_method = Self::get_method_virtual(receiver_class, class_and_method.method.name.as_str(), class_and_method.method.descriptor.as_str())?;
+                        let method_resolver = if kind == InvokeKind::VIRTUAL {Self::get_method_virtual} else {Self::get_method_interface_virtual};
+                        let resolved_method = method_resolver(receiver_class, class_and_method.method.name.as_str(), class_and_method.method.descriptor.as_str())?;
                         resolved_method
                     }
                     None => {
@@ -945,7 +946,21 @@ impl<'a> CallFrame<'a>{
             if let Some(super_class) = current_class.superclass{
                 current_class = super_class
             } else {
-                return Err(VmError::JavaException(JavaError::MethodNotFoundException(method_name.to_string() + descriptor)));
+                return Err(VmError::JavaException(JavaError::MethodNotFoundException(format!("{}{} in {}", method_name, descriptor, class.name))));
+            }
+        }
+    }
+
+    fn get_method_interface_virtual(class: ClassRef<'a>, method_name: &str, descriptor: &str) -> Result<ClassAndMethod<'a>, VmError>{
+        let mut current_class = class;
+        loop {
+            if let Some(method) = current_class.find_method(method_name, descriptor){
+                return Ok(ClassAndMethod{class: current_class, method});
+            }
+            if let Some(super_interface) = current_class.interfaces.first(){
+                current_class = super_interface
+            } else {
+                return Err(VmError::JavaException(JavaError::MethodNotFoundException(format!("{}{} in {}", method_name, descriptor, class.name))));
             }
         }
     }
