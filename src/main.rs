@@ -56,13 +56,13 @@ fn init_system(vm: &mut VM) -> Result<(), VmError>{
 
     let arg1 = vm.new_string_object("file.encoding".to_string())?;
     let arg2 = vm.new_string_object("UTF-8".to_string())?;
-    let propeties_set_method = vm.resolve_class_method("java/util/Properties", "setProperty", "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/Object;")?;
-    vm.invoke_new_frame(propeties_set_method, Some(properties_object), vec![Value::Reference(arg1), Value::Reference(arg2)])?;
+    let properties_set_method = vm.resolve_class_method("java/util/Properties", "setProperty", "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/Object;")?;
+    vm.invoke_new_frame(properties_set_method, Some(properties_object), vec![Value::Reference(arg1), Value::Reference(arg2)])?;
 
     let arg1 = vm.new_string_object("line.separator".to_string())?;
     let arg2 = vm.new_string_object("\n".to_string())?;
-    let propeties_set_method = vm.resolve_class_method("java/util/Properties", "setProperty", "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/Object;")?;
-    vm.invoke_new_frame(propeties_set_method, Some(properties_object), vec![Value::Reference(arg1), Value::Reference(arg2)])?;
+    let properties_set_method = vm.resolve_class_method("java/util/Properties", "setProperty", "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/Object;")?;
+    vm.invoke_new_frame(properties_set_method, Some(properties_object), vec![Value::Reference(arg1), Value::Reference(arg2)])?;
 
     static_object.set_field(5, Value::Reference(properties_object));
 
@@ -71,7 +71,7 @@ fn init_system(vm: &mut VM) -> Result<(), VmError>{
             class: system_class,
             method: setout0_method,
         };
-        let file_descriptor = vm.new_object("java/io/FileDescriptor")?;
+        let file_descriptor = vm.new_object("java/io/FileDescriptor").unwrap();
         let static_file_descriptor = vm.get_static_class_object(file_descriptor.class_id).unwrap();
         //public static final FileDescriptor out = new FileDescriptor(1);
         let file_descriptor_out = static_file_descriptor.get_field(3);
@@ -141,8 +141,8 @@ fn main() {
     println!("Init complete. Starting Main Program");
 
     //vm.class_manager.get_or_resolve_class("Empty").expect("TODO: panic message");
-    run_and_catch_method(&mut vm, "Test", "main", "([Ljava/lang/String;)V");
-    //run_and_catch_method(&mut vm, "logicsim/App", "main", "([Ljava/lang/String;)V");
+    //run_and_catch_method(&mut vm, "Test", "main", "([Ljava/lang/String;)V");
+    run_and_catch_method(&mut vm, "logicsim/App", "main", "([Ljava/lang/String;)V");
 
     //parse_class_file(&class_path, "java/lang/Exception");
 

@@ -352,10 +352,17 @@ impl<'a> CallFrame<'a>{
                         Instruction::ISTORE2 => { self.execute_istore(2)? }
                         Instruction::ISTORE3 => { self.execute_istore(3)? }
 
+                        Instruction::LSTORE(index) => { self.execute_lstore(index as usize)? }
                         Instruction::LSTORE0 => { self.execute_lstore(0)? }
                         Instruction::LSTORE1 => { self.execute_lstore(1)? }
                         Instruction::LSTORE2 => { self.execute_lstore(2)? }
                         Instruction::LSTORE3 => { self.execute_lstore(3)? }
+                        
+                        Instruction::FSTORE(index) => { self.execute_fstore(index as usize)? }
+                        Instruction::FSTORE0 => { self.execute_fstore(0)? }
+                        Instruction::FSTORE1 => { self.execute_fstore(1)? }
+                        Instruction::FSTORE2 => { self.execute_fstore(2)? }
+                        Instruction::FSTORE3 => { self.execute_fstore(3)? }
 
                         Instruction::ASTORE(index) => { self.execute_astore(index as usize)? }
                         Instruction::ASTORE0 => { self.execute_astore(0)? }
@@ -402,11 +409,13 @@ impl<'a> CallFrame<'a>{
                         Instruction::LLOAD2 => { self.execute_lload(2)? }
                         Instruction::LLOAD3 => { self.execute_lload(3)? }
 
+                        Instruction::FLOAD(index) => { self.execute_fload(index as usize)? }
                         Instruction::FLOAD0 => { self.execute_fload(0)? }
                         Instruction::FLOAD1 => { self.execute_fload(1)? }
                         Instruction::FLOAD2 => { self.execute_fload(2)? }
                         Instruction::FLOAD3 => { self.execute_fload(3)? }
 
+                        Instruction::DLOAD(index) => { self.execute_dload(index as usize)? }
                         Instruction::DLOAD0 => { self.execute_dload(0)? }
                         Instruction::DLOAD1 => { self.execute_dload(1)? }
                         Instruction::DLOAD2 => { self.execute_dload(2)? }
@@ -469,6 +478,8 @@ impl<'a> CallFrame<'a>{
                                 Ok(((val1 as u64) >> (val2 & 0x1f)) as i64)
                             }
                         })?}
+                        Instruction::LSHL => { self.execute_ji_arithmetic(|val1, val2| Ok(val1 << (val2 & 0x3f)))? }
+                        Instruction::LSHR => { self.execute_ji_arithmetic(|val1, val2| Ok(val1 >> (val2 & 0x3f)))? }
                         Instruction::FADD => { self.execute_f_arithmetic(|val1, val2| Ok(val1 + val2))? }
                         Instruction::FSUB => { self.execute_f_arithmetic(|val1, val2| Ok(val1 - val2))? }
                         Instruction::FMUL => { self.execute_f_arithmetic(|val1, val2| Ok(val1 * val2))? }
@@ -669,6 +680,17 @@ impl<'a> CallFrame<'a>{
             Ok(())
         } else {
             Err(VmError::ValidationError(format!("LSTORE{} failed, because stack[{}] was {:?} and not Long", index, index, popped)))
+        }
+    }
+
+    fn execute_fstore(&mut self, index: usize) -> Result<(), VmError>{
+        let popped = self.stack.pop();
+        if let Some(Value::Float(value)) = popped{
+            debug!("FSTORE{} {:?}", index, value);
+            self.locals[index] = popped.unwrap();
+            Ok(())
+        } else {
+            Err(VmError::ValidationError(format!("FSTORE{} failed, because stack[{}] was {:?} and not Float", index, index, popped)))
         }
     }
 
@@ -939,14 +961,27 @@ impl<'a> CallFrame<'a>{
             }
             return Ok(ClassAndMethod{class: current_class, method: current_class.find_method(method_name, descriptor).unwrap()})
         }
-        loop {
-            if let Some(method) = current_class.find_method(method_name, descriptor){
-                return Ok(ClassAndMethod{class: current_class, method});
+        if class.is_interface(){
+            loop {
+                if let Some(method) = current_class.find_method(method_name, descriptor){
+                    return Ok(ClassAndMethod{class: current_class, method});
+                }
+                if let Some(super_interface) = current_class.interfaces.first(){
+                    current_class = super_interface
+                } else {
+                    return Err(VmError::JavaException(JavaError::MethodNotFoundException(format!("{}{} in {}", method_name, descriptor, class.name))));
+                }
             }
-            if let Some(super_class) = current_class.superclass{
-                current_class = super_class
-            } else {
-                return Err(VmError::JavaException(JavaError::MethodNotFoundException(format!("{}{} in {}", method_name, descriptor, class.name))));
+        } else {
+            loop {
+                if let Some(method) = current_class.find_method(method_name, descriptor){
+                    return Ok(ClassAndMethod{class: current_class, method});
+                }
+                if let Some(super_class) = current_class.superclass{
+                    current_class = super_class
+                } else {
+                    return Err(VmError::JavaException(JavaError::MethodNotFoundException(format!("{}{} in {}", method_name, descriptor, class.name))));
+                }
             }
         }
     }
@@ -957,8 +992,16 @@ impl<'a> CallFrame<'a>{
             if let Some(method) = current_class.find_method(method_name, descriptor){
                 return Ok(ClassAndMethod{class: current_class, method});
             }
-            if let Some(super_interface) = current_class.interfaces.first(){
-                current_class = super_interface
+            if let Some(super_class) = current_class.superclass{
+                if super_class.superclass.is_some(){
+                    current_class = super_class
+                } else {
+                    if let Some(super_interface) = current_class.interfaces.first(){
+                        current_class = super_interface
+                    } else {
+                        return Err(VmError::JavaException(JavaError::MethodNotFoundException(format!("{}{} in {}", method_name, descriptor, class.name))));
+                    }
+                }
             } else {
                 return Err(VmError::JavaException(JavaError::MethodNotFoundException(format!("{}{} in {}", method_name, descriptor, class.name))));
             }

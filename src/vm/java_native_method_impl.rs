@@ -96,6 +96,8 @@ pub fn register_all_natives(registry: &mut NativeMethodRegistry){
     registry.register("sun/misc/Unsafe", "allocateMemory", "(J)J", delegate_allocate_memory);
     registry.register("sun/misc/Unsafe", "putLong", "(JJ)V", delegate_put_long);
     registry.register("sun/misc/Unsafe", "getByte", "(J)B", delegate_get_byte);
+    registry.register("sun/misc/Unsafe", "getObject", "(Ljava/lang/Object;J)Ljava/lang/Object;", delegate_get_object_volatile);
+    registry.register("sun/misc/Unsafe", "putOrderedObject", "(Ljava/lang/Object;JLjava/lang/Object;)V", delegate_put_ordered_object);
     registry.register("sun/reflect/Reflection", "getCallerClass", "()Ljava/lang/Class;", delegate_get_caller_class);
     registry.register("sun/reflect/Reflection", "getClassAccessFlags", "(Ljava/lang/Class;)I", delegate_get_class_access_flags);
     registry.register("java/lang/Thread", "currentThread", "()Ljava/lang/Thread;", delegate_current_thread);
@@ -467,10 +469,18 @@ fn delegate_static_field_offset<'a>(vm: &mut VM<'a>, class : ClassRef<'a>, objec
 
 fn delegate_get_object_volatile<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
     println!("args: {:?}", args);
-    if let (Some(Value::Reference(clazz)), Some(Value::Long(index))) = (args.get(0), args.get(1)) {
-        let class_ref = vm.extract_class_from_class_object(clazz)?;
+    if let (Some(Value::Reference(o)), Some(Value::Long(index))) = (args.get(0), args.get(1)) {
+        if o.is_array(){
+            return non_failing_some(o.get_element(*index as usize  - 16));
+        }
+        let class_ref = vm.extract_class_from_class_object(o)?;
         //FIXME I assume that the field is static ig
-        let field_value = vm.static_class_objects.get(&class_ref.id).unwrap().get_field(*index as usize);
+        let static_object = vm.static_class_objects.get(&class_ref.id).unwrap();
+        let field_value = if static_object.is_object() {
+            static_object.get_field(*index as usize)
+        } else {
+            static_object.get_element(*index as usize)
+        };
         return non_failing_some(field_value);
     }
     non_failing_none()
@@ -522,6 +532,23 @@ fn delegate_get_byte<'a>(vm: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<
     } else {
         Err(VmError::ValidationError("Expected a long as address".to_string()))
     }
+}
+
+fn delegate_put_ordered_object<'a>(vm: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
+    println!("args: {:?}", args);
+    if let (Some(Value::Reference(o)), Some(Value::Long(index)), Some(x)) = (args.get(0), args.get(1), args.get(3)) {
+        if o.is_array(){
+            o.set_element(*index as usize  - 16, x.clone());
+            return non_failing_none();
+        }
+        let class_ref = vm.extract_class_from_class_object(o)?;
+        //FIXME I assume that the field is static ig
+        let static_object = vm.static_class_objects.get(&class_ref.id).unwrap();
+        println!("o: {:?}", static_object);
+        static_object.set_field(*index as usize, x.clone());
+        println!("o2: {:?}", static_object);
+    }
+    non_failing_none()
 }
 
 fn delegate_get_caller_class<'a>(vm: &mut VM<'a>, class : ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{

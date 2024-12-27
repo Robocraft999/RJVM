@@ -127,7 +127,7 @@ impl<'a> VM<'a>{
                     VMResultType::ExceptionThrown(error, throwable) => {
                         if let VmError::JavaException(JavaError::JavaExceptionThrown(thrown_class_name, message)) = &error{
                             let mut frame = self.call_stack.pop_call_frame();
-                            debug!("Exception thrown: {} in {:?}", thrown_class_name, class_and_method);
+                            debug!("Exception thrown by {}: {}: {}", class_and_method.format(), thrown_class_name, message);
                             if class_and_method.method.has_exception_handler() {
                                 todo!()
                             } else {
