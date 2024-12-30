@@ -77,6 +77,7 @@ pub fn register_all_natives(registry: &mut NativeMethodRegistry){
     registry.register("java/lang/Class", "isInterface", "()Z", delegate_is_interface);
     registry.register("java/lang/Class", "isArray", "()Z", delegate_is_array);
     registry.register("java/lang/Class", "isPrimitive", "()Z", delegate_is_primitive);
+    registry.register("java/lang/Class", "isAssignableFrom", "(Ljava/lang/Class;)Z", delegate_is_assignable_from);
     registry.register("java/lang/Float", "floatToRawIntBits", "(F)I", delegate_float_to_raw_bits);
     registry.register("java/lang/Double", "doubleToRawLongBits", "(D)J", delegate_double_to_raw_bits);
     registry.register("java/lang/Object", "getClass", "()Ljava/lang/Class;", delegate_get_class);
@@ -84,6 +85,7 @@ pub fn register_all_natives(registry: &mut NativeMethodRegistry){
     registry.register("java/lang/Object", "clone", "()Ljava/lang/Object;", delegate_clone);
     registry.register("[Ljava/lang/Object;", "getClass", "()Ljava/lang/Class;", delegate_get_class);
     registry.register("java/lang/Throwable", "fillInStackTrace", "(I)Ljava/lang/Throwable;", delegate_fill_in_stacktrace);
+    //registry.register("sun/misc/Unsafe", "registerNatives", "()V", delegate_nop);
     registry.register("sun/misc/Unsafe", "arrayBaseOffset", "(Ljava/lang/Class;)I", delegate_array_base_offset);
     registry.register("sun/misc/Unsafe", "arrayIndexScale", "(Ljava/lang/Class;)I", delegate_array_index_scale);
     registry.register("sun/misc/Unsafe", "addressSize", "()I", delegate_address_size);
@@ -103,11 +105,14 @@ pub fn register_all_natives(registry: &mut NativeMethodRegistry){
     registry.register("java/lang/Thread", "currentThread", "()Ljava/lang/Thread;", delegate_current_thread);
     registry.register("java/lang/Thread", "isAlive", "()Z", delegate_is_alive);
     registry.register("java/lang/Runtime", "availableProcessors", "()I", delegate_available_processors);
+    registry.register("java/lang/Runtime", "freeMemory", "()J", delegate_free_memory);
     registry.register("java/security/AccessController", "getStackAccessControlContext", "()Ljava/security/AccessControlContext;", delegate_get_stack_access_control_context);
     registry.register("java/security/AccessController", "doPrivileged", "(Ljava/security/PrivilegedAction;)Ljava/lang/Object;", delegate_do_privileged);
+    registry.register("java/security/AccessController", "doPrivileged", "(Ljava/security/PrivilegedExceptionAction;)Ljava/lang/Object;", delegate_do_privileged);
     registry.register("java/lang/String", "intern", "()Ljava/lang/String;", delegate_string_intern);
     registry.register("sun/reflect/NativeConstructorAccessorImpl", "newInstance0", "(Ljava/lang/reflect/Constructor;[Ljava/lang/Object;)Ljava/lang/Object;", delegate_new_instance0);
     registry.register("java/io/FileOutputStream", "writeBytes", "([BIIZ)V", delegate_write_bytes);
+    //registry.register("java/io/FileInputStream", "initIDs", "()V", delegate_nop);
     registry.register("java/io/FileInputStream", "readBytes", "([BII)I", delegate_read_bytes);
     registry.register("java/io/FileSystem", "getFileSystem", "()Ljava/io/FileSystem;", delegate_get_file_system);
     registry.register("rjvm/io/UnixFileSystem", "getBooleanAttributes0", "(Ljava/io/File;)I", delegate_get_boolean_attribute)
@@ -119,6 +124,10 @@ fn non_failing_some<'a>(value: Value<'a>) -> VMPartialResult<'a, Option<Value<'a
 
 fn non_failing_none<'a>() -> VMPartialResult<'a, Option<Value<'a>>> {
     Ok(VMResultType::Ok(None))
+}
+
+fn delegate_nop<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
+    non_failing_none()
 }
 
 fn delegate_nano_time<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
@@ -358,6 +367,17 @@ fn delegate_is_primitive<'a>(vm: &mut VM<'a>,  _: ClassRef<'a>, obj: Option<Refe
     }
 }
 
+fn delegate_is_assignable_from<'a>(vm: &mut VM<'a>,  _: ClassRef<'a>, obj: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
+    debug!("isAssignableFrom this: {:?}, other {:?}", obj, args);
+    if let (Some(object), Some(Value::Reference(other))) = (obj, args.get(0)) {
+        let clazz = vm.extract_class_from_class_object(object)?;
+        let other_class = vm.extract_class_from_class_object(other)?;
+        non_failing_some(Value::from(vm.check_if_subclass_of(other_class.name.as_str(), clazz.name.as_str())?))
+    } else {
+        Err(VmError::ValidationError("expected a class reference".to_string()))
+    }
+}
+
 fn delegate_float_to_raw_bits<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
     if let Some(Value::Float(value)) = args.get(0){
         return non_failing_some(Value::Integer(value.to_bits() as i32))
@@ -468,22 +488,21 @@ fn delegate_static_field_offset<'a>(vm: &mut VM<'a>, class : ClassRef<'a>, objec
 }
 
 fn delegate_get_object_volatile<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
-    println!("args: {:?}", args);
+    println!("get_object_volatile args: {:?}", args);
     if let (Some(Value::Reference(o)), Some(Value::Long(index))) = (args.get(0), args.get(1)) {
         if o.is_array(){
             return non_failing_some(o.get_element(*index as usize  - 16));
         }
-        let class_ref = vm.extract_class_from_class_object(o)?;
-        //FIXME I assume that the field is static ig
-        let static_object = vm.static_class_objects.get(&class_ref.id).unwrap();
-        let field_value = if static_object.is_object() {
+        let field_value = if let Ok(class_ref) = vm.extract_class_from_class_object(o){
+            let static_object = vm.static_class_objects.get(&class_ref.id).unwrap();
             static_object.get_field(*index as usize)
         } else {
-            static_object.get_element(*index as usize)
+            o.get_field(*index as usize)
         };
-        return non_failing_some(field_value);
+        non_failing_some(field_value)
+    } else {
+        Err(VmError::ValidationError(format!("Expected an Reference or Array but got: {:?}", args)))
     }
-    non_failing_none()
 }
 
 fn delegate_static_field_base<'a>(_: &mut VM<'a>, _: ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
@@ -535,25 +554,31 @@ fn delegate_get_byte<'a>(vm: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<
 }
 
 fn delegate_put_ordered_object<'a>(vm: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
-    println!("args: {:?}", args);
+    println!("put_ordered_object args: {:?}", args);
     if let (Some(Value::Reference(o)), Some(Value::Long(index)), Some(x)) = (args.get(0), args.get(1), args.get(3)) {
         if o.is_array(){
             o.set_element(*index as usize  - 16, x.clone());
             return non_failing_none();
         }
-        let class_ref = vm.extract_class_from_class_object(o)?;
-        //FIXME I assume that the field is static ig
-        let static_object = vm.static_class_objects.get(&class_ref.id).unwrap();
-        println!("o: {:?}", static_object);
-        static_object.set_field(*index as usize, x.clone());
-        println!("o2: {:?}", static_object);
+        if let Ok(class_ref) = vm.extract_class_from_class_object(o){
+            let static_object = vm.static_class_objects.get(&class_ref.id).unwrap();
+            static_object.set_field(*index as usize, x.clone());
+        } else {
+            o.set_field(*index as usize, x.clone());
+        }
+        non_failing_none()
+    } else {
+        Err(VmError::ValidationError(format!("Expected a reference or array but got: {:?}", args)))
     }
-    non_failing_none()
 }
 
 fn delegate_get_caller_class<'a>(vm: &mut VM<'a>, class : ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
-    //FIXME this is bad
-    non_failing_some(Value::Reference(vm.new_class_object(class.name.clone())?))
+    let frame_index = vm.call_stack.frames.len() - 2;
+    if let Some(frame) = vm.call_stack.frames.get(frame_index){
+        non_failing_some(Value::Reference(vm.new_class_object(frame.class_and_method.class.name.clone())?))
+    } else {
+        Err(VmError::ValidationError("There is no parent Callframe".to_string()))
+    }
 }
 
 fn delegate_get_class_access_flags<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
@@ -594,6 +619,10 @@ fn delegate_is_alive<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, object: Option<Refere
 
 fn delegate_available_processors<'a>(_: &mut VM<'a>, _: ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
     non_failing_some(Value::Integer(1))
+}
+
+fn delegate_free_memory<'a>(_: &mut VM<'a>, _: ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
+    non_failing_some(Value::Long(1024 * 1024 * 20))
 }
 
 fn delegate_get_stack_access_control_context<'a>(_: &mut VM<'a>, _: ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{

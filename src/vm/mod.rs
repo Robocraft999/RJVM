@@ -187,6 +187,7 @@ impl<'a> VM<'a>{
                 } else {
                     info!("Native Method {} wont get executed", class_and_method.format());
                     Ok(VMResultType::Ok(None))
+                    //Err(VmError::MethodCallError(format!("void Native {}", class_and_method.format())))
                 }
             }
         }

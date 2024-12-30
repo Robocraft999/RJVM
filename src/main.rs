@@ -111,7 +111,7 @@ fn run_and_catch_method(vm: &mut VM, class_name: &str, method_name: &str, method
 }
 
 fn main() {
-    simple_logger::SimpleLogger::new().with_level(LevelFilter::Debug).without_timestamps().init().unwrap();
+
 
     let mut class_path = ClassPath::default();
     class_path.push("resources;resources/rt.jar;resources/LogicSim.jar;resources/lib/unix;resources/lib").expect("TODO: panic message");
@@ -138,6 +138,7 @@ fn main() {
         }
     }
 
+    simple_logger::SimpleLogger::new().with_level(LevelFilter::Trace).without_timestamps().init().unwrap();
     println!("Init complete. Starting Main Program");
 
     //vm.class_manager.get_or_resolve_class("Empty").expect("TODO: panic message");
