@@ -428,7 +428,18 @@ fn delegate_clone<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, reference: Option<Refere
                 Err(VmError::ValidationError("Expected array to be cloned".to_string()))
             }
         } else {
-            todo!("cloning objects not yet possible")
+            if let ReferenceType::Object(content) = &obj.reference_type{
+                debug!("Cloning object: {:?}", reference);
+                let mut new_object = vm.new_object(obj.class_name.as_str())?;
+                if let ReferenceType::Object(new_content) = &new_object.reference_type{
+                    for (index, item) in content.borrow().iter().enumerate(){
+                        new_content.borrow_mut().insert(index, item.clone());
+                    }
+                }
+                non_failing_some(Value::Reference(new_object))
+            } else {
+                Err(VmError::ValidationError("Expected array to be cloned".to_string()))
+            }
         }
     } else {
         Err(VmError::ValidationError("Expected object".to_string()))
@@ -573,11 +584,20 @@ fn delegate_put_ordered_object<'a>(vm: &mut VM<'a>, _ : ClassRef<'a>, _: Option<
 }
 
 fn delegate_get_caller_class<'a>(vm: &mut VM<'a>, class : ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
-    let frame_index = vm.call_stack.frames.len() - 2;
-    if let Some(frame) = vm.call_stack.frames.get(frame_index){
-        non_failing_some(Value::Reference(vm.new_class_object(frame.class_and_method.class.name.clone())?))
+    if vm.init_call_stack.frames.len() == 0{
+        let frame_index = vm.call_stack.frames.len() - 2;
+        if let Some(frame) = vm.call_stack.frames.get(frame_index){
+            non_failing_some(Value::Reference(vm.new_class_object(frame.class_and_method.class.name.clone())?))
+        } else {
+            Err(VmError::ValidationError("There is no parent Callframe".to_string()))
+        }
     } else {
-        Err(VmError::ValidationError("There is no parent Callframe".to_string()))
+        //FIXME not sure if this works if the caller class is on the init call stack
+        if let Some(class_and_method) = &vm.call_stack.current_frame{
+            non_failing_some(Value::Reference(vm.new_class_object(class_and_method.class.name.clone())?))
+        } else {
+            Err(VmError::ValidationError("There is no parent Callframe (in clinit)".to_string()))
+        }
     }
 }
 

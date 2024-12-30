@@ -14,7 +14,7 @@ use crate::vm::value::Reference;
 pub struct CallStack<'a>{
     pub frames: Vec<CallFrame<'a>>,
     frames_infos : Vec<String>,
-    current_frame: Option<RefCell<CallFrame<'a>>>
+    pub current_frame: Option<ClassAndMethod<'a>>
 }
 
 impl<'a> CallStack<'a> {
@@ -119,6 +119,7 @@ impl<'a> CallStack<'a> {
             //let res = c.borrow_mut().execute(&mut *vm);
             trace!("execute_top popping frame for execution");
             let mut frame = self.pop_call_frame();
+            self.current_frame = Some(frame.class_and_method.clone());
             let res = {
                 //let frame = self.frames.last_mut().unwrap();
                 frame.execute(&mut *vm)?.clone()

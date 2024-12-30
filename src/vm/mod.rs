@@ -48,7 +48,8 @@ pub struct VM<'a>{
     pub class_objects: HashMap<ClassId, Reference<'a>>,
     pub native_method_registry: NativeMethodRegistry<'a>,
     pub currently_open_files: HashMap<String, (Vec<u8>, usize)>,
-    pub current_thread: Option<Reference<'a>>
+    pub current_thread: Option<Reference<'a>>,
+    pub init_call_stack: CallStack<'a>,
 }
 
 impl<'a> VM<'a>{
@@ -67,7 +68,8 @@ impl<'a> VM<'a>{
             class_objects: HashMap::new(),
             native_method_registry,
             currently_open_files: HashMap::new(),
-            current_thread: None
+            current_thread: None,
+            init_call_stack: CallStack::new(),
         }
     }
 
@@ -81,7 +83,7 @@ impl<'a> VM<'a>{
         let frame = CallStack::create_call_frame(class_and_method, object, args)?;
         self.invoke_frame(frame)
     }
-    
+
     pub fn invoke_frame(&mut self, call_frame: CallFrame<'a>) -> VMPartialResult<'a, Option<Value<'a>>>{
         let class_and_method = call_frame.class_and_method.clone();
         if !class_and_method.method.is_native(){
@@ -192,18 +194,132 @@ impl<'a> VM<'a>{
             }
         }
     }
+    
+    fn invoke_frame_on_stack(&mut self, call_frame: CallFrame<'a>) -> VMPartialResult<'a, Option<Value<'a>>>{
+        let class_and_method = call_frame.class_and_method.clone();
+        if !class_and_method.method.is_native(){
+            self.init_call_stack.push_call_frame(call_frame);
+            self.init_call_stack.print_call_stack();
+            let vm_ptr: *mut VM = self;
+            loop {
+                let partial = self.init_call_stack.execute_top(vm_ptr)?;
+                match partial {
+                    VMResultType::Ok(optional_value) => {
+                        return Ok(VMResultType::Ok(optional_value));
+                    }
+                    VMResultType::CallPaused(new_frame) => {
+                        let result = self.invoke_frame(new_frame)?;
+                        if let VMResultType::Ok(returned_value) = result {
+                            self.init_call_stack.add_to_top_stack(returned_value);
+                        } else if let VMResultType::ExceptionThrown(VmError::JavaException(JavaError::JavaExceptionThrown(thrown_class_name, message)), throwable) = result{
+                            let (mut is_handled, mut handler_option) = (false, None);
+                            for handler in class_and_method.method.get_exception_handlers().0 {
+                                let can_handle = match handler.catch_type {
+                                    Some(ref class_name) => {
+                                        self.check_if_subclass_of(class_name.as_str(), thrown_class_name.as_str())?
+                                    }
+                                    None => true
+                                };
+                                if can_handle{
+                                    is_handled = true;
+                                    handler_option = Some(handler);
+                                    break;
+                                }
+                            }
+                            if is_handled{
+                                let frame = self.init_call_stack.frames.last_mut().unwrap();
+                                frame.pc = handler_option.unwrap().handler_pc;
+                                frame.stack.push(throwable);
+                                debug!("Exception thrown handled by {}", frame.class_and_method.method.name.as_str());
+                            } else {
+                                debug!("Exception handler not in this function");
+                                return Ok(VMResultType::ExceptionThrown(VmError::JavaException(JavaError::JavaExceptionThrown(thrown_class_name, message)), throwable));
+                            }
+                        }
+                    }
+                    VMResultType::ExceptionThrown(error, throwable) => {
+                        if let VmError::JavaException(JavaError::JavaExceptionThrown(thrown_class_name, message)) = &error{
+                            let mut frame = self.init_call_stack.pop_call_frame();
+                            debug!("Exception thrown by {}: {}: {}", class_and_method.format(), thrown_class_name, message);
+                            if class_and_method.method.has_exception_handler() {
+                                todo!()
+                            } else {
+                                return Ok(VMResultType::ExceptionThrown(error, throwable));
+                            }
+                        } else {
+                            unreachable!("Could not handle {} thrown by a function", error);
+                        }
+                    }
+                }
+            }
+        } else {
+            let object = if class_and_method.method.is_static() {
+                None
+            } else {
+                match call_frame.locals.get(0) {
+                    Some(local) => {
+                        Some(local.expect_reference()?)
+                    },
+                    None => None
+                }
+            };
+            let args = call_frame.locals
+                .iter()
+                .cloned()
+                .skip(if object.is_none() {0} else {1})
+                .take_while(|value| value != &Value::Uninitialized)
+                .collect::<Vec<_>>();
+            let try_native = NativeMethodRegistry::invoke(self, &class_and_method, object, args);
+            if let Some(native) = try_native{
+                trace!("'Pushing' native method frame {:?}", call_frame);
+                //self.call_stack.push_call_frame(call_frame);
+                self.init_call_stack.print_call_stack();
+                //self.handle_result(native?)
+                trace!("native result is {:?}", native);
+                match native? {
+                    VMResultType::Ok(optional_value) => {
+                        Ok(VMResultType::Ok(optional_value))
+                    }
+                    VMResultType::CallPaused(new_frame) => {
+                        let result = self.invoke_frame(new_frame)?;
+                        //should always return VMResultType::Ok(None)
+                        assert!(result.is_ok());
+                        /*if let VMResultType::Ok(returned_value) = result {
+                            self.call_stack.add_to_top_stack(returned_value);
+                        }*/
+                        Ok(result)
+                    }
+                    VMResultType::ExceptionThrown(error, throwable) => {
+                        Err(error)
+                    }
+                }
+            } else {
+                if class_and_method.method.descriptor.return_type.is_some(){
+                    error!("Native Method {} wont get executed but return value is probably expected", class_and_method.format());
+                    Err(VmError::MethodCallError(format!("Native {}", class_and_method.format())))
+                } else {
+                    info!("Native Method {} wont get executed", class_and_method.format());
+                    Ok(VMResultType::Ok(None))
+                    //Err(VmError::MethodCallError(format!("void Native {}", class_and_method.format())))
+                }
+            }
+        }
+    }
 
     pub fn get_or_resolve_class(&mut self, class_name: &str) -> VMResult<ClassRef<'a>>{
         let resolved = self.class_manager.get_or_resolve_class(class_name)?;
+        //FIXME maybe make this global
         if let ResolvedClass::NewClass(to_init) = &resolved{
             for class in to_init.to_initialize.iter(){
-                self.init_class(class)?;
+                if let Some(clinit) = self.init_class(class)?{
+                    self.invoke_frame_on_stack(clinit)?;
+                }
             }
         }
         Ok(resolved.get_class())
     }
 
-    fn init_class(&mut self, class: ClassRef<'a>) -> VMResult<()>{
+    fn init_class(&mut self, class: ClassRef<'a>) -> VMResult<Option<CallFrame<'a>>>{
         if class.transitive_field_count > 0{
             let static_object = self.new_object_from_class(class);
             self.static_class_objects.insert(class.id, static_object);
@@ -212,11 +328,11 @@ impl<'a> VM<'a>{
                     class,
                     method: clinit_method,
                 };
-                self.invoke_new_frame(class_and_method, Some(static_object), Vec::new())?;
+                return Ok(Some(CallStack::create_call_frame(class_and_method, Some(static_object), Vec::new())?));
             }
         }
 
-        Ok(())
+        Ok(None)
     }
 
     pub fn resolve_class_method(&mut self, class_name: &str, method_name: &str, descriptor: &str) -> VMResult<ClassAndMethod<'a>>{
