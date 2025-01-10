@@ -131,7 +131,16 @@ impl<'a> VM<'a>{
                             let mut frame = self.call_stack.pop_call_frame();
                             debug!("Exception thrown by {}: {}: {}", class_and_method.format(), thrown_class_name, message);
                             if class_and_method.method.has_exception_handler() {
-                                todo!()
+                                for entry in class_and_method.method.get_exception_handlers().0{
+                                    if let Some(catch_type_name) = entry.catch_type{
+                                        if self.check_if_subclass_of(thrown_class_name, catch_type_name.as_str())?{
+                                            frame.pc = entry.handler_pc;
+                                            frame.stack.push(throwable);
+                                            debug!("Exception thrown handled by {}", frame.class_and_method.method.name.as_str());
+                                            return self.invoke_frame(frame);
+                                        }
+                                    }
+                                }
                             } else {
                                 return Ok(VMResultType::ExceptionThrown(error, throwable));
                             }

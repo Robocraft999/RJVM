@@ -898,8 +898,17 @@ impl<'a> CallFrame<'a>{
         let class = vm.get_or_resolve_class(class_name.as_str())?;
         trace!("finished loading class to execute on: '{}'", class_name.as_str());
         let class_and_method = match kind {
-            InvokeKind::STATIC | InvokeKind::SPECIAL => {
-                class.find_method(method_name.as_str(), descriptor.as_str()).map(|method| ClassAndMethod {class, method}).unwrap()
+            InvokeKind::STATIC => {
+                class
+                    .find_method(method_name.as_str(), descriptor.as_str())
+                    .map(|method| ClassAndMethod {class, method})
+                    .ok_or(VmError::JavaException(JavaError::MethodNotFoundException(format!("{:?} {}.{}{}", kind, class.name,  method_name, descriptor))))?
+            }
+            InvokeKind::SPECIAL => {
+                class
+                    .find_method(method_name.as_str(), descriptor.as_str())
+                    .map(|method| ClassAndMethod {class, method})
+                    .unwrap_or(Self::get_method_virtual(class, method_name.as_str(), descriptor.as_str())?)
             }
             InvokeKind::VIRTUAL | InvokeKind::INTERFACE => {
                 Self::get_method_virtual(class, method_name.as_str(), descriptor.as_str())?

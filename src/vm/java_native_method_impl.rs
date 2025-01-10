@@ -78,6 +78,8 @@ pub fn register_all_natives(registry: &mut NativeMethodRegistry){
     registry.register("java/lang/Class", "isArray", "()Z", delegate_is_array);
     registry.register("java/lang/Class", "isPrimitive", "()Z", delegate_is_primitive);
     registry.register("java/lang/Class", "isAssignableFrom", "(Ljava/lang/Class;)Z", delegate_is_assignable_from);
+    registry.register("java/lang/ClassLoader", "findLoadedClass0", "(Ljava/lang/String;)Ljava/lang/Class;", delegate_find_loaded_class0);
+    registry.register("java/lang/ClassLoader", "findBootstrapClass", "(Ljava/lang/String;)Ljava/lang/Class;", delegate_find_bootstrap_class);
     registry.register("java/lang/Float", "floatToRawIntBits", "(F)I", delegate_float_to_raw_bits);
     registry.register("java/lang/Double", "doubleToRawLongBits", "(D)J", delegate_double_to_raw_bits);
     registry.register("java/lang/Object", "getClass", "()Ljava/lang/Class;", delegate_get_class);
@@ -109,6 +111,7 @@ pub fn register_all_natives(registry: &mut NativeMethodRegistry){
     registry.register("java/security/AccessController", "getStackAccessControlContext", "()Ljava/security/AccessControlContext;", delegate_get_stack_access_control_context);
     registry.register("java/security/AccessController", "doPrivileged", "(Ljava/security/PrivilegedAction;)Ljava/lang/Object;", delegate_do_privileged);
     registry.register("java/security/AccessController", "doPrivileged", "(Ljava/security/PrivilegedExceptionAction;)Ljava/lang/Object;", delegate_do_privileged);
+    registry.register("java/security/AccessController", "doPrivileged", "(Ljava/security/PrivilegedExceptionAction;Ljava/security/AccessControlContext;)Ljava/lang/Object;", delegate_do_privileged);
     registry.register("java/lang/String", "intern", "()Ljava/lang/String;", delegate_string_intern);
     registry.register("sun/reflect/NativeConstructorAccessorImpl", "newInstance0", "(Ljava/lang/reflect/Constructor;[Ljava/lang/Object;)Ljava/lang/Object;", delegate_new_instance0);
     registry.register("java/io/FileOutputStream", "writeBytes", "([BIIZ)V", delegate_write_bytes);
@@ -375,6 +378,34 @@ fn delegate_is_assignable_from<'a>(vm: &mut VM<'a>,  _: ClassRef<'a>, obj: Optio
         non_failing_some(Value::from(vm.check_if_subclass_of(other_class.name.as_str(), clazz.name.as_str())?))
     } else {
         Err(VmError::ValidationError("expected a class reference".to_string()))
+    }
+}
+
+fn delegate_find_loaded_class0<'a>(vm: &mut VM<'a>,  _: ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
+    debug!("findLoadedClass0 {:?}", args);
+    if let Some(str_object) = args.get(0) {
+        let class_name = VM::extract_string_from_object(&str_object)?;
+        if vm.class_manager.find_class_by_name(class_name.as_str()).is_some() {
+            non_failing_some(Value::Reference(vm.new_class_object(class_name)?))
+        } else {
+            non_failing_some(Value::Null)
+        }
+    } else {
+        Err(VmError::ValidationError("expected a string reference".to_string()))
+    }
+}
+
+fn delegate_find_bootstrap_class<'a>(vm: &mut VM<'a>,  _: ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
+    debug!("findBootstrapClass {:?}", args);
+    if let Some(str_object) = args.get(0) {
+        let class_name = VM::extract_string_from_object(&str_object)?;
+        if vm.class_manager.find_class_by_name(class_name.as_str()).is_some() {
+            non_failing_some(Value::Reference(vm.new_class_object(class_name)?))
+        } else {
+            non_failing_some(Value::Null)
+        }
+    } else {
+        Err(VmError::ValidationError("expected a string reference".to_string()))
     }
 }
 
