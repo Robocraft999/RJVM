@@ -141,7 +141,7 @@ impl<'a> CallStack<'a> {
                 }
                 VMResultType::ExceptionThrown(error, throwable) => {
                     trace!("et execution returned ExceptionThrown, returning frame {:?} and error {:?}", frame, error);
-                    //self.push_call_frame(frame);
+                    self.push_call_frame(frame);
                     Ok(VMResultType::ExceptionThrown(error, throwable))
                 }
             }

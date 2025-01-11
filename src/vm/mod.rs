@@ -12,7 +12,7 @@ use class_manager::ClassManager;
 use class_path::ClassPath;
 use value::Value;
 use crate::access_flags::MethodFlag;
-use crate::attribute::ProgramCounter;
+use crate::attribute::{ExceptionTable, ProgramCounter};
 use crate::error::ClassParseError;
 use crate::field_info::{FieldType, PrimitiveType};
 use crate::vm::call_frame::CallFrame;
@@ -84,6 +84,59 @@ impl<'a> VM<'a>{
         self.invoke_frame(frame)
     }
 
+    /*
+    invoke(main_frame)
+        normal
+            push main_frame
+            exe main_frame
+                popped main_frame
+                OK(result)
+                    return OK(result)
+                EXCEPTION(error, throwable)
+                    +++ pushed main_frame
+                    --- pop parent_frame
+                    main_frame handler?
+                        set pc
+                        goto "exe main_frame"
+                    :
+                        return EXCEPTION(error, throwable)
+                CALL_PAUSED(frame)
+                    pushed main_frame
+                    push frame
+                    result2 = invoke(frame)
+                        popped frame
+                        OK(result2)
+                            add_to_top_frame(result2) //main_frame
+                            goto "exe main_frame"
+                        EXCEPTION(error2, throwable2) //exception could not been handled by the called frame
+                            +++ pushed frame
+                            +++ pop frame
+                            main_frame handler?
+                                set pc
+                                goto "exe main_frame"
+                            :
+                                pop main_frame        //exception could also not been handled by main_frame
+                                return EXCEPTION(error2, throwable2)
+
+        native
+            result = ninvoke(main_frame)
+                SOME
+                    OK(result2)
+                        return OK(result2)
+                    EXCEPTION(error, throwable)      //unreachable from natives
+                        return error
+                    CALL_PAUSED(frame)
+                        result2 = invoke(frame)
+                            popped frame
+                            OK(result3)
+                            EXCEPTION(error2, throwable2)
+                                special handling for "doPrivileged"
+                        return result2               //result2 is either OK, so should be None or threw exception which can`t be handled by native main_frame
+
+                NONE
+                    return OK(None)
+     */
+
     pub fn invoke_frame(&mut self, call_frame: CallFrame<'a>) -> VMPartialResult<'a, Option<Value<'a>>>{
         let class_and_method = call_frame.class_and_method.clone();
         if !class_and_method.method.is_native(){
@@ -101,48 +154,30 @@ impl<'a> VM<'a>{
                         if let VMResultType::Ok(returned_value) = result {
                             self.call_stack.add_to_top_stack(returned_value);
                         } else if let VMResultType::ExceptionThrown(VmError::JavaException(JavaError::JavaExceptionThrown(thrown_class_name, message)), throwable) = result{
-                            let (mut is_handled, mut handler_option) = (false, None);
-                            for handler in class_and_method.method.get_exception_handlers().0 {
-                                let can_handle = match handler.catch_type {
-                                    Some(ref class_name) => {
-                                        self.check_if_subclass_of(class_name.as_str(), thrown_class_name.as_str())?
-                                    }
-                                    None => true
-                                };
-                                if can_handle{
-                                    is_handled = true;
-                                    handler_option = Some(handler);
-                                    break;
-                                }
-                            }
-                            if is_handled{
+                            let current_pc = self.call_stack.frames.last().unwrap().pc.clone();
+                            if let Some(handler_pc) = self.try_resolve_exception_handler(class_and_method.method.get_exception_handlers(), current_pc, thrown_class_name.as_str())?{
                                 let frame = self.call_stack.frames.last_mut().unwrap();
-                                frame.pc = handler_option.unwrap().handler_pc;
+                                frame.pc = handler_pc;
                                 frame.stack.push(throwable);
                                 debug!("Exception thrown handled by {}", frame.class_and_method.method.name.as_str());
                             } else {
-                                debug!("Exception handler not in this function");
-                                return Ok(VMResultType::ExceptionThrown(VmError::JavaException(JavaError::JavaExceptionThrown(thrown_class_name, message)), throwable));
+                                debug!("Exception handler not in this function {}", class_and_method.format());
+                                return Ok(VMResultType::ExceptionThrown(VmError::JavaException(JavaError::JavaExceptionThrown(thrown_class_name.to_owned(), message.to_owned())), throwable));
                             }
                         }
                     }
                     VMResultType::ExceptionThrown(error, throwable) => {
                         if let VmError::JavaException(JavaError::JavaExceptionThrown(thrown_class_name, message)) = &error{
-                            let mut frame = self.call_stack.pop_call_frame();
                             debug!("Exception thrown by {}: {}: {}", class_and_method.format(), thrown_class_name, message);
-                            if class_and_method.method.has_exception_handler() {
-                                for entry in class_and_method.method.get_exception_handlers().0{
-                                    if let Some(catch_type_name) = entry.catch_type{
-                                        if self.check_if_subclass_of(thrown_class_name, catch_type_name.as_str())?{
-                                            frame.pc = entry.handler_pc;
-                                            frame.stack.push(throwable);
-                                            debug!("Exception thrown handled by {}", frame.class_and_method.method.name.as_str());
-                                            return self.invoke_frame(frame);
-                                        }
-                                    }
-                                }
+                            let current_pc = self.call_stack.frames.last().unwrap().pc.clone();
+                            if let Some(handler_pc) = self.try_resolve_exception_handler(class_and_method.method.get_exception_handlers(), current_pc, thrown_class_name)?{
+                                let frame = self.call_stack.frames.last_mut().unwrap();
+                                frame.pc = handler_pc;
+                                frame.stack.push(throwable);
+                                debug!("Exception thrown handled by {}", frame.class_and_method.method.name.as_str());
                             } else {
-                                return Ok(VMResultType::ExceptionThrown(error, throwable));
+                                debug!("Exception handler not in this function {}", class_and_method.format());
+                                return Ok(VMResultType::ExceptionThrown(VmError::JavaException(JavaError::JavaExceptionThrown(thrown_class_name.to_owned(), message.to_owned())), throwable));
                             }
                         } else {
                             unreachable!("Could not handle {} thrown by a function", error);
@@ -180,8 +215,18 @@ impl<'a> VM<'a>{
                     }
                     VMResultType::CallPaused(new_frame) => {
                         let result = self.invoke_frame(new_frame)?;
-                        //should always return VMResultType::Ok(None)
-                        assert!(result.is_ok());
+                        if class_and_method.class.name == "java/security/AccessController" &&
+                            class_and_method.method.name == "doPrivileged" &&
+                            class_and_method.method.descriptor.matches("(Ljava/security/PrivilegedExceptionAction;Ljava/security/AccessControlContext;)Ljava/lang/Object;"){
+                            if let VMResultType::ExceptionThrown(error, throwable) = result{
+                                let new_error = self.new_object("java/security/PrivilegedActionException")?;
+                                new_error.set_field(2, throwable);
+                                return Ok(VMResultType::ExceptionThrown(error, Value::Reference(new_error)));
+                            }
+                        } else {
+                            //should always return VMResultType::Ok(None)
+                            assert!(result.is_ok());
+                        }
                         /*if let VMResultType::Ok(returned_value) = result {
                             self.call_stack.add_to_top_stack(returned_value);
                         }*/
@@ -199,6 +244,23 @@ impl<'a> VM<'a>{
                     info!("Native Method {} wont get executed", class_and_method.format());
                     Ok(VMResultType::Ok(None))
                     //Err(VmError::MethodCallError(format!("void Native {}", class_and_method.format())))
+                }
+            }
+        }
+    }
+
+    fn try_resolve_exception_handler(&mut self, exception_table: ExceptionTable, pc: ProgramCounter, thrown_class_name: &str) -> VMResult<Option<ProgramCounter>>{
+        for handler in exception_table.0 {
+            let can_handle = match handler.catch_type {
+                Some(ref class_name) => {
+                    self.check_if_subclass_of(class_name.as_str(), thrown_class_name.as_str())?
+                }
+                None => true
+            };
+            if can_handle{
+                //FIXME check if end_pc is inclusive or exclusive
+                if handler.start_pc.0 <= pc.0 && pc.0 <= handler.end_pc.0{
+                    return Ok(Some(handler.handler_pc));
                 }
             }
         }
