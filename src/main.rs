@@ -137,7 +137,7 @@ fn main() {
         }
     }
 
-    simple_logger::SimpleLogger::new().with_level(LevelFilter::Debug).without_timestamps().init().unwrap();
+    simple_logger::SimpleLogger::new().with_level(LevelFilter::Error).without_timestamps().init().unwrap();
     println!("Init complete. Starting Main Program");
 
     //vm.class_manager.get_or_resolve_class("Empty").expect("TODO: panic message");

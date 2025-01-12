@@ -253,7 +253,7 @@ impl<'a> VM<'a>{
         for handler in exception_table.0 {
             let can_handle = match handler.catch_type {
                 Some(ref class_name) => {
-                    self.check_if_subclass_of(class_name.as_str(), thrown_class_name.as_str())?
+                    self.check_if_subclass_of(class_name.as_str(), thrown_class_name)?
                 }
                 None => true
             };
@@ -264,6 +264,7 @@ impl<'a> VM<'a>{
                 }
             }
         }
+        Ok(None)
     }
     
     fn invoke_frame_on_stack(&mut self, call_frame: CallFrame<'a>) -> VMPartialResult<'a, Option<Value<'a>>>{
