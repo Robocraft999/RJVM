@@ -26,7 +26,7 @@ impl<'a> CallStack<'a> {
         }
     }
 
-    pub fn create_call_frame<'frame>(class_and_method: ClassAndMethod<'frame>, object: Option<Reference<'frame>>, args: Vec<Value<'frame>>) -> VMResult<CallFrame<'frame>> {
+    pub fn create_call_frame<'frame>(class_and_method: ClassAndMethod<'frame>, object: Option<Reference<'frame>>, args: Vec<Value<'frame>>) -> CallFrame<'frame> {
         let locals = if !class_and_method.method.is_native(){
             let mut empty_locals = vec![Value::Uninitialized; class_and_method.get_max_locals()];
             for i in 0..args.len(){
@@ -57,12 +57,13 @@ impl<'a> CallStack<'a> {
         assert_eq!(args_amount, class_and_method.method.get_args_count(), "Args has not the correct length (was {}, expected {})", args_amount, class_and_method.method.get_args_count());
         info!("NEW CALL FRAME with {:?} locals, \nobject=({:?}), \nargs=({:?}), \nmax_locals=[{}]", locals, object, args, class_and_method.get_max_locals());
 
-        Ok(CallFrame{
+        CallFrame{
             class_and_method,
             locals,
             pc: ProgramCounter(0),
+            last_pc: ProgramCounter(0),
             stack: Vec::new()
-        })
+        }
     }
 
     pub fn push_call_frame(&mut self, call_frame: CallFrame<'a>){
@@ -143,6 +144,12 @@ impl<'a> CallStack<'a> {
                     trace!("et execution returned ExceptionThrown, returning frame {:?} and error {:?}", frame, error);
                     self.push_call_frame(frame);
                     Ok(VMResultType::ExceptionThrown(error, throwable))
+                }
+                VMResultType::NeedsClassInit(frames) => {
+                    trace!("et execution returned NeedsClassInit, returning frames {:?}", frames);
+                    frame.pc = frame.last_pc.clone();
+                    self.push_call_frame(frame);
+                    Ok(VMResultType::NeedsClassInit(frames))
                 }
             }
             //Ok(res)

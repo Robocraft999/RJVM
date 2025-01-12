@@ -8,6 +8,7 @@ use crate::bytecode::{Instruction, parse_instruction, printable_instructions};
 use crate::class_file::get_constant_printable;
 use crate::constants::ConstantPoolEntry;
 use crate::field_info::{FieldType, PrimitiveType};
+use crate::get_or_init;
 use crate::method_info::MethodDescriptor;
 use crate::vm::java_error::JavaError;
 use crate::vm::{VM, VmError};
@@ -21,6 +22,7 @@ pub struct CallFrame<'a>{
     pub class_and_method: ClassAndMethod<'a>,
     pub locals: Vec<Value<'a>>,
     pub pc: ProgramCounter,
+    pub last_pc: ProgramCounter,
     pub stack: Vec<Value<'a>>,
 }
 
@@ -37,6 +39,7 @@ impl<'a> CallFrame<'a>{
 
             loop {
                 if let Ok((instruction, pc)) = parse_instruction(&code.code, self.pc.0 as usize) {
+                    self.last_pc = self.pc.clone();
                     self.pc = ProgramCounter(pc as u16);
                     trace!("{:?}", instruction);
                     trace!("stack=");
@@ -64,24 +67,24 @@ impl<'a> CallFrame<'a>{
                             let (class_name, field_name, descriptor) = self.class_and_method.get_constant_field_info_descriptor(index).expect("GIB MICH DIE FELD2");
                             //let (field_index, info) = self.class_and_method.class.find_field(field_name.as_str()).unwrap();
                             //let class = vm.class_manager.find_class_by_name(class_name.as_str()).unwrap();
-                            let class = vm.get_or_resolve_class(class_name.as_str())?;
+                            let class = get_or_init!(vm.get_or_resolve_class(class_name.as_str())?);
                             let (field_index, info, class_id) = class.find_field_static(field_name.as_str()).unwrap();
                             let object = vm.get_static_class_object(class_id).unwrap();
                             debug!("GETSTATIC {} {} {} {:?}", field_name, descriptor, field_index, info);
                             self.stack.push(object.get_field(field_index));
                         }
                         Instruction::LDC(index) => {
-                            let value = self.get_constant_as_value(vm, index as u16)?;
+                            let value = get_or_init!(self.get_constant_as_value(vm, index as u16)?);
                             self.stack.push(value);
                             debug!("LDC: {:?}", get_constant_printable(constants, index as u16))
                         }
                         Instruction::LDCW(index) => {
-                            let value = self.get_constant_as_value(vm, index)?;
+                            let value = get_or_init!(self.get_constant_as_value(vm, index)?);
                             self.stack.push(value);
                             debug!("LDCW: {:?}", get_constant_printable(constants, index))
                         }
                         Instruction::LDC2W(index) => {
-                            let value = self.get_constant_as_value(vm, index)?;
+                            let value = get_or_init!(self.get_constant_as_value(vm, index)?);
                             self.stack.push(value);
                             debug!("LDC2W: {}", get_constant_printable(constants, index))
                         }
@@ -90,7 +93,7 @@ impl<'a> CallFrame<'a>{
                             let target_class = if class_name == self.class_and_method.class.name {
                                 self.class_and_method.class
                             } else {
-                                vm.get_or_resolve_class(class_name.as_str())?
+                                get_or_init!(vm.get_or_resolve_class(class_name.as_str())?)
                             };
                             let (field_index, info) = target_class.find_field(field_name.as_str()).unwrap();
                             debug!("PUTFIELD {}.{} {} {} {:?}", class_name, field_name, descriptor, field_index, info);
@@ -109,7 +112,7 @@ impl<'a> CallFrame<'a>{
                             let target_class = if class_name == self.class_and_method.class.name {
                                 self.class_and_method.class
                             } else {
-                                vm.get_or_resolve_class(class_name.as_str())?
+                                get_or_init!(vm.get_or_resolve_class(class_name.as_str())?)
                             };
                             let (field_index, _) = target_class.find_field(field_name.as_str()).unwrap();
                             let object = self.stack.pop().unwrap();
@@ -137,7 +140,7 @@ impl<'a> CallFrame<'a>{
                         Instruction::NEW(index) => {
                             let class_name = self.class_and_method.get_constant_utf8(index).unwrap();
                             //let res = vm.invoke_method(class_name.as_str(), "<init>", "()V")?;
-                            let new_object = vm.new_object(class_name.as_str())?;
+                            let new_object = get_or_init!(vm.new_object(class_name.as_str())?);
 
                             debug!("NEW: {} {} {:?}", index, get_constant_printable(constants, index), &new_object);
                             self.stack.push(Value::Reference(new_object));
@@ -147,8 +150,15 @@ impl<'a> CallFrame<'a>{
                             let class_name = self.class_and_method.get_constant_utf8(index).unwrap();
                             debug!("ANEWARRAY {}[{}]", class_name, count);
                             let array_content = vec![Value::Null; count as usize];
-                            //FIXME needs class proload
-                            let array = Value::Reference(vm.new_array(1, FieldType::Object(class_name), RefCell::new(array_content))?);
+                            let result = vm.new_array(1, FieldType::Object(class_name), RefCell::new(array_content))?;
+                            let array = Value::Reference(match result {
+                                VMResultType::Ok(value) => value,
+                                VMResultType::NeedsClassInit(classes) => {
+                                    self.stack.push(Value::Integer(count));
+                                    return Ok(VMResultType::NeedsClassInit(classes));
+                                }
+                                _ => unreachable!("[ANEWARRAY] got unexpected result: {:?}", result)
+                            });
                             self.stack.push(array);
                         }
                         Instruction::NEWARRAY(atype) => {
@@ -166,7 +176,15 @@ impl<'a> CallFrame<'a>{
                             let count = self.pop_int()?;
                             debug!("NEWARRAY {:?}[{}]", primitive_type, count);
                             let array_content = vec![Value::Null; count as usize];
-                            let array = Value::Reference(vm.new_array(1, primitive_type, RefCell::new(array_content))?);
+                            let result = vm.new_array(1, primitive_type, RefCell::new(array_content))?;
+                            let array = Value::Reference(match result {
+                                VMResultType::Ok(value) => value,
+                                VMResultType::NeedsClassInit(classes) => {
+                                    self.stack.push(Value::Integer(count));
+                                    return Ok(VMResultType::NeedsClassInit(classes));
+                                }
+                                _ => unreachable!("[NEWARRAY] got unexpected result: {:?}", result)
+                            });
                             self.stack.push(array);
                         }
                         Instruction::ARRAYLENGTH => {
@@ -599,7 +617,7 @@ impl<'a> CallFrame<'a>{
                             debug!("CHECKCAST {}", get_constant_printable(constants, constant_index));
                         }
                         Instruction::INSTANCEOF(constant_index) => {
-                            let of_class = vm.get_or_resolve_class(get_constant_printable(constants, constant_index).as_str())?;
+                            let of_class = get_or_init!(vm.get_or_resolve_class(get_constant_printable(constants, constant_index).as_str())?);
 
                             let object = self.stack.pop().unwrap();
                             if object == Value::Null{
@@ -886,7 +904,7 @@ impl<'a> CallFrame<'a>{
     fn execute_invoke(&mut self, vm: &mut VM<'a>, index: u16, kind: InvokeKind) -> VMPartialResult<'a, Option<Value<'a>>> {
         let (class_name, method_name, descriptor) = self.class_and_method.get_constant_method_info_descriptor(index).expect("GIB MICH DIE METHODE");
         trace!("loading class to execute on: '{}'", class_name.as_str());
-        let class = vm.get_or_resolve_class(class_name.as_str())?;
+        let class = get_or_init!(vm.get_or_resolve_class(class_name.as_str())?);
         trace!("finished loading class to execute on: '{}'", class_name.as_str());
         let args_count = MethodDescriptor::new(descriptor.clone()).args.len();
         let mut args = Vec::new();
@@ -954,7 +972,7 @@ impl<'a> CallFrame<'a>{
             trace!("    [{}] {:?}", index, value);
         }
         debug!("INVOKE{:?}: {}{} on {:?}", kind, method_name, descriptor, receiver);
-        let call_frame = CallStack::create_call_frame(class_and_method, receiver, args)?;
+        let call_frame = CallStack::create_call_frame(class_and_method, receiver, args);
         Ok(VMResultType::CallPaused(call_frame))
         //Ok(VMResultType::Ok(Some(Value::Null)))
         /*let res = vm.invoke(class_and_method, receiver, args)?.to_option();
@@ -1027,7 +1045,7 @@ impl<'a> CallFrame<'a>{
         Err(VmError::ValidationError(format!("Expected Integer to pop but found {:?}", popped)))
     }
 
-    fn get_constant_as_value(&mut self, vm: &mut VM<'a>, index: u16) -> Result<Value<'a>, VmError>{
+    fn get_constant_as_value(&mut self, vm: &mut VM<'a>, index: u16) -> VMPartialResult<'a, Value<'a>>{
         let constant_value = self.class_and_method.class.get_constant(index).unwrap();
         let value = match constant_value {
             ConstantPoolEntry::Integer(value) => Value::Integer(value),
@@ -1037,7 +1055,7 @@ impl<'a> CallFrame<'a>{
             ConstantPoolEntry::String(string_index) => {
                 if let Some(ConstantPoolEntry::Utf8(string)) = self.class_and_method.class.get_constant(string_index){
                     //FIXME maybe needs preloading
-                    let string_object = vm.new_string_object(string)?;
+                    let string_object = get_or_init!(vm.new_string_object(string)?);
                     Value::Reference(string_object)
                 } else {
                     //return Err(ValidationError("Expected string".to_string()));
@@ -1047,7 +1065,7 @@ impl<'a> CallFrame<'a>{
             }
             ConstantPoolEntry::Class(name_index) => {
                 if let Some(ConstantPoolEntry::Utf8(string)) = self.class_and_method.class.get_constant(name_index){
-                    let class_object = vm.new_class_object(string)?;
+                    let class_object = get_or_init!(vm.new_class_object(string)?);
                     Value::Reference(class_object)
                 } else {
                     warn!("expected but didnt find string object");
@@ -1056,7 +1074,7 @@ impl<'a> CallFrame<'a>{
             }
             _ => unimplemented!("Constant of type {constant_value:?} cannot be converted to a value")
         };
-        Ok(value)
+        Ok(VMResultType::Ok(value))
     }
 }
 
