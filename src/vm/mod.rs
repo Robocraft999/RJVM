@@ -83,6 +83,121 @@ impl<'a> VM<'a>{
         let frame = CallStack::create_call_frame(class_and_method, object, args)?;
         self.invoke_frame(frame)
     }
+    /*
+    main_frame
+        func1
+            func2
+            func3
+                try
+                    func4
+                catch
+        func5
+
+    push main_frame
+        last_result None
+
+            last_result = exe main_frame = CallPaused(func1)
+            **cs=[main_frame]
+        last_result Some(CallPaused(func1))
+            push func1
+
+            last_result = exe func1 = CallPaused(func2)
+            **cs=[main_frame, func1]
+        last_result Some(CallPaused(func2))
+            push func2
+
+            last_result = exe func2 = Ok(func2_res)
+            **cs=[main_frame, func1]
+        last_result Some(Ok(func2_res))
+            add func2_res to top (func1)
+
+            last_result = exe func1 = CallPaused(func3)
+            **cs=[main_frame, func1]
+        last_result Some(CallPaused(func3))
+            push func3
+
+            last_result = exe func3 = CallPaused(func4)
+            **cs=[main_frame, func1, func3]
+        last_result Some(CallPaused(func4))
+            push func4
+
+            last_result = exe func4 = ExceptionThrown(e, t)
+            **cs=[main_frame, func1, func3, func4]
+        last_result Some(ExceptionThrown(e, t))
+            try_resolve_handler
+                found
+                    last_frame.pc = handler_pc //func4
+                not found
+                    pop func4
+                    continue
+
+            last_result = exe func4 = OK(func4_res)
+            **cs=[main_frame, func1, func3]
+        last_result Some(Ok(func4_res))
+            add func4_res to top (func3)
+
+            last_result = exe func3 = Ok(func3_res)
+            **cs=[main_frame, func1]
+        last_result Some(Ok(func3_res))
+            add func3_res to top (func1)
+
+            last_result = exe func1 = Ok(func1_res)
+            **cs=[main_frame]
+        last_result Some(Ok(func1_res))
+            add func1_res to top (main_frame)
+
+            last_result = exe main_frame = CallPaused(func5)
+            **cs=[main_frame]
+        last_result Some(CallPaused(func5))
+            push func5
+
+            last_result = exe func5 = Ok(func5_res)
+            **cs=[main_frame]
+        last_result = Some(Ok(func5_res))
+            add func5_res to top (main_frame)
+
+            last_result = exe main_frame = Ok(main_res)
+    return Ok(main_res)
+     */
+
+    pub fn invoke_frame2(&mut self, main_frame: CallFrame<'a>) -> VMPartialResult<'a, Option<Value<'a>>> {
+        let mut last_result = None;
+        self.call_stack.push_call_frame(main_frame);
+        let vm_ptr: *mut VM = self;
+        while !self.call_stack.frames.is_empty(){
+            if let Some(last) = last_result{
+                match last {
+                    VMResultType::Ok(result) => {
+                        self.call_stack.add_to_top_stack(result);
+                    }
+                    VMResultType::CallPaused(new_frame) => self.call_stack.push_call_frame(new_frame),
+                    VMResultType::ExceptionThrown(error, throwable) => {
+                        if let VmError::JavaException(JavaError::JavaExceptionThrown(thrown_class_name, message)) = error {
+                            let error_frame = self.call_stack.frames.last_mut().unwrap();
+                            let exception_table = error_frame.class_and_method.method.get_exception_handlers().clone();
+                            let current_pc = error_frame.pc.clone();
+                            if let Some(handler_pc) = self.try_resolve_exception_handler(exception_table, current_pc, thrown_class_name.as_str())?{
+                                error_frame.pc = handler_pc;
+                                error_frame.stack.push(throwable);
+                                debug!("Exception thrown handled by {}", error_frame.class_and_method.format());
+                            } else {
+                                debug!("Exception handler not in this function {}", error_frame.class_and_method.format());
+                            }
+                        } else {
+                            unreachable!("Could not handle {} thrown by a function", error);
+                        }
+                    }
+                }
+            }
+            last_result = Some(self.call_stack.execute_top(vm_ptr));
+        }
+
+        if let Some(result) = last_result{
+            result
+        } else {
+            unreachable!("main_frame can't have no result")
+        }
+    }
 
     /*
     invoke(main_frame)
@@ -136,7 +251,6 @@ impl<'a> VM<'a>{
                 NONE
                     return OK(None)
      */
-
     pub fn invoke_frame(&mut self, call_frame: CallFrame<'a>) -> VMPartialResult<'a, Option<Value<'a>>>{
         let class_and_method = call_frame.class_and_method.clone();
         if !class_and_method.method.is_native(){
