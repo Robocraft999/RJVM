@@ -94,108 +94,141 @@ impl<'a> VM<'a>{
         func5
 
     push main_frame
-        last_result None
-
-            last_result = exe main_frame = CallPaused(func1)
-            **cs=[main_frame]
-        last_result Some(CallPaused(func1))
+    last_result = exe main_frame = CallPaused(func1)
             push func1
+    cs = [main_frame, func1]
 
-            last_result = exe func1 = CallPaused(func2)
-            **cs=[main_frame, func1]
-        last_result Some(CallPaused(func2))
+    last_result = exe func1 = CallPaused(func2)
             push func2
+    cs = [main_frame, func1, func2]
 
-            last_result = exe func2 = Ok(func2_res)
-            **cs=[main_frame, func1]
-        last_result Some(Ok(func2_res))
-            add func2_res to top (func1)
+    last_result = exe func2 = Ok(f2res)
+            add f2res top (func1)
+    cs = [main_frame, func1]
 
-            last_result = exe func1 = CallPaused(func3)
-            **cs=[main_frame, func1]
-        last_result Some(CallPaused(func3))
+    last_result = exe func1 = CallPaused(func3)
             push func3
+    cs = [main_frame, func1, func3]
 
-            last_result = exe func3 = CallPaused(func4)
-            **cs=[main_frame, func1, func3]
-        last_result Some(CallPaused(func4))
+    last_result = exe func3 = CallPaused(func4)
             push func4
+    cs = [main_frame, func1, func3, func4]
 
-            last_result = exe func4 = ExceptionThrown(e, t)
-            **cs=[main_frame, func1, func3, func4]
-        last_result Some(ExceptionThrown(e, t))
+    last_result = exe func4 = ExceptionThrown
             try_resolve_handler
-                found
-                    last_frame.pc = handler_pc //func4
-                not found
-                    pop func4
-                    continue
+                    found
+                            last_frame.pc = handler_pc //func4
+                    not found
+                            pop func4
+                            continue (cs=[main_frame, func1, func3])
+    cs = [main_frame, func1, func3, func4]
 
-            last_result = exe func4 = OK(func4_res)
-            **cs=[main_frame, func1, func3]
-        last_result Some(Ok(func4_res))
-            add func4_res to top (func3)
+    last_result = exe func4 = Ok(f4res)
+            add f4res top (func3)
+    cs = [main_frame, func1, func3]
 
-            last_result = exe func3 = Ok(func3_res)
-            **cs=[main_frame, func1]
-        last_result Some(Ok(func3_res))
-            add func3_res to top (func1)
+    last_result = exe func3 = Ok(f2res)
+            add f3res top (func1)
+    cs = [main_frame, func1]
 
-            last_result = exe func1 = Ok(func1_res)
-            **cs=[main_frame]
-        last_result Some(Ok(func1_res))
-            add func1_res to top (main_frame)
+    last_result = exe func1 = Ok(f1res)
+            add f1res top (main_frame)
+    cs = [main_frame]
 
-            last_result = exe main_frame = CallPaused(func5)
-            **cs=[main_frame]
-        last_result Some(CallPaused(func5))
+    last_result = exe main_frame = CallPaused(func5)
             push func5
+    cs = [main_frame, func5]
 
-            last_result = exe func5 = Ok(func5_res)
-            **cs=[main_frame]
-        last_result = Some(Ok(func5_res))
-            add func5_res to top (main_frame)
+    last_result = exe func5 = Ok(f5res)
+            add f5res top (main_frame)
+    cs = [main_frame]
 
-            last_result = exe main_frame = Ok(main_res)
-    return Ok(main_res)
+    last_result = exe main_frame = Ok(main_res)
+        return main_res
      */
 
-    pub fn invoke_frame2(&mut self, main_frame: CallFrame<'a>) -> VMPartialResult<'a, Option<Value<'a>>> {
-        let mut last_result = None;
+    pub fn invoke_frame(&mut self, main_frame: CallFrame<'a>) -> VMPartialResult<'a, Option<Value<'a>>> {
         self.call_stack.push_call_frame(main_frame);
         let vm_ptr: *mut VM = self;
-        while !self.call_stack.frames.is_empty(){
-            if let Some(last) = last_result{
-                match last {
-                    VMResultType::Ok(result) => {
-                        self.call_stack.add_to_top_stack(result);
+        let mut last_result: Option<VMResultType<Option<Value>>> = None;
+        loop{
+            let current_result = if let Some(VMResultType::ExceptionThrown(error, ref throwable)) = last_result{
+                VMResultType::ExceptionThrown(error, throwable.clone())
+            } else {
+                let class_and_method = self.call_stack.frames.last().unwrap().class_and_method.clone();
+                if class_and_method.method.is_native(){
+                    self.execute_native(class_and_method)?
+                } else {
+                    self.call_stack.execute_top(vm_ptr)?
+                }
+            };
+            last_result = None;
+            match current_result {
+                VMResultType::Ok(result) => {
+                    if self.call_stack.frames.is_empty(){
+                        return Ok(VMResultType::Ok(result));
                     }
-                    VMResultType::CallPaused(new_frame) => self.call_stack.push_call_frame(new_frame),
-                    VMResultType::ExceptionThrown(error, throwable) => {
-                        if let VmError::JavaException(JavaError::JavaExceptionThrown(thrown_class_name, message)) = error {
+                    self.call_stack.add_to_top_stack(result);
+                }
+                VMResultType::CallPaused(new_frame) => self.call_stack.push_call_frame(new_frame),
+                VMResultType::ExceptionThrown(error, throwable) => {
+                    if let VmError::JavaException(JavaError::JavaExceptionThrown(thrown_class_name, message)) = error {
+                        let error_frame = self.call_stack.frames.last().unwrap();
+                        let class_and_method = error_frame.class_and_method.clone();
+                        let exception_table = class_and_method.method.get_exception_handlers().clone();
+                        let current_pc = error_frame.pc.clone();
+                        if let Some(handler_pc) = self.try_resolve_exception_handler(exception_table, current_pc, thrown_class_name.as_str())?{
                             let error_frame = self.call_stack.frames.last_mut().unwrap();
-                            let exception_table = error_frame.class_and_method.method.get_exception_handlers().clone();
-                            let current_pc = error_frame.pc.clone();
-                            if let Some(handler_pc) = self.try_resolve_exception_handler(exception_table, current_pc, thrown_class_name.as_str())?{
-                                error_frame.pc = handler_pc;
-                                error_frame.stack.push(throwable);
-                                debug!("Exception thrown handled by {}", error_frame.class_and_method.format());
-                            } else {
-                                debug!("Exception handler not in this function {}", error_frame.class_and_method.format());
-                            }
+                            error_frame.pc = handler_pc;
+                            error_frame.stack.push(throwable.clone());
+                            debug!("Exception thrown handled by {}", class_and_method.format());
                         } else {
-                            unreachable!("Could not handle {} thrown by a function", error);
+                            self.call_stack.pop_call_frame();
+                            last_result = Some(VMResultType::ExceptionThrown(VmError::JavaException(JavaError::JavaExceptionThrown(thrown_class_name, message)), throwable));
+                            debug!("Exception handler not in this function {}", class_and_method.format());
                         }
+                    } else {
+                        unreachable!("Could not handle {} thrown by a function", error);
                     }
                 }
             }
-            last_result = Some(self.call_stack.execute_top(vm_ptr));
+            self.call_stack.print_call_stack();
         }
+    }
 
-        if let Some(result) = last_result{
-            result
+    fn execute_native(&mut self, class_and_method: ClassAndMethod<'a>) -> VMPartialResult<'a, Option<Value<'a>>> {
+        let call_frame = self.call_stack.pop_call_frame();
+        let object = if class_and_method.method.is_static() {
+            None
         } else {
-            unreachable!("main_frame can't have no result")
+            match call_frame.locals.get(0) {
+                Some(local) => {
+                    Some(local.expect_reference()?)
+                },
+                None => None
+            }
+        };
+        let args = call_frame.locals
+            .iter()
+            .cloned()
+            .skip(if object.is_none() {0} else {1})
+            .take_while(|value| value != &Value::Uninitialized)
+            .collect::<Vec<_>>();
+        let try_native = NativeMethodRegistry::invoke(self, &class_and_method, object, args);
+        if let Some(native) = try_native {
+            Ok(match native? {
+                VMResultType::Ok(value) => {VMResultType::Ok(value)}
+                VMResultType::CallPaused(frame) => {
+                    self.call_stack.push_call_frame(call_frame);
+                    VMResultType::CallPaused(frame)
+                }
+                VMResultType::ExceptionThrown(error, throwable) => {
+                    self.call_stack.push_call_frame(call_frame);
+                    VMResultType::ExceptionThrown(error, throwable)
+                }
+            })
+        } else {
+            Ok(VMResultType::Ok(None))
         }
     }
 
@@ -251,7 +284,7 @@ impl<'a> VM<'a>{
                 NONE
                     return OK(None)
      */
-    pub fn invoke_frame(&mut self, call_frame: CallFrame<'a>) -> VMPartialResult<'a, Option<Value<'a>>>{
+    pub fn invoke_frame2(&mut self, call_frame: CallFrame<'a>) -> VMPartialResult<'a, Option<Value<'a>>>{
         let class_and_method = call_frame.class_and_method.clone();
         if !class_and_method.method.is_native(){
             self.call_stack.push_call_frame(call_frame);
@@ -498,7 +531,7 @@ impl<'a> VM<'a>{
         if let ResolvedClass::NewClass(to_init) = &resolved{
             for class in to_init.to_initialize.iter(){
                 if let Some(clinit) = self.init_class(class)?{
-                    self.invoke_frame_on_stack(clinit)?;
+                    //self.invoke_frame_on_stack(clinit)?;
                 }
             }
         }

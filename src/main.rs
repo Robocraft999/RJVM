@@ -115,10 +115,10 @@ fn main() {
     class_path.push("resources;resources/rt.jar;resources/LogicSim.jar;resources/lib/unix;resources/lib").expect("TODO: panic message");
 
     let mut vm = VM::new(class_path);
-    /*simple_logger::SimpleLogger::new().with_level(LevelFilter::Trace).without_timestamps().init().unwrap();
+    simple_logger::SimpleLogger::new().with_level(LevelFilter::Warn).without_timestamps().init().unwrap();
     run_and_catch_method(&mut vm, "Test", "main", "([Ljava/lang/String;)V");
     info!("frames: {:?}", vm.call_stack.frames);
-    return;*/
+    return;
 
     match init_vm(&mut vm) {
         Ok(_) => {}

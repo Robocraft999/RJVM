@@ -147,6 +147,7 @@ impl<'a> CallFrame<'a>{
                             let class_name = self.class_and_method.get_constant_utf8(index).unwrap();
                             debug!("ANEWARRAY {}[{}]", class_name, count);
                             let array_content = vec![Value::Null; count as usize];
+                            //FIXME needs class proload
                             let array = Value::Reference(vm.new_array(1, FieldType::Object(class_name), RefCell::new(array_content))?);
                             self.stack.push(array);
                         }
@@ -175,12 +176,12 @@ impl<'a> CallFrame<'a>{
                                 if let ReferenceType::Array(_, _, content) = &reference.reference_type{
                                     self.stack.push(Value::Integer(content.borrow().len() as i32));
                                 } else {
-                                    return VMPartialResult::Err(VmError::ValidationError("Expected an Array ref but found: Object ref".to_string()))
+                                    return Err(VmError::ValidationError("Expected an Array ref but found: Object ref".to_string()))
                                 }
                             } else if let Some(Value::Null) = popped{
-                                return VMPartialResult::Err(VmError::JavaException(JavaError::NullPointerException("Expected an array".to_string())))
+                                return Err(VmError::JavaException(JavaError::NullPointerException("Expected an array".to_string())))
                             } else {
-                                return VMPartialResult::Err(VmError::ValidationError(format!("Expected an array ref but found: {:?}", &popped)))
+                                return Err(VmError::ValidationError(format!("Expected an array ref but found: {:?}", &popped)))
                             }
                         }
                         Instruction::DUP => {
@@ -598,6 +599,8 @@ impl<'a> CallFrame<'a>{
                             debug!("CHECKCAST {}", get_constant_printable(constants, constant_index));
                         }
                         Instruction::INSTANCEOF(constant_index) => {
+                            let of_class = vm.get_or_resolve_class(get_constant_printable(constants, constant_index).as_str())?;
+
                             let object = self.stack.pop().unwrap();
                             if object == Value::Null{
                                 self.stack.push(Value::from(false));
@@ -605,7 +608,6 @@ impl<'a> CallFrame<'a>{
                             }
                             let object = object.expect_reference()?;
                             let object_class = vm.find_class_by_id(object.class_id).unwrap();
-                            let of_class = vm.get_or_resolve_class(get_constant_printable(constants, constant_index).as_str())?;
                             let mut instance_of = false;
                             let mut to_check = vec![object_class];
                             while let Some(next_class) = to_check.pop() {
@@ -883,6 +885,9 @@ impl<'a> CallFrame<'a>{
 
     fn execute_invoke(&mut self, vm: &mut VM<'a>, index: u16, kind: InvokeKind) -> VMPartialResult<'a, Option<Value<'a>>> {
         let (class_name, method_name, descriptor) = self.class_and_method.get_constant_method_info_descriptor(index).expect("GIB MICH DIE METHODE");
+        trace!("loading class to execute on: '{}'", class_name.as_str());
+        let class = vm.get_or_resolve_class(class_name.as_str())?;
+        trace!("finished loading class to execute on: '{}'", class_name.as_str());
         let args_count = MethodDescriptor::new(descriptor.clone()).args.len();
         let mut args = Vec::new();
         for _ in 0..args_count{
@@ -894,9 +899,6 @@ impl<'a> CallFrame<'a>{
             args.insert(0, popped);
         }
 
-        trace!("loading class to execute on: '{}'", class_name.as_str());
-        let class = vm.get_or_resolve_class(class_name.as_str())?;
-        trace!("finished loading class to execute on: '{}'", class_name.as_str());
         let class_and_method = match kind {
             InvokeKind::STATIC => {
                 class
@@ -1034,6 +1036,7 @@ impl<'a> CallFrame<'a>{
             ConstantPoolEntry::Double(value) => Value::Double(value),
             ConstantPoolEntry::String(string_index) => {
                 if let Some(ConstantPoolEntry::Utf8(string)) = self.class_and_method.class.get_constant(string_index){
+                    //FIXME maybe needs preloading
                     let string_object = vm.new_string_object(string)?;
                     Value::Reference(string_object)
                 } else {
