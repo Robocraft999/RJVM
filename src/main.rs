@@ -39,7 +39,7 @@ macro_rules! get_or_init {
             let res = $x;
             match res{
                 VMResultType::Ok(value) => value,
-                VMResultType::NeedsClassInit(classes) => {return Ok(VMResultType::NeedsClassInit(classes))}
+                VMResultType::NeedsClassInit(classes, reenter) => {return Ok(VMResultType::NeedsClassInit(classes, reenter))}
                 _ => unreachable!("[get_after_init] got unexpected result {:?}", res)
             }
         }
@@ -53,7 +53,7 @@ macro_rules! get_or_init_special {
             let res = $x;
             match res{
                 VMResultType::Ok(value) => ($wrapper)(value),
-                VMResultType::NeedsClassInit(classes) => {return Ok(VMResultType::NeedsClassInit(classes))}
+                VMResultType::NeedsClassInit(classes, reenter) => {return Ok(VMResultType::NeedsClassInit(classes, reenter))}
                 _ => unreachable!("[get_after_init] got unexpected result {:?}", res)
             }
         }
@@ -61,7 +61,7 @@ macro_rules! get_or_init_special {
 }
 
 fn init_vm(vm: &mut VM) -> Result<(), VmError>{
-    if let VMResultType::NeedsClassInit(classes) = vm.get_or_resolve_class("sun/misc/VM")?{
+    if let VMResultType::NeedsClassInit(classes, _) = vm.get_or_resolve_class("sun/misc/VM")?{
         for frame in classes{
             vm.invoke_frame(frame)?;
         }
@@ -71,7 +71,7 @@ fn init_vm(vm: &mut VM) -> Result<(), VmError>{
 }
 
 fn init_system(vm: &mut VM) -> Result<(), VmError>{
-    if let VMResultType::NeedsClassInit(classes) = vm.get_or_resolve_class("java/lang/System")?{
+    if let VMResultType::NeedsClassInit(classes, _) = vm.get_or_resolve_class("java/lang/System")?{
         for frame in classes{
             vm.invoke_frame(frame)?;
         }
@@ -82,7 +82,7 @@ fn init_system(vm: &mut VM) -> Result<(), VmError>{
 }
 
 fn run_and_catch_method<'a>(vm: &'a mut VM<'a>, class_name: &str, method_name: &str, method_descriptor: &str){
-    if let VMResultType::NeedsClassInit(classes) = vm.get_or_resolve_class(class_name).unwrap().clone(){
+    if let VMResultType::NeedsClassInit(classes, _) = vm.get_or_resolve_class(class_name).unwrap().clone(){
         for frame in classes{
             vm.invoke_frame(frame).unwrap();
         }
@@ -108,7 +108,7 @@ fn main() {
     class_path.push("resources;resources/rt.jar;resources/LogicSim.jar;resources/lib/unix;resources/lib").expect("TODO: panic message");
 
     let mut vm = VM::new(class_path);
-    simple_logger::SimpleLogger::new().with_level(LevelFilter::Warn).without_timestamps().init().unwrap();
+    simple_logger::SimpleLogger::new().with_level(LevelFilter::Debug).without_timestamps().init().unwrap();
     /*simple_logger::SimpleLogger::new().with_level(LevelFilter::Warn).without_timestamps().init().unwrap();
     run_and_catch_method(&mut vm, "Test", "main", "([Ljava/lang/String;)V");
     return;*/
@@ -117,7 +117,7 @@ fn main() {
         Ok(_) => {}
         Err(error) => {
             error!("Init VM: {}", error);
-            //panic!();
+            panic!();
         }
     };
     //vm.get_or_resolve_class("java/lang/CharacterData").expect("msg");
@@ -126,7 +126,7 @@ fn main() {
         Err(error) => {
             println!("'{}'", error);
             error!("Init System: {}", error);
-            //panic!();
+            panic!();
         }
     }
 

@@ -12,12 +12,14 @@ use class_manager::ClassManager;
 use class_path::ClassPath;
 use value::Value;
 use crate::access_flags::MethodFlag;
-use crate::attribute::{ExceptionTable, ProgramCounter};
+use crate::attribute::{Code, ExceptionTable, ProgramCounter, VisibleRuntimeAnnotations};
 use crate::error::ClassParseError;
 use crate::field_info::{FieldType, PrimitiveType};
 use crate::{get_or_init, get_or_init_special};
+use crate::constants::ConstantPool;
+use crate::method_info::{MethodDescriptor, MethodInfo};
 use crate::vm::call_frame::CallFrame;
-use crate::vm::class::{ClassAndMethod, ClassId, ClassRef};
+use crate::vm::class::{Class, ClassAndMethod, ClassId, ClassRef};
 use crate::vm::class_manager::ResolvedClass;
 use crate::vm::gc::ObjectAllocator;
 use crate::vm::java_error::JavaError;
@@ -55,10 +57,44 @@ pub struct VM<'a>{
 
 impl<'a> VM<'a>{
     pub fn new(class_path: ClassPath) -> Self{
-        let class_manager = ClassManager::new(class_path);
+        let mut class_manager = ClassManager::new(class_path);
         let mut native_method_registry = NativeMethodRegistry::new();
         register_all_natives(&mut native_method_registry);
         let unsafe_allocator = Unsafe::new();
+        let dummy_class = class_manager.classes.alloc(Class {
+            id: ClassId(0),
+            name: "internal/Returner".to_string(),
+            source_file: None,
+            constants: ConstantPool(vec![]),
+            flags: vec![],
+            superclass: None,
+            interfaces: vec![],
+            fields: vec![],
+            methods: vec![MethodInfo {
+                flags: vec![],
+                name: "dummy".to_string(),
+                descriptor: MethodDescriptor::new("()Ljava/lang/Object;".to_string()),
+                deprecated: false,
+                code: Some(Code {
+                    max_stack: 1,
+                    max_locals: 1,
+                    code: vec![0xb0], //ARETURN
+                    attributes: vec![],
+                    line_number_table: None,
+                    exception_table: ExceptionTable(vec![]),
+                }),
+                attributes: vec![],
+            }],
+            annotations: VisibleRuntimeAnnotations(vec![]),
+            transitive_field_count: 0,
+            first_field_index: 0,
+            array_info: None,
+        });
+        let class_ref = unsafe {
+            let class_ptr: *const Class<'a> = dummy_class;
+            &*class_ptr
+        };
+        class_manager.classes_by_id.insert(class_ref.id, class_ref);
         Self{
             class_manager,
             object_allocator: ObjectAllocator::new(),
@@ -172,7 +208,7 @@ impl<'a> VM<'a>{
                     self.call_stack.add_to_top_stack(result);
                 }
                 VMResultType::CallPaused(new_frame) => self.call_stack.push_call_frame(new_frame),
-                VMResultType::NeedsClassInit(classes) => {
+                VMResultType::NeedsClassInit(classes, _) => {
                     for new_frame in classes {
                         self.call_stack.push_call_frame(new_frame);
                     }
@@ -232,13 +268,19 @@ impl<'a> VM<'a>{
                     self.call_stack.push_call_frame(call_frame);
                     VMResultType::ExceptionThrown(error, throwable)
                 }
-                VMResultType::NeedsClassInit(classes) => {
-                    self.call_stack.push_call_frame(call_frame);
-                    VMResultType::NeedsClassInit(classes)
+                VMResultType::NeedsClassInit(classes, reenter) => {
+                    if reenter {
+                        self.call_stack.push_call_frame(call_frame);
+                    }
+                    VMResultType::NeedsClassInit(classes, reenter)
                 }
             })
         } else {
-            Ok(VMResultType::Ok(None))
+            if class_and_method.method.descriptor.return_type.is_some(){
+                Err(VmError::MethodCallError(format!("native {} returns a value which is probably used", class_and_method.format())))
+            } else {
+                Ok(VMResultType::Ok(None))
+            }
         }
     }
 
@@ -270,7 +312,8 @@ impl<'a> VM<'a>{
                     .map(|class| self.init_class(class))
                     .filter(Option::is_some)
                     .map(Option::unwrap)
-                    .collect()
+                    .collect(),
+                true
             ))
             /*for class in to_init.to_initialize.iter(){
                 if let Some(clinit) = self.init_class(class)?{
@@ -283,7 +326,7 @@ impl<'a> VM<'a>{
     }
 
     fn init_class(&mut self, class: ClassRef<'a>) -> Option<CallFrame<'a>>{
-        if class.transitive_field_count > 0{
+        if class.transitive_field_count > 0 && !class.is_array(){
             let static_object = self.new_object_from_class(class);
             self.static_class_objects.insert(class.id, static_object);
             if let Some(clinit_method) = class.find_method("<clinit>", "()V"){

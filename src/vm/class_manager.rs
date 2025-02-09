@@ -35,8 +35,8 @@ pub(crate) struct ClassesToInitialize<'a> {
 
 pub struct ClassManager<'a>{
     pub class_path: ClassPath,
-    classes_by_name: HashMap<String, ClassRef<'a>>,
-    classes_by_id: HashMap<ClassId, ClassRef<'a>>,
+    pub classes_by_name: HashMap<String, ClassRef<'a>>,
+    pub classes_by_id: HashMap<ClassId, ClassRef<'a>>,
     pub classes: Arena<Class<'a>>,
     next_id: u32,
 }
@@ -48,7 +48,7 @@ impl<'a> ClassManager<'a>{
             classes_by_name: HashMap::new(),
             classes_by_id: HashMap::new(),
             classes: Arena::with_capacity(100),
-            next_id: 0,
+            next_id: 1,
         }
     }
 

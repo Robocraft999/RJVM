@@ -1,5 +1,8 @@
 use std::cell::RefCell;
 use log::{trace, warn};
+use crate::attribute::{Code, ExceptionTable, VisibleRuntimeAnnotations};
+use crate::bytecode::Instruction;
+use crate::constants::ConstantPool;
 use super::call_frame::CallFrame;
 use crate::VM;
 use crate::Value;
@@ -7,7 +10,9 @@ use crate::VmError;
 use crate::vm::ClassAndMethod;
 use crate::vm::info;
 use crate::error;
+use crate::method_info::{MethodDescriptor, MethodInfo};
 use crate::ProgramCounter;
+use crate::vm::class::{Class, ClassId, ClassRef};
 use crate::vm::result::{VMPartialResult, VMResult, VMResultType};
 use crate::vm::value::Reference;
 
@@ -23,6 +28,22 @@ impl<'a> CallStack<'a> {
             frames: Vec::new(),
             frames_infos : Vec::new(),
             current_frame: None,
+        }
+    }
+
+    pub fn create_returning_frame<'frame>(class: ClassRef<'frame> ,object: Value<'frame>) -> CallFrame<'frame> {
+        let method = &class.methods[0];
+        let class_and_method = ClassAndMethod {
+            class,
+            method,
+        };
+        let locals = Vec::new();
+        CallFrame{
+            class_and_method,
+            locals,
+            pc: ProgramCounter(0),
+            last_pc: ProgramCounter(0),
+            stack: vec![object]
         }
     }
 
@@ -145,11 +166,13 @@ impl<'a> CallStack<'a> {
                     self.push_call_frame(frame);
                     Ok(VMResultType::ExceptionThrown(error, throwable))
                 }
-                VMResultType::NeedsClassInit(frames) => {
+                VMResultType::NeedsClassInit(frames, reenter) => {
                     trace!("et execution returned NeedsClassInit, returning frames {:?}", frames);
                     frame.pc = frame.last_pc.clone();
-                    self.push_call_frame(frame);
-                    Ok(VMResultType::NeedsClassInit(frames))
+                    if reenter {
+                        self.push_call_frame(frame);
+                    }
+                    Ok(VMResultType::NeedsClassInit(frames, reenter))
                 }
             }
             //Ok(res)

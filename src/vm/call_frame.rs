@@ -133,9 +133,9 @@ impl<'a> CallFrame<'a>{
                         }
                         Instruction::IRETURN | Instruction::LRETURN | Instruction::FRETURN | Instruction::DRETURN | Instruction::ARETURN=> {
                             //TODO check for types
-                            let value = self.stack.pop();
+                            let value = self.stack.pop().unwrap();
                             info!("RETURN {:?}", value);
-                            return Ok(VMResultType::Ok(value));
+                            return Ok(VMResultType::Ok(Some(value)));
                         }
                         Instruction::NEW(index) => {
                             let class_name = self.class_and_method.get_constant_utf8(index).unwrap();
@@ -153,9 +153,9 @@ impl<'a> CallFrame<'a>{
                             let result = vm.new_array(1, FieldType::Object(class_name), RefCell::new(array_content))?;
                             let array = Value::Reference(match result {
                                 VMResultType::Ok(value) => value,
-                                VMResultType::NeedsClassInit(classes) => {
+                                VMResultType::NeedsClassInit(classes, reenter) => {
                                     self.stack.push(Value::Integer(count));
-                                    return Ok(VMResultType::NeedsClassInit(classes));
+                                    return Ok(VMResultType::NeedsClassInit(classes, reenter));
                                 }
                                 _ => unreachable!("[ANEWARRAY] got unexpected result: {:?}", result)
                             });
@@ -179,9 +179,9 @@ impl<'a> CallFrame<'a>{
                             let result = vm.new_array(1, primitive_type, RefCell::new(array_content))?;
                             let array = Value::Reference(match result {
                                 VMResultType::Ok(value) => value,
-                                VMResultType::NeedsClassInit(classes) => {
+                                VMResultType::NeedsClassInit(classes, reenter) => {
                                     self.stack.push(Value::Integer(count));
-                                    return Ok(VMResultType::NeedsClassInit(classes));
+                                    return Ok(VMResultType::NeedsClassInit(classes, reenter));
                                 }
                                 _ => unreachable!("[NEWARRAY] got unexpected result: {:?}", result)
                             });
@@ -1076,11 +1076,24 @@ impl<'a> CallFrame<'a>{
         };
         Ok(VMResultType::Ok(value))
     }
+
+    fn get_instruction_at(&self, pc: ProgramCounter) -> Option<Instruction>{
+        if let Some(code) = &self.class_and_method.method.code{
+            if let Ok((instruction, _)) = parse_instruction(&code.code, self.pc.0 as usize) {
+                Some(instruction)
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
 }
 
 impl Debug for CallFrame<'_>{
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Method: {} at {:?}", self.class_and_method.format(), self.pc)
+        let instruction = self.get_instruction_at(self.pc.clone());
+        write!(f, "Method: {} at {:?} ({:?})", self.class_and_method.format(), self.pc, instruction)
     }
 }
 

@@ -7,7 +7,7 @@ use log::{debug, trace, warn};
 use crate::field_info::{field_type_from_str, get_class_descriptor, FieldType, PrimitiveType};
 use crate::get_or_init;
 use crate::method_info::MethodDescriptor;
-use crate::vm::class::{ClassAndMethod, ClassRef};
+use crate::vm::class::{ClassAndMethod, ClassId, ClassRef};
 use crate::vm::java_error::JavaError;
 use crate::vm::value::{Reference, ReferenceType, Value};
 use crate::vm::{VM, VmError};
@@ -67,7 +67,8 @@ pub fn register_all_natives(registry: &mut NativeMethodRegistry){
     registry.register("java/lang/System", "identityHashCode", "(Ljava/lang/Object;)I", delegate_identity_hash_code);
     registry.register("java/lang/System", "setOut0", "(Ljava/io/PrintStream;)V", delegate_set_out);
     registry.register("java/lang/System", "arraycopy", "(Ljava/lang/Object;ILjava/lang/Object;II)V", delegate_arraycopy);
-    registry.register("java/lang/System", "initProperties", "(Ljava/util/Properties)V", delegate_init_sytem_props);
+    registry.register("java/lang/System", "initProperties", "(Ljava/util/Properties;)Ljava/util/Properties;", delegate_init_system_props);
+    registry.register("java/lang/System", "mapLibraryName", "(Ljava/lang/String;)Ljava/lang/String;", delegate_system_map_library_name);
     registry.register("java/lang/Class", "getPrimitiveClass", "(Ljava/lang/String;)Ljava/lang/Class;", delegate_get_primitive_class);
     registry.register("java/lang/Class", "getComponentType", "()Ljava/lang/Class;", delegate_get_component_type);
     registry.register("java/lang/Class", "getClassLoader0", "()Ljava/lang/ClassLoader;", delegate_get_classloader);
@@ -123,6 +124,7 @@ pub fn register_all_natives(registry: &mut NativeMethodRegistry){
     registry.register("java/io/FileSystem", "getFileSystem", "()Ljava/io/FileSystem;", delegate_get_file_system);
     registry.register("rjvm/io/UnixFileSystem", "getBooleanAttributes0", "(Ljava/io/File;)I", delegate_get_boolean_attribute);
     registry.register("sun/misc/VM", "initialize", "()V", delegate_init_vm);
+    registry.register("java/util/concurrent/atomic/AtomicLong", "VMSupportsCS8", "()Z", delegate_vm_supports_cs8);
 }
 
 fn non_failing_some<'a>(value: Value<'a>) -> VMPartialResult<'a, Option<Value<'a>>>{
@@ -189,7 +191,7 @@ fn delegate_arraycopy<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<
     Err(VmError::ValidationError("Expected two arrays with indices".to_string()))
 }
 
-fn delegate_init_sytem_props<'a>(vm: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
+fn delegate_init_system_props<'a>(vm: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
     let properties_object = args.get(0).unwrap().expect_reference()?;
     let arg1 = get_or_init!(vm.new_string_object("file.encoding".to_string())?);
     let arg2 = get_or_init!(vm.new_string_object("UTF-8".to_string())?);
@@ -200,7 +202,15 @@ fn delegate_init_sytem_props<'a>(vm: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Re
     let arg2 = get_or_init!(vm.new_string_object("\n".to_string())?);
     let properties_set_method = vm.try_resolve_class_method("java/util/Properties", "setProperty", "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/Object;")?;
     let frame2 = CallStack::create_call_frame(properties_set_method, Some(properties_object), vec![Value::Reference(arg1), Value::Reference(arg2)]);
-    Ok(VMResultType::NeedsClassInit(vec![frame1, frame2]))
+    Ok(VMResultType::NeedsClassInit(vec![frame1, frame2], false))
+}
+
+fn delegate_system_map_library_name<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
+    if let Some(Value::Reference(name)) = args.get(0) {
+        non_failing_some(Value::Reference(name))
+    } else {
+        Err(VmError::ValidationError(format!("Expected Reference but found '{:?}'", args.get(0))))
+    }
 }
 
 fn delegate_get_primitive_class<'a>(vm: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
@@ -670,9 +680,15 @@ fn delegate_current_thread<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, _: Option<Refer
         let name_string = get_or_init!(vm.new_string_object("Main".to_string())?);
         let name_char_array = name_string.get_field(0);
 
+        let group_name = get_or_init!(vm.new_string_object("system".to_string())?);
         let group = get_or_init!(vm.new_object("java/lang/ThreadGroup")?);
-        let group_init = vm.try_resolve_class_method("java/lang/ThreadGroup", "<init>", "()V")?;
-        vm.invoke_new_frame(group_init, Some(group), vec![])?;
+        group.set_field(6, Value::Integer(0));
+        group.set_field(1, Value::Reference(group_name));
+        group.set_field(2, Value::Integer(10));
+        group.set_field(0, Value::Null);
+
+        //let group_init = vm.try_resolve_class_method("java/lang/ThreadGroup", "<init>", "()V")?;
+        //vm.invoke_new_frame(group_init, Some(group), vec![])?;
 
         thread.set_field(0, name_char_array);
         thread.set_field(1, Value::Integer(10));
@@ -705,7 +721,7 @@ fn delegate_do_privileged<'a>(vm: &mut VM<'a>, class: ClassRef<'a>, _: Option<Re
         let class_name = vm.find_class_by_id(action.class_id).unwrap().name.as_str();
         let run = get_or_init!(vm.resolve_class_method(class_name, "run", "()Ljava/lang/Object;")?);
         let frame = CallStack::create_call_frame(run, Some(action), vec![]);
-        Ok(VMResultType::CallPaused(frame))
+        Ok(VMResultType::NeedsClassInit(vec![frame], false))
         //Ok(vm.invoke_new_frame(run, Some(action), vec![])?)
     } else {
         Err(VmError::ValidationError("Expected a action object reference".to_string()))
@@ -760,7 +776,9 @@ fn delegate_new_instance0<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, object: Option<R
                         Vec::new()
                     };
                     let object = get_or_init!(vm.new_object(class_and_method.class.name.as_str())?);
-                    vm.invoke_new_frame(class_and_method, Some(object), constructor_args)?;
+                    let frame = CallStack::create_call_frame(class_and_method, Some(object), constructor_args);
+                    let return_frame = CallStack::create_returning_frame(vm.find_class_by_id(ClassId(0)).unwrap(), Value::Reference(object));
+                    return Ok(VMResultType::NeedsClassInit(vec![return_frame, frame], false));
                     return non_failing_some(Value::Reference(object))
                 }
             }
@@ -890,17 +908,21 @@ fn delegate_get_boolean_attribute<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, object: 
 }
 
 fn delegate_init_vm<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, object: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
-    let prop_class_id = vm.find_class_by_name("java/util/Properties".to_owned()).unwrap().id;
+    let vm_class_id = vm.find_class_by_name("sun/misc/VM".to_owned()).unwrap().id;
     let arg1 = get_or_init!(vm.new_string_object("java.lang.Integer.IntegerCache.high".to_string())?);
     let arg2 = get_or_init!(vm.new_string_object("127".to_string())?);
-    let static_object = vm.get_static_class_object(prop_class_id).unwrap();
-    let properties_object = static_object.get_field(11).expect_reference()?;
+    let static_vm_object = vm.get_static_class_object(vm_class_id).unwrap();
+    let properties_object = static_vm_object.get_field(11).expect_reference()?;
 
     let properties_set_method = vm.try_resolve_class_method("java/util/Properties", "setProperty", "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/Object;")?;
     let frame1 = CallStack::create_call_frame(properties_set_method, Some(properties_object), vec![Value::Reference(arg1), Value::Reference(arg2)]);
     let save_properties_method = vm.try_resolve_class_method("sun/misc/VM", "saveAndRemoveProperties", "(Ljava/util/Properties;)V")?;
     let frame2 = CallStack::create_call_frame(save_properties_method, None, vec![Value::Reference(properties_object)]);
-    Ok(VMResultType::NeedsClassInit(vec![frame1, frame2]))
+    Ok(VMResultType::NeedsClassInit(vec![frame1, frame2], false))
+}
+
+fn delegate_vm_supports_cs8<'a>(_: &mut VM<'a>, _: ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
+    non_failing_some(Value::Integer(0))
 }
 
 #[cfg(test)]
