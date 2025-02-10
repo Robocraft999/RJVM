@@ -24,3 +24,17 @@ pub enum ConstantPoolEntry{
 
 #[derive(Debug)]
 pub struct ConstantPool(pub Vec<ConstantPoolEntry>);
+
+#[derive(Debug, FromRepr, PartialEq, Clone)]
+#[repr(u8)]
+pub enum BytecodeBehavior {
+    REFGetField = 1,
+    REFGetStatic = 2,
+    REFPutField = 3,
+    REFPutStatic = 4,
+    REFInvokeVirtual = 5,
+    REFInvokeStatic = 6,
+    REFInvokeSpecial = 7,
+    REFNewInvokeSpecial = 8,
+    REFInvokeInterface = 9,
+}

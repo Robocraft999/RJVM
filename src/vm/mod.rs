@@ -12,7 +12,7 @@ use class_manager::ClassManager;
 use class_path::ClassPath;
 use value::Value;
 use crate::access_flags::MethodFlag;
-use crate::attribute::{Code, ExceptionTable, ProgramCounter, VisibleRuntimeAnnotations};
+use crate::attribute::{BootstrapMethods, Code, ExceptionTable, ProgramCounter, VisibleRuntimeAnnotations};
 use crate::error::ClassParseError;
 use crate::field_info::{FieldType, PrimitiveType};
 use crate::{get_or_init, get_or_init_special};
@@ -86,6 +86,7 @@ impl<'a> VM<'a>{
                 attributes: vec![],
             }],
             annotations: VisibleRuntimeAnnotations(vec![]),
+            bootstrap_methods: BootstrapMethods(Vec::new()),
             transitive_field_count: 0,
             first_field_index: 0,
             array_info: None,
@@ -215,19 +216,22 @@ impl<'a> VM<'a>{
                 }
                 VMResultType::ExceptionThrown(error, throwable) => {
                     if let VmError::JavaException(JavaError::JavaExceptionThrown(thrown_class_name, message)) = error {
-                        let error_frame = self.call_stack.frames.last().unwrap();
-                        let class_and_method = error_frame.class_and_method.clone();
-                        let exception_table = class_and_method.method.get_exception_handlers().clone();
-                        let current_pc = error_frame.pc.clone();
-                        if let Some(handler_pc) = get_or_init!(self.try_resolve_exception_handler(exception_table, current_pc, thrown_class_name.as_str())?){
-                            let error_frame = self.call_stack.frames.last_mut().unwrap();
-                            error_frame.pc = handler_pc;
-                            error_frame.stack.push(throwable.clone());
-                            debug!("Exception thrown handled by {}", class_and_method.format());
+                        if let Some(error_frame) = self.call_stack.frames.last(){
+                            let class_and_method = error_frame.class_and_method.clone();
+                            let exception_table = class_and_method.method.get_exception_handlers().clone();
+                            let current_pc = error_frame.pc.clone();
+                            if let Some(handler_pc) = get_or_init!(self.try_resolve_exception_handler(exception_table, current_pc, thrown_class_name.as_str())?){
+                                let error_frame = self.call_stack.frames.last_mut().unwrap();
+                                error_frame.pc = handler_pc;
+                                error_frame.stack.push(throwable.clone());
+                                debug!("Exception thrown handled by {}", class_and_method.format());
+                            } else {
+                                self.call_stack.pop_call_frame();
+                                last_result = Some(VMResultType::ExceptionThrown(VmError::JavaException(JavaError::JavaExceptionThrown(thrown_class_name, message)), throwable));
+                                debug!("Exception handler not in this function {}", class_and_method.format());
+                            }
                         } else {
-                            self.call_stack.pop_call_frame();
-                            last_result = Some(VMResultType::ExceptionThrown(VmError::JavaException(JavaError::JavaExceptionThrown(thrown_class_name, message)), throwable));
-                            debug!("Exception handler not in this function {}", class_and_method.format());
+                            panic!("Could not handle {} thrown by a function with message: {}", thrown_class_name, message)
                         }
                     } else {
                         unreachable!("Could not handle {} thrown by a function", error);

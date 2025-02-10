@@ -1,7 +1,7 @@
 use std::fmt::{Debug, Formatter};
 
 use crate::access_flags::{ClassFlag, ClassFlags};
-use crate::attribute::VisibleRuntimeAnnotations;
+use crate::attribute::{BootstrapMethods, VisibleRuntimeAnnotations};
 use crate::constants::{ConstantPool, ConstantPoolEntry};
 use crate::field_info::{FieldInfo, FieldType, PrimitiveType};
 use crate::method_info::MethodInfo;
@@ -19,6 +19,7 @@ pub struct Class<'a>{
     pub fields: Vec<FieldInfo>,
     pub methods: Vec<MethodInfo>,
     pub annotations: VisibleRuntimeAnnotations,
+    pub bootstrap_methods: BootstrapMethods,
     pub transitive_field_count: usize,
     pub first_field_index: usize,
     pub array_info: Option<ArrayInfo>

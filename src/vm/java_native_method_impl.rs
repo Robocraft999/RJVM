@@ -205,9 +205,14 @@ fn delegate_init_system_props<'a>(vm: &mut VM<'a>, _ : ClassRef<'a>, _: Option<R
     Ok(VMResultType::NeedsClassInit(vec![frame1, frame2], false))
 }
 
-fn delegate_system_map_library_name<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
-    if let Some(Value::Reference(name)) = args.get(0) {
-        non_failing_some(Value::Reference(name))
+fn delegate_system_map_library_name<'a>(vm: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
+    if let Some(string) = args.get(0) {
+        let name = VM::extract_string_from_object(string)?;
+        let new_name = match name.as_str(){
+            "zip" => "java.util.zip".to_string(),
+            _ => name
+        };
+        non_failing_some(Value::Reference(get_or_init!(vm.new_string_object(new_name)?)))
     } else {
         Err(VmError::ValidationError(format!("Expected Reference but found '{:?}'", args.get(0))))
     }

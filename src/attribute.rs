@@ -3,7 +3,7 @@ use std::fmt::{Debug, Formatter};
 use crate::bytecode::{Instruction, printable_instructions};
 use crate::bytes::{parse_u1, parse_u2};
 use crate::class_file::get_constant_printable;
-use crate::constants::ConstantPool;
+use crate::constants::{BytecodeBehavior, ConstantPool};
 use crate::error::ClassParseError;
 
 #[derive(Debug, Clone)]
@@ -137,5 +137,17 @@ pub enum ElementValue{
     Class(String),
     Annotation(Annotation),
     Array(Vec<ElementValue>),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct BootstrapMethods(pub Vec<BootstrapMethod>);
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct BootstrapMethod{
+    pub kind: BytecodeBehavior,
+    pub class_name: String,
+    pub method_name: String,
+    pub method_descriptor: String,
+    pub arguments_indices: Vec<u16>,
 }
 

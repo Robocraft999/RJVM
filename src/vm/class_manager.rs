@@ -96,6 +96,7 @@ impl<'a> ClassManager<'a>{
             fields: parsed_class.fields,
             methods: parsed_class.methods,
             annotations: parsed_class.runtime_visible_annotations,
+            bootstrap_methods: parsed_class.bootstrap_methods,
             transitive_field_count: superclass_field_count + fields_count,
             first_field_index: superclass_field_count,
             array_info

@@ -126,6 +126,12 @@ impl<'a> CallFrame<'a>{
                         Instruction::INVOKESPECIAL(index) => { return self.execute_invoke(vm, index, InvokeKind::SPECIAL) }
                         Instruction::INVOKESTATIC(index) => { return self.execute_invoke(vm, index, InvokeKind::STATIC) }
                         Instruction::INVOKEINTERFACE(index, _, _) => { return self.execute_invoke(vm, index, InvokeKind::INTERFACE) }
+                        Instruction::INVOKEDYNAMIC(index, _, _) => {
+                            println!("{}", index);
+                            let reference = get_or_init!(self.get_constant_as_value(vm, index)?);
+                            println!("{:?}", reference);
+                            println!();
+                        }
 
                         Instruction::RETURN => {
                             info!("RETURN");
@@ -1071,6 +1077,13 @@ impl<'a> CallFrame<'a>{
                     warn!("expected but didnt find string object");
                     Value::Null
                 }
+            }
+            ConstantPoolEntry::InvokeDynamic(bootstrap_method_index, name_and_type_index) => {
+                if let Some(ConstantPoolEntry::NameAndType(name_index, type_index)) = self.class_and_method.class.get_constant(name_and_type_index){
+                    println!("{:?} {:?}", self.class_and_method.class.get_constant(name_index), self.class_and_method.class.get_constant(type_index))
+                }
+                println!("{:?}", self.class_and_method.class.bootstrap_methods.0.get(bootstrap_method_index as usize));
+                Value::Null
             }
             _ => unimplemented!("Constant of type {constant_value:?} cannot be converted to a value")
         };

@@ -2,10 +2,10 @@ use std::fmt::{Debug, Formatter};
 use cesu8::from_java_cesu8;
 use log::info;
 use crate::access_flags::{parse_class_flags, parse_field_flags, parse_method_flags, ClassFlags};
-use crate::attribute::{Annotation, Attribute, Code, ConstantValue, ExceptionTable, ExceptionTableEntry, LineNumber, LineNumberTable, LineNumberTableEntry, ProgramCounter, VisibleRuntimeAnnotations};
+use crate::attribute::{Annotation, Attribute, BootstrapMethod, BootstrapMethods, Code, ConstantValue, ExceptionTable, ExceptionTableEntry, LineNumber, LineNumberTable, LineNumberTableEntry, ProgramCounter, VisibleRuntimeAnnotations};
 use crate::bytes::{parse_u1, parse_u2, parse_u4, parse_u8};
 use crate::class_file_version::ClassFileVersion;
-use crate::constants::{ConstantPool, ConstantPoolEntry};
+use crate::constants::{BytecodeBehavior, ConstantPool, ConstantPoolEntry};
 use crate::error::ClassParseError;
 use crate::field_info::{field_type_from_str, FieldInfo};
 use crate::method_info::{MethodDescriptor, MethodInfo};
@@ -24,6 +24,7 @@ pub struct ClassFile{
     pub methods: Vec<MethodInfo>,
     pub deprecated: bool,
     pub runtime_visible_annotations: VisibleRuntimeAnnotations,
+    pub bootstrap_methods: BootstrapMethods,
     pub source_file: Option<String>
 }
 
@@ -359,6 +360,7 @@ pub fn parse_class_file(class_path: &ClassPath, class_name: &str) -> Result<Clas
     let mut deprecated = false;
     let mut source_file = None;
     let mut runtime_visible_annotations = VisibleRuntimeAnnotations(Vec::new());
+    let mut bootstrap_methods = BootstrapMethods(Vec::new());
 
     for _ in 0..attributes_count{
         let name = get_constant_printable(&constant_pool, parse_u2(&mut bytes)?);
@@ -376,6 +378,41 @@ pub fn parse_class_file(class_path: &ClassPath, class_name: &str) -> Result<Clas
                     annotations.push(Annotation::new(&constant_pool, &mut bytes)?);
                 }
                 runtime_visible_annotations = VisibleRuntimeAnnotations(annotations)
+            }
+            "BootstrapMethods" => {
+                let num_bootstrap_methods = parse_u2(&mut bytes)?;
+                let mut bootstrap_methods_vec = Vec::new();
+                for _ in 0..num_bootstrap_methods {
+                    let bootstrap_method_handle = parse_u2(&mut bytes)?;
+                    let method_handle = constant_pool.0.get(bootstrap_method_handle as usize - 1).unwrap();
+                    println!("BootstrapMethods {:?}", &method_handle);
+                    let mut args = Vec::new();
+
+                    let num_bootstrap_arguments = parse_u2(&mut bytes)?;
+                    for _ in 0..num_bootstrap_arguments {
+                        let argument_index = parse_u2(&mut bytes)?;
+                        args.push(argument_index);
+                    }
+                    if let ConstantPoolEntry::MethodHandle(kind, method_ref_index) = method_handle {
+                        println!("Handle: {}", kind);
+                        let method_ref = constant_pool.0.get(*method_ref_index as usize - 1).unwrap();
+                        if let ConstantPoolEntry::Methodref(class_index, name_and_type_index) = method_ref{
+                            println!("{}", get_constant_printable(&constant_pool, *class_index));
+                            let name_and_type = constant_pool.0.get(*name_and_type_index as usize - 1).unwrap();
+                            if let ConstantPoolEntry::NameAndType(name_index, type_index) = name_and_type {
+                                let method = BootstrapMethod{
+                                    kind: BytecodeBehavior::from_repr(*kind).unwrap(),
+                                    class_name: get_constant_printable(&constant_pool, *class_index),
+                                    method_name: get_constant_printable(&constant_pool, *name_index),
+                                    method_descriptor: get_constant_printable(&constant_pool, *type_index),
+                                    arguments_indices: args,
+                                };
+                                bootstrap_methods_vec.push(method);
+                            }
+                        }
+                    }
+                }
+                bootstrap_methods = BootstrapMethods(bootstrap_methods_vec);
             }
             _ => {
                 let mut info = Vec::new();
@@ -398,7 +435,8 @@ pub fn parse_class_file(class_path: &ClassPath, class_name: &str) -> Result<Clas
         methods,
         deprecated,
         runtime_visible_annotations,
-        source_file
+        bootstrap_methods,
+        source_file,
     };
 
     info!("------------------------------------");
