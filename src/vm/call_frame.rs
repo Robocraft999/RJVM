@@ -1106,7 +1106,18 @@ impl<'a> CallFrame<'a>{
 impl Debug for CallFrame<'_>{
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let instruction = self.get_instruction_at(self.pc.clone());
-        write!(f, "Method: {} at {:?} ({:?})", self.class_and_method.format(), self.pc, instruction)
+        let mut line_number = -1;
+        if let Some(code) = &self.class_and_method.method.code{
+            if let Some(line_number_table) = &code.line_number_table{
+                for entry in line_number_table.0.iter().rev(){
+                    if entry.program_counter.0 < self.pc.0{
+                        line_number = entry.line_number.0 as i32;
+                        break;
+                    }
+                }
+            }  
+        };
+        write!(f, "Method: {}:{} at {:?} ({:?})", self.class_and_method.format(), line_number, self.pc, instruction)
     }
 }
 
