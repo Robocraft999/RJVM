@@ -151,3 +151,6 @@ pub struct BootstrapMethod{
     pub arguments_indices: Vec<u16>,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct Exceptions(pub Vec<String>);
+

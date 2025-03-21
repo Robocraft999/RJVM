@@ -2,7 +2,7 @@ use std::fmt::{Debug, Formatter};
 use cesu8::from_java_cesu8;
 use log::info;
 use crate::access_flags::{parse_class_flags, parse_field_flags, parse_method_flags, ClassFlags};
-use crate::attribute::{Annotation, Attribute, BootstrapMethod, BootstrapMethods, Code, ConstantValue, ExceptionTable, ExceptionTableEntry, LineNumber, LineNumberTable, LineNumberTableEntry, ProgramCounter, VisibleRuntimeAnnotations};
+use crate::attribute::{Annotation, Attribute, BootstrapMethod, BootstrapMethods, Code, ConstantValue, ExceptionTable, ExceptionTableEntry, Exceptions, LineNumber, LineNumberTable, LineNumberTableEntry, ProgramCounter, VisibleRuntimeAnnotations};
 use crate::bytes::{parse_u1, parse_u2, parse_u4, parse_u8};
 use crate::class_file_version::ClassFileVersion;
 use crate::constants::{BytecodeBehavior, ConstantPool, ConstantPoolEntry};
@@ -255,6 +255,7 @@ pub fn parse_class_file(class_path: &ClassPath, class_name: &str) -> Result<Clas
         let mut attributes = Vec::new();
         let mut deprecated = false;
         let mut code = None;
+        let mut exceptions = None;
         for _ in 0..attributes_count{
             let name = get_constant_printable(&constant_pool, parse_u2(&mut bytes)?);
             let attribute_length = parse_u4(&mut bytes)?;
@@ -334,6 +335,15 @@ pub fn parse_class_file(class_path: &ClassPath, class_name: &str) -> Result<Clas
                 "Deprecated" => {
                     deprecated = true
                 }
+                "Exceptions" => {
+                    let number_of_exceptions = parse_u2(&mut bytes)?;
+                    let mut exception_vec = Vec::new();
+                        for _ in 0..number_of_exceptions{
+                        let name = get_constant_printable(&constant_pool, parse_u2(&mut bytes)?);
+                        exception_vec.push(name);
+                    }
+                    exceptions = Some(Exceptions(exception_vec));
+                }
                 _ => {
                     let mut info = Vec::new();
                     for _ in 0..attribute_length{
@@ -354,6 +364,7 @@ pub fn parse_class_file(class_path: &ClassPath, class_name: &str) -> Result<Clas
             deprecated,
             attributes,
             code,
+            exceptions
         });
     }
     let attributes_count = parse_u2(&mut bytes)?;

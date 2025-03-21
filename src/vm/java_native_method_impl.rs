@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::env;
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -84,6 +85,7 @@ pub fn register_all_natives(registry: &mut NativeMethodRegistry){
     registry.register("java/lang/Class", "isAssignableFrom", "(Ljava/lang/Class;)Z", delegate_is_assignable_from);
     registry.register("java/lang/ClassLoader", "findLoadedClass0", "(Ljava/lang/String;)Ljava/lang/Class;", delegate_find_loaded_class0);
     registry.register("java/lang/ClassLoader", "findBootstrapClass", "(Ljava/lang/String;)Ljava/lang/Class;", delegate_find_bootstrap_class);
+    registry.register("java/lang/ClassLoader$NativeLibrary", "load", "(Ljava/lang/String;)V", delegate_native_lib_load);
     registry.register("java/lang/Float", "floatToRawIntBits", "(F)I", delegate_float_to_raw_bits);
     registry.register("java/lang/Double", "doubleToRawLongBits", "(D)J", delegate_double_to_raw_bits);
     registry.register("java/lang/Object", "getClass", "()Ljava/lang/Class;", delegate_get_class);
@@ -101,11 +103,13 @@ pub fn register_all_natives(registry: &mut NativeMethodRegistry){
     registry.register("sun/misc/Unsafe", "staticFieldBase", "(Ljava/lang/reflect/Field;)Ljava/lang/Object;", delegate_static_field_base);
     registry.register("sun/misc/Unsafe", "compareAndSwapObject", "(Ljava/lang/Object;JLjava/lang/Object;Ljava/lang/Object;)Z", delegate_compare_and_swap_object);
     registry.register("sun/misc/Unsafe", "compareAndSwapInt", "(Ljava/lang/Object;JII)Z", delegate_compare_and_swap_int);
+    registry.register("sun/misc/Unsafe", "compareAndSwapLong", "(Ljava/lang/Object;JJJ)Z", delegate_compare_and_swap_long);
     registry.register("sun/misc/Unsafe", "allocateMemory", "(J)J", delegate_allocate_memory);
     registry.register("sun/misc/Unsafe", "putLong", "(JJ)V", delegate_put_long);
     registry.register("sun/misc/Unsafe", "getByte", "(J)B", delegate_get_byte);
     registry.register("sun/misc/Unsafe", "getObject", "(Ljava/lang/Object;J)Ljava/lang/Object;", delegate_get_object_volatile);
     registry.register("sun/misc/Unsafe", "putOrderedObject", "(Ljava/lang/Object;JLjava/lang/Object;)V", delegate_put_ordered_object);
+    registry.register("sun/misc/Unsafe", "defineClass", "(Ljava/lang/String;[BIILjava/lang/ClassLoader;Ljava/security/ProtectionDomain;)Ljava/lang/Class;", delegate_define_class);
     registry.register("sun/reflect/Reflection", "getCallerClass", "()Ljava/lang/Class;", delegate_get_caller_class);
     registry.register("sun/reflect/Reflection", "getClassAccessFlags", "(Ljava/lang/Class;)I", delegate_get_class_access_flags);
     registry.register("java/lang/Thread", "currentThread", "()Ljava/lang/Thread;", delegate_current_thread);
@@ -114,6 +118,7 @@ pub fn register_all_natives(registry: &mut NativeMethodRegistry){
     registry.register("java/lang/Runtime", "freeMemory", "()J", delegate_free_memory);
     registry.register("java/security/AccessController", "getStackAccessControlContext", "()Ljava/security/AccessControlContext;", delegate_get_stack_access_control_context);
     registry.register("java/security/AccessController", "doPrivileged", "(Ljava/security/PrivilegedAction;)Ljava/lang/Object;", delegate_do_privileged);
+    registry.register("java/security/AccessController", "doPrivileged", "(Ljava/security/PrivilegedAction;Ljava/security/AccessControlContext;)Ljava/lang/Object;", delegate_do_privileged);
     registry.register("java/security/AccessController", "doPrivileged", "(Ljava/security/PrivilegedExceptionAction;)Ljava/lang/Object;", delegate_do_privileged);
     registry.register("java/security/AccessController", "doPrivileged", "(Ljava/security/PrivilegedExceptionAction;Ljava/security/AccessControlContext;)Ljava/lang/Object;", delegate_do_privileged);
     registry.register("java/lang/String", "intern", "()Ljava/lang/String;", delegate_string_intern);
@@ -123,8 +128,13 @@ pub fn register_all_natives(registry: &mut NativeMethodRegistry){
     registry.register("java/io/FileInputStream", "readBytes", "([BII)I", delegate_read_bytes);
     registry.register("java/io/FileSystem", "getFileSystem", "()Ljava/io/FileSystem;", delegate_get_file_system);
     registry.register("rjvm/io/UnixFileSystem", "getBooleanAttributes0", "(Ljava/io/File;)I", delegate_get_boolean_attribute);
+    registry.register("rjvm/io/WinFileSystem",  "getBooleanAttributes0", "(Ljava/io/File;)I", delegate_get_boolean_attribute);
+    registry.register("rjvm/io/WinFileSystem", "canonicalize0", "(Ljava/lang/String;)Ljava/lang/String;", delegate_canonicalize0);
+    registry.register("rjvm/io/WinFileSystem", "getFinalPath0", "(Ljava/lang/String;)Ljava/lang/String;", delegate_get_final_path0);
     registry.register("sun/misc/VM", "initialize", "()V", delegate_init_vm);
     registry.register("java/util/concurrent/atomic/AtomicLong", "VMSupportsCS8", "()Z", delegate_vm_supports_cs8);
+    registry.register("sun/misc/Signal", "findSignal", "(Ljava/lang/String;)I", delegate_find_signal);
+    registry.register("sun/misc/Signal", "handle0", "(IJ)J", delegate_handle0);
 }
 
 fn non_failing_some<'a>(value: Value<'a>) -> VMPartialResult<'a, Option<Value<'a>>>{
@@ -193,23 +203,29 @@ fn delegate_arraycopy<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<
 
 fn delegate_init_system_props<'a>(vm: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
     let properties_object = args.get(0).unwrap().expect_reference()?;
-    let arg1 = get_or_init!(vm.new_string_object("file.encoding".to_string())?);
-    let arg2 = get_or_init!(vm.new_string_object("UTF-8".to_string())?);
+    let props = vec![
+        ("file.encoding", "UTF-8".to_string()),
+        ("line.separator", "\r\n".to_string()),
+        ("sun.boot.library.path", "C:\\Users\\Admin\\.jdks\\azul-22.0.1\\bin".to_string()),
+        ("user.dir", env::current_dir().unwrap().to_string_lossy().to_string()),
+        ("user.home", env::home_dir().unwrap().to_string_lossy().to_string()),
+        ("os.name", "windows".to_string()),
+    ];
     let properties_set_method = vm.try_resolve_class_method("java/util/Properties", "setProperty", "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/Object;")?;
-    let frame1 = CallStack::create_call_frame(properties_set_method, Some(properties_object), vec![Value::Reference(arg1), Value::Reference(arg2)]);
-
-    let arg1 = get_or_init!(vm.new_string_object("line.separator".to_string())?);
-    let arg2 = get_or_init!(vm.new_string_object("\n".to_string())?);
-    let properties_set_method = vm.try_resolve_class_method("java/util/Properties", "setProperty", "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/Object;")?;
-    let frame2 = CallStack::create_call_frame(properties_set_method, Some(properties_object), vec![Value::Reference(arg1), Value::Reference(arg2)]);
-    Ok(VMResultType::NeedsClassInit(vec![frame1, frame2], false))
+    let frames = props.into_iter().map(|(key, value)| {
+        //FIXME could be bad to unwrap
+        let arg1 = vm.try_new_string_object(key.to_string()).unwrap();
+        let arg2 = vm.try_new_string_object(value).unwrap();
+        CallStack::create_call_frame(properties_set_method.clone(), Some(properties_object), vec![Value::Reference(arg1), Value::Reference(arg2)])
+    }).collect();
+    Ok(VMResultType::NeedsClassInit(frames, false))
 }
 
 fn delegate_system_map_library_name<'a>(vm: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
     if let Some(string) = args.get(0) {
         let name = VM::extract_string_from_object(string)?;
-        let new_name = match name.as_str(){
-            "zip" => "java.util.zip".to_string(),
+        let new_name = match env::consts::OS{
+            "windows" => name + ".dll",
             _ => name
         };
         non_failing_some(Value::Reference(get_or_init!(vm.new_string_object(new_name)?)))
@@ -314,8 +330,18 @@ fn delegate_get_declared_constructors0<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, cla
                 let parameter_class = get_or_init!(vm.new_class_object(field_type.to_class_name())?);
                 parameters.push(Value::Reference(parameter_class));
             }
+            let mut exceptions = Vec::new();
+            if let Some(exception_vec) = constructor.exceptions.clone(){
+                for exception in exception_vec.0{
+                    let parameter_class = get_or_init!(vm.new_class_object(exception)?);
+                    exceptions.push(Value::Reference(parameter_class));
+                }
+            }
             //parameterTypes
             java_constructor.set_field(6, Value::Reference(get_or_init!(vm.new_array(1, FieldType::Object("java/lang/Class".to_string()), RefCell::new(parameters))?)));
+            
+            //exceptionTypes
+            java_constructor.set_field(7, Value::Reference(get_or_init!(vm.new_array(1, FieldType::Object("java/lang/Class".to_string()), RefCell::new(exceptions))?)));
 
             let flags = constructor.flags.iter().map(|flag| flag.clone() as u16).reduce(|flag1, flag2| flag1 | flag2).unwrap_or(0);
             //modifiers
@@ -404,11 +430,11 @@ fn delegate_is_primitive<'a>(vm: &mut VM<'a>,  _: ClassRef<'a>, obj: Option<Refe
 }
 
 fn delegate_is_assignable_from<'a>(vm: &mut VM<'a>,  _: ClassRef<'a>, obj: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
-    debug!("isAssignableFrom this: {:?}, other {:?}", obj, args);
+    debug!("isAssignableFrom\nthis: {:?}\nfrom: {:?}", obj, args);
     if let (Some(object), Some(Value::Reference(other))) = (obj, args.get(0)) {
-        let clazz = get_or_init!(vm.extract_class_from_class_object(object)?);
-        let other_class = get_or_init!(vm.extract_class_from_class_object(other)?);
-        non_failing_some(Value::from(get_or_init!(vm.check_if_subclass_of(other_class.name.as_str(), clazz.name.as_str())?)))
+        let this_class = get_or_init!(vm.extract_class_from_class_object(object)?);
+        let from_class = get_or_init!(vm.extract_class_from_class_object(other)?);
+        non_failing_some(Value::from(get_or_init!(vm.check_if_subclass_of(this_class.name.as_str(), from_class.name.as_str())?)))
     } else {
         Err(VmError::ValidationError("expected a class reference".to_string()))
     }
@@ -439,6 +465,16 @@ fn delegate_find_bootstrap_class<'a>(vm: &mut VM<'a>,  _: ClassRef<'a>, _: Optio
         }
     } else {
         Err(VmError::ValidationError("expected a string reference".to_string()))
+    }
+}
+
+fn delegate_native_lib_load<'a>(vm: &mut VM<'a>,  _: ClassRef<'a>, object: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
+    debug!("nativeLib::load {:?}", object);
+    if let Some(obj) = object {
+        obj.set_field(0, Value::Long(1));
+        non_failing_none()
+    } else {
+        Err(VmError::ValidationError("this is null".to_string()))
     }
 }
 
@@ -597,6 +633,10 @@ fn delegate_compare_and_swap_object<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, _: Opt
 }
 
 fn delegate_compare_and_swap_int<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
+    non_failing_some(Value::Integer(1))
+}
+
+fn delegate_compare_and_swap_long<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
     non_failing_some(Value::Integer(1))
 }
 
@@ -817,6 +857,8 @@ fn delegate_read_bytes<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, obj: Option<Referen
         let data = arg0.expect_reference()?;
         let offset = arg1.expect_int()?;
         let length = arg2.expect_int()?;
+        
+        let io_exception_class = get_or_init!(vm.get_or_resolve_class("java/io/IOException")?);
 
         if let Some(file_input_stream) = obj{
             let path = VM::extract_string_from_object(&file_input_stream.get_field(2))?;
@@ -874,7 +916,13 @@ fn delegate_read_bytes<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, obj: Option<Referen
                     Ok(Some(Value::Integer((end - start) as i32)))
                 }*/
             } else {
-                Err(VmError::JavaException(JavaError::IOException(format!("File {} was not found", path))))
+                let exception_object = vm.try_new_object("java/io/IOException")?;
+                let init = vm.get_class_method(io_exception_class, "<init>", "(Ljava/lang/String;)V")?;
+                let details = get_or_init!(vm.new_string_object(format!("File {} was not found", path))?);
+                let init_frame = CallStack::create_call_frame(init, Some(exception_object), vec![Value::Reference(details)]);
+                let throw_frame = CallStack::create_throwing_frame(vm.find_class_by_id(ClassId(0)).unwrap(), Value::Reference(exception_object));
+                Ok(VMResultType::NeedsClassInit(vec![throw_frame, init_frame], false))
+                //Err(VmError::JavaException(JavaError::IOException(format!("File {} was not found", path))))
             }
         } else {
             Err(VmError::ValidationError("Expected an object reference".to_string()))
@@ -885,8 +933,13 @@ fn delegate_read_bytes<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, obj: Option<Referen
 }
 
 fn delegate_get_file_system<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
-    let linux_file_system = get_or_init!(vm.new_object("rjvm/io/UnixFileSystem")?);
-    non_failing_some(Value::Reference(linux_file_system))
+    let class_name = match env::consts::OS {
+        "linux" => "rjvm/io/UnixFileSystem",
+        "windows" => "rjvm/io/WinFileSystem",
+        _ => unimplemented!(),
+    };
+    let file_system = get_or_init!(vm.new_object(class_name)?);
+    non_failing_some(Value::Reference(file_system))
 }
 
 const BA_EXISTS: i32 = 1;
@@ -909,7 +962,41 @@ fn delegate_get_boolean_attribute<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, object: 
             attributes |= BA_DIRECTORY;
         }
     }
+    println!("HILFE {:?} ({}), {}", path, attributes, attributes & BA_EXISTS);
     non_failing_some(Value::Integer(attributes))
+}
+
+fn delegate_canonicalize0<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
+    if let Some(string) = args.get(0){
+        let path = VM::extract_string_from_object(string)?;
+        let path = Path::new(&path);
+        let path = path.canonicalize().unwrap().into_os_string().into_string().unwrap();
+        let new_path = get_or_init!(vm.new_string_object(path)?);
+        non_failing_some(Value::Reference(new_path))
+    } else {
+        Err(VmError::ValidationError("Can't canonicalize 0 arguments".to_string()))
+    }
+}
+
+fn delegate_get_final_path0<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
+    if let Some(string) = args.get(0){
+        //TODO only valid for windows
+        let path = VM::extract_string_from_object(string)?;
+        if path.starts_with("\\\\?\\"){
+            let is_unc = path.starts_with("\\\\?\\UNC");
+            let path = if is_unc {
+                path.strip_prefix("\\\\?\\UNC")
+            } else {
+                path.strip_prefix("\\\\?\\")
+            }.unwrap().to_string();
+            let new_path = get_or_init!(vm.new_string_object(path)?);
+            non_failing_some(Value::Reference(new_path))
+        } else {
+            Err(VmError::ValidationError(format!("Path not starting with right prefix: {:?}", path)))
+        }
+    } else {
+        Err(VmError::ValidationError("Can't getFinalPath0 with 0 arguments".to_string()))
+    }
 }
 
 fn delegate_init_vm<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, object: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
@@ -928,6 +1015,28 @@ fn delegate_init_vm<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, object: Option<Referen
 
 fn delegate_vm_supports_cs8<'a>(_: &mut VM<'a>, _: ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
     non_failing_some(Value::Integer(0))
+}
+
+fn delegate_find_signal<'a>(_: &mut VM<'a>, _: ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
+    if let Some(string) = args.get(0){
+        let name = VM::extract_string_from_object(string)?;
+        let result = match name.as_str() {
+            "HUP"  =>  1,
+            "INT"  =>  2,
+            "TERM" => 15,
+            _      => -1
+        };
+        println!("Signal name: {} {}", name, result);
+        if result > 0{
+            return non_failing_some(Value::Integer(result))
+        }
+    }
+    unimplemented!();
+    non_failing_some(Value::Integer(0))
+}
+
+fn delegate_handle0<'a>(_: &mut VM<'a>, _: ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
+    non_failing_some(Value::Long(0))
 }
 
 #[cfg(test)]

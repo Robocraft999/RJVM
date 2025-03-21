@@ -137,11 +137,21 @@ impl<'a> CallFrame<'a>{
                             info!("RETURN");
                             return Ok(VMResultType::Ok(None));
                         }
-                        Instruction::IRETURN | Instruction::LRETURN | Instruction::FRETURN | Instruction::DRETURN | Instruction::ARETURN=> {
+                        Instruction::IRETURN | Instruction::LRETURN | Instruction::FRETURN | Instruction::DRETURN=> {
                             //TODO check for types
                             let value = self.stack.pop().unwrap();
                             info!("RETURN {:?}", value);
                             return Ok(VMResultType::Ok(Some(value)));
+                        }
+                        Instruction::ARETURN => {
+                            let value = self.stack.pop().unwrap();
+                            return if let Value::Reference(reference) = value {
+                                Ok(VMResultType::Ok(Some(Value::Reference(reference))))
+                            } else if value == Value::Null {
+                                Ok(VMResultType::Ok(Some(Value::Null)))
+                            } else {
+                                Err(VmError::ValidationError(format!("Tried to return a value of type: {:?} but expected reference", value)))
+                            }
                         }
                         Instruction::NEW(index) => {
                             let class_name = self.class_and_method.get_constant_utf8(index).unwrap();
@@ -208,6 +218,7 @@ impl<'a> CallFrame<'a>{
                                 return Err(VmError::ValidationError(format!("Expected an array ref but found: {:?}", &popped)))
                             }
                         }
+                        //TODO instead of popping try to copy and insert
                         Instruction::DUP => {
                             debug!("DUP");
                             let value = self.stack.pop().unwrap();
@@ -221,24 +232,44 @@ impl<'a> CallFrame<'a>{
                             self.stack.push(value);
                         }
                         Instruction::DUP2 => {
-                            let optional_value1 = self.stack.pop();
-                            let optional_value2 = self.stack.pop();
-                            if let (Some(value1), Some(value2)) = (optional_value1.clone(), optional_value2) {
-                                debug!("DUP2 Comp type 1");
+                            debug!("DUP2");
+                            let value1 = self.stack.pop().unwrap();
+                            if value1.get_computational_type() == 1{
+                                let value2 = self.stack.pop().unwrap();
                                 self.stack.push(value2.clone());
+                                self.stack.push(value2);
+                            }
+                            self.stack.push(value1.clone());
+                            self.stack.push(value1);
+                        }
+                        Instruction::DUP2X1 => {
+                            debug!("DUP2X1");
+                            let value1 = self.stack.pop().unwrap();
+                            let value2 = self.stack.pop().unwrap();
+                            if value1.get_computational_type() == 1{
+                                let value3 = self.stack.pop().unwrap();
+                                self.stack.push(value2.clone());
+                                self.stack.push(value1.clone());
+                                self.stack.push(value3);
+                                self.stack.push(value2);
+                                self.stack.push(value1);
+                            } else {
                                 self.stack.push(value1.clone());
                                 self.stack.push(value2);
                                 self.stack.push(value1);
-                            } else if let Some(value) = optional_value1{
-                                debug!("DUP2 Comp type 2");
-                                self.stack.push(value.clone());
-                                self.stack.push(value);
                             }
                         }
                         Instruction::POP => {
                             debug!("POP");
                             if self.stack.pop().is_none(){
-                                warn!("Expected a value to pop");
+                                return Err(VmError::ValidationError("Expected a value to pop but Stack was empty".to_string()));
+                            }
+                        }
+                        Instruction::POP2 => {
+                            debug!("POP2");
+                            let popped = self.stack.pop().unwrap();
+                            if popped.get_computational_type() == 1{
+                                self.stack.pop().unwrap();
                             }
                         }
                         Instruction::IF_ACMPNE(offset) => {
@@ -394,12 +425,12 @@ impl<'a> CallFrame<'a>{
                         Instruction::ASTORE1 => { self.execute_astore(1)? }
                         Instruction::ASTORE2 => { self.execute_astore(2)? }
                         Instruction::ASTORE3 => { self.execute_astore(3)? }
-                        Instruction::IASTORE | Instruction::AASTORE | Instruction::CASTORE | Instruction::BASTORE => {
+                        Instruction::IASTORE | Instruction::AASTORE | Instruction::CASTORE | Instruction::BASTORE | Instruction::SASTORE => {
                             //TODO validate type of value to fit instruction
                             let value = self.stack.pop().unwrap();
                             let index = self.pop_int()?;
                             let popped = self.stack.pop().unwrap();
-                            debug!("XASTORE: {:?}", popped);
+                            debug!("XASTORE: {:?} <- {:?}", popped, value);
                             if let Value::Reference(array_ref) = popped{
                                 array_ref.set_element(index as usize, value);
                             }
@@ -465,7 +496,7 @@ impl<'a> CallFrame<'a>{
                             }
                         }
                         //TODO add type validation
-                        Instruction::AALOAD | Instruction::IALOAD | Instruction::BALOAD | Instruction::CALOAD => {
+                        Instruction::AALOAD | Instruction::IALOAD | Instruction::BALOAD | Instruction::CALOAD | Instruction::SALOAD => {
                             let index = self.pop_int()?;
                             if let Some(Value::Reference(array_ref)) = self.stack.pop(){
                                 self.stack.push(array_ref.get_element(index as usize));
@@ -495,7 +526,9 @@ impl<'a> CallFrame<'a>{
                             }
                         })?}
                         Instruction::LADD => { self.execute_j_arithmetic(|val1, val2| Ok(val1.wrapping_add(val2)))? }
+                        Instruction::LMUL => { self.execute_j_arithmetic(|val1, val2| Ok(val1.wrapping_mul(val2)))? }
                         Instruction::LAND => { self.execute_j_arithmetic(|val1, val2| Ok(val1 & val2))? },
+                        Instruction::LXOR => { self.execute_j_arithmetic(|val1, val2| Ok(val1 ^ val2))? }
                         Instruction::LUSHR => { self.execute_ji_arithmetic(|val1, val2| {
                             if val1 > 0{
                                 Ok(val1 >> (val2 & 0x1f))
@@ -534,6 +567,15 @@ impl<'a> CallFrame<'a>{
                                 self.stack.push(Value::Integer(int));
                             } else {
                                 warn!("I2B Conversion failed, because {value:?} is not of type Int")
+                            }
+                        }
+                        Instruction::I2S => {
+                            let value = self.stack.pop().unwrap();
+                            debug!("I2S");
+                            if let Value::Integer(int) = value {
+                                self.stack.push(Value::Integer(int));
+                            } else {
+                                warn!("I2S Conversion failed, because {value:?} is not of type Int")
                             }
                         }
                         Instruction::I2L => {
@@ -924,13 +966,7 @@ impl<'a> CallFrame<'a>{
         }
 
         let class_and_method = match kind {
-            InvokeKind::STATIC => {
-                class
-                    .find_method(method_name.as_str(), descriptor.as_str())
-                    .map(|method| ClassAndMethod {class, method})
-                    .ok_or(VmError::JavaException(JavaError::MethodNotFoundException(format!("{:?} {}.{}{}", kind, class.name,  method_name, descriptor))))?
-            }
-            InvokeKind::SPECIAL => {
+            InvokeKind::SPECIAL | InvokeKind::STATIC => {
                 class
                     .find_method(method_name.as_str(), descriptor.as_str())
                     .map(|method| ClassAndMethod {class, method})
@@ -1110,7 +1146,7 @@ impl Debug for CallFrame<'_>{
         if let Some(code) = &self.class_and_method.method.code{
             if let Some(line_number_table) = &code.line_number_table{
                 for entry in line_number_table.0.iter().rev(){
-                    if entry.program_counter.0 < self.pc.0{
+                    if entry.program_counter.0 < self.pc.0 || (self.pc.0 == 0 && entry.program_counter.0 == 0) {
                         line_number = entry.line_number.0 as i32;
                         break;
                     }

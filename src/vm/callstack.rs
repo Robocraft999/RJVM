@@ -10,6 +10,7 @@ use crate::VmError;
 use crate::vm::ClassAndMethod;
 use crate::vm::info;
 use crate::error;
+use crate::field_info::FieldType;
 use crate::method_info::{MethodDescriptor, MethodInfo};
 use crate::ProgramCounter;
 use crate::vm::class::{Class, ClassId, ClassRef};
@@ -31,8 +32,24 @@ impl<'a> CallStack<'a> {
         }
     }
 
-    pub fn create_returning_frame<'frame>(class: ClassRef<'frame> ,object: Value<'frame>) -> CallFrame<'frame> {
+    pub fn create_returning_frame<'frame>(class: ClassRef<'frame>, object: Value<'frame>) -> CallFrame<'frame> {
         let method = &class.methods[0];
+        let class_and_method = ClassAndMethod {
+            class,
+            method,
+        };
+        let locals = Vec::new();
+        CallFrame{
+            class_and_method,
+            locals,
+            pc: ProgramCounter(0),
+            last_pc: ProgramCounter(0),
+            stack: vec![object]
+        }
+    }
+    
+    pub fn create_throwing_frame<'frame>(class: ClassRef<'frame>, object: Value<'frame>) -> CallFrame<'frame> {
+        let method = &class.methods[1];
         let class_and_method = ClassAndMethod {
             class,
             method,
@@ -48,6 +65,21 @@ impl<'a> CallStack<'a> {
     }
 
     pub fn create_call_frame<'frame>(class_and_method: ClassAndMethod<'frame>, object: Option<Reference<'frame>>, args: Vec<Value<'frame>>) -> CallFrame<'frame> {
+        for (i, arg) in class_and_method.method.descriptor.args.iter().enumerate() {
+            let arg1 = args.get(i).unwrap();
+            if let FieldType::Object(class_name) = arg{
+                if arg1 == &Value::Null || arg1 == &Value::Dummy{
+                    continue
+                }
+                if let Value::Reference(reference) = arg1{
+                    /*if &reference.class_name != class_name{
+                        panic!("Wrong class name!: {}, expected: {}", reference.class_name, class_name);
+                    }*/
+                } else {
+                    panic!("Wrong argument type!: {:?}, expected: {}", arg1, class_name);
+                }
+            }
+        }
         let locals = if !class_and_method.method.is_native(){
             let mut empty_locals = vec![Value::Uninitialized; class_and_method.get_max_locals()];
             for i in 0..args.len(){

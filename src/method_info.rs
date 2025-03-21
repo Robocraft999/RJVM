@@ -1,7 +1,7 @@
 use regex::Regex;
 
 use crate::access_flags::{MethodFlag, MethodFlags};
-use crate::attribute::{Attribute, Code, ExceptionTable, ExceptionTableEntry};
+use crate::attribute::{Attribute, Code, ExceptionTable, ExceptionTableEntry, Exceptions};
 use crate::field_info::{FieldType, parse_field_type, PrimitiveType};
 
 #[derive(Debug)]
@@ -11,6 +11,7 @@ pub struct MethodInfo{
     pub descriptor: MethodDescriptor,
     pub deprecated: bool,
     pub code: Option<Code>,
+    pub exceptions: Option<Exceptions>,
     pub attributes: Vec<Attribute>
 }
 

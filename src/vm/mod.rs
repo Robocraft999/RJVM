@@ -72,7 +72,7 @@ impl<'a> VM<'a>{
             fields: vec![],
             methods: vec![MethodInfo {
                 flags: vec![],
-                name: "dummy".to_string(),
+                name: "dummyReturn".to_string(),
                 descriptor: MethodDescriptor::new("()Ljava/lang/Object;".to_string()),
                 deprecated: false,
                 code: Some(Code {
@@ -84,6 +84,23 @@ impl<'a> VM<'a>{
                     exception_table: ExceptionTable(vec![]),
                 }),
                 attributes: vec![],
+                exceptions: None,
+            },
+            MethodInfo{
+                flags: vec![],
+                name: "dummyThrow".to_string(),
+                descriptor: MethodDescriptor::new("()V".to_string()),
+                deprecated: false,
+                code: Some(Code{
+                    max_stack: 1,
+                    max_locals: 1,
+                    code: vec![0xbf], //ATHROW
+                    attributes: vec![],
+                    line_number_table: None,
+                    exception_table: ExceptionTable(vec![]),
+                }),
+                attributes: vec![],
+                exceptions: None,
             }],
             annotations: VisibleRuntimeAnnotations(vec![]),
             bootstrap_methods: BootstrapMethods(Vec::new()),
@@ -349,11 +366,15 @@ impl<'a> VM<'a>{
         let result = self.get_or_resolve_class(class_name);
         result.and_then(|class| {
             let class = get_or_init!(class);
-            class
-                .find_method(method_name, descriptor)
-                .map(|method| VMResultType::Ok(ClassAndMethod{ class, method}))
-                .ok_or(VmError::JavaException(JavaError::MethodNotFoundException(method_name.to_string())))
+            self.get_class_method(class, method_name, descriptor).map(|e| VMResultType::Ok(e))
         })
+    }
+    
+    pub fn get_class_method(&self, class: ClassRef<'a>, method_name: &str, descriptor: &str) -> VMResult<ClassAndMethod<'a>>{
+        class
+            .find_method(method_name, descriptor)
+            .map(|method| ClassAndMethod{ class, method})
+            .ok_or(VmError::JavaException(JavaError::MethodNotFoundException(method_name.to_string())))
     }
 
     pub fn try_resolve_class_method(&mut self, class_name: &str, method_name: &str, descriptor: &str) -> VMResult<ClassAndMethod<'a>>{
@@ -416,6 +437,15 @@ impl<'a> VM<'a>{
         }
     }
 
+    pub fn try_new_string_object(&mut self, string: String) -> VMResult<Reference<'a>>{
+        let result = self.new_string_object(string)?;
+        if let VMResultType::Ok(object) = result {
+            Ok(object)
+        } else {
+            Err(VmError::ClassNotLoadedError("[try_new_string_object]: Class not loaded".to_string()))
+        }
+    }
+    
     pub fn new_string_object(&mut self, string: String) -> VMPartialResult<'a, Reference<'a>>{
         if self.string_objects.contains_key(&string){
             return Ok(VMResultType::Ok(self.string_objects[&string]))
@@ -439,15 +469,20 @@ impl<'a> VM<'a>{
     pub fn extract_string_from_object(value: &Value<'a>) -> VMResult<String>{
         if let Value::Reference(reference) = value{
             let chars = reference.get_field(0);
-            if let Value::Reference(char_ref) = chars {
-                if let ReferenceType::Array(_, _, content) = &char_ref.reference_type{
-                    let chars: Vec<u8> = content.borrow().iter().map(|v| if let Value::Integer(val) = v {*val as u8} else {0}).collect();
-                    let string = from_java_cesu8(chars.as_slice())?.to_string();
-                    return Ok(string);
-                }
-            }
+            return Self::extract_string_from_char_arr(&chars);
         }
         Err(VmError::ValidationError(format!( "Expected String Object but found: {:?}", value)))
+    }
+    
+    pub fn extract_string_from_char_arr(chars: &Value<'a>) -> VMResult<String>{
+        if let Value::Reference(char_ref) = chars {
+            if let ReferenceType::Array(_, _, content) = &char_ref.reference_type{
+                let chars: Vec<u8> = content.borrow().iter().map(|v| if let Value::Integer(val) = v {*val as u8} else {0}).collect();
+                let string = from_java_cesu8(chars.as_slice())?.to_string();
+                return Ok(string);
+            }
+        }
+        Err(VmError::ValidationError(format!( "Expected CharArray but found: {:?}", chars)))
     }
 
     pub fn new_class_object(&mut self, class_name: String) -> VMPartialResult<'a, Reference<'a>>{
@@ -476,8 +511,10 @@ impl<'a> VM<'a>{
     }
     
     pub fn check_if_subclass_of(&mut self, class_name: &str, of_name: &str) -> VMPartialResult<'a, bool>{
+        println!("HELPME  {}", class_name);
         let mut current_class = get_or_init!(self.get_or_resolve_class(of_name)?);
         loop {
+            println!("HELPME2 {}", current_class.name);
             if current_class.name == class_name {
                 return Ok(VMResultType::Ok(true));
             }
