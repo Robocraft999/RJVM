@@ -128,6 +128,7 @@ pub fn register_all_natives(registry: &mut NativeMethodRegistry){
     registry.register("java/io/FileInputStream", "readBytes", "([BII)I", delegate_read_bytes);
     registry.register("java/io/FileSystem", "getFileSystem", "()Ljava/io/FileSystem;", delegate_get_file_system);
     registry.register("rjvm/io/UnixFileSystem", "getBooleanAttributes0", "(Ljava/io/File;)I", delegate_get_boolean_attribute);
+    registry.register("rjvm/io/UnixFileSystem", "canonicalize0", "(Ljava/lang/String;)Ljava/lang/String;", delegate_canonicalize0);
     registry.register("rjvm/io/WinFileSystem",  "getBooleanAttributes0", "(Ljava/io/File;)I", delegate_get_boolean_attribute);
     registry.register("rjvm/io/WinFileSystem", "canonicalize0", "(Ljava/lang/String;)Ljava/lang/String;", delegate_canonicalize0);
     registry.register("rjvm/io/WinFileSystem", "getFinalPath0", "(Ljava/lang/String;)Ljava/lang/String;", delegate_get_final_path0);
@@ -203,14 +204,24 @@ fn delegate_arraycopy<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<
 
 fn delegate_init_system_props<'a>(vm: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
     let properties_object = args.get(0).unwrap().expect_reference()?;
-    let props = vec![
+    let mut props = vec![
         ("file.encoding", "UTF-8".to_string()),
-        ("line.separator", "\r\n".to_string()),
-        ("sun.boot.library.path", "C:\\Users\\Admin\\.jdks\\azul-22.0.1\\bin".to_string()),
+        ("line.separator", "\n".to_string()),
+        ("sun.boot.library.path", "/home/admin/.jdks/temurin-22.0.1/lib".to_string()),
         ("user.dir", env::current_dir().unwrap().to_string_lossy().to_string()),
         ("user.home", env::home_dir().unwrap().to_string_lossy().to_string()),
-        ("os.name", "windows".to_string()),
+        ("os.name", "linux".to_string()),
     ];
+    if env::consts::OS == "windows"{
+        props = vec![
+            ("file.encoding", "UTF-8".to_string()),
+            ("line.separator", "\r\n".to_string()),
+            ("sun.boot.library.path", "C:\\Users\\Admin\\.jdks\\azul-22.0.1\\bin".to_string()),
+            ("user.dir", env::current_dir().unwrap().to_string_lossy().to_string()),
+            ("user.home", env::home_dir().unwrap().to_string_lossy().to_string()),
+            ("os.name", "windows".to_string()),
+        ];
+    }
     let properties_set_method = vm.try_resolve_class_method("java/util/Properties", "setProperty", "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/Object;")?;
     let frames = props.into_iter().map(|(key, value)| {
         //FIXME could be bad to unwrap
@@ -226,6 +237,7 @@ fn delegate_system_map_library_name<'a>(vm: &mut VM<'a>, _ : ClassRef<'a>, _: Op
         let name = VM::extract_string_from_object(string)?;
         let new_name = match env::consts::OS{
             "windows" => name + ".dll",
+            "linux" => format!("lib{name}.so"),
             _ => name
         };
         non_failing_some(Value::Reference(get_or_init!(vm.new_string_object(new_name)?)))

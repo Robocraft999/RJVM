@@ -2,15 +2,20 @@ package rjvm.io;
 
 import internal.Extends;
 import java.io.File;
+import java.io.IOException;
 
 @Extends("java.io.FileSystem")
 final class UnixFileSystem{
+    private final char slash = '/';
+    private final char colon = ':';
+    private final String userDir = normalize(System.getProperty("user.dir"));
+
     public char getSeparator(){
-        return '/';
+        return slash;
     }
 
     public char getPathSeparator(){
-        return '/';
+        return colon;
     }
 
     /* A normal Unix pathname contains no duplicate slashes and does not end
@@ -57,6 +62,13 @@ final class UnixFileSystem{
         return pathname.startsWith("/") ? 1 : 0;
     }
 
+    public String canonicalize(String path) throws IOException {
+        return canonicalize0(path);
+    }
+    private native String canonicalize0(String path) throws IOException;
+
+    /* -- Attribute accessors -- */
+
     public int getBooleanAttributes(File f) {
         int rv = getBooleanAttributes0(f);
         return rv | isHidden(f);
@@ -88,5 +100,16 @@ final class UnixFileSystem{
         }
         if (parent.equals("/")) return trimSeparator(parent + child);
         return trimSeparator(parent + '/' + child);
+    }
+
+    /* -- Path operations -- */
+
+    public boolean isAbsolute(File f) {
+        return (prefixLength(f.getPath()) != 0);
+    }
+
+    public String resolve(File f) {
+        if (isAbsolute(f)) return f.getPath();
+        return resolve(userDir, f.getPath());
     }
 }
