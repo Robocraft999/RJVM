@@ -485,9 +485,7 @@ impl<'a> VM<'a>{
         Err(VmError::ValidationError(format!( "Expected CharArray but found: {:?}", chars)))
     }
 
-    pub fn new_class_object(&mut self, class_name: String) -> VMPartialResult<'a, Reference<'a>>{
-        let class_id = get_or_init_special!(self.get_or_resolve_class(class_name.as_str())?, |v: ClassRef| v.id);
-
+    pub fn new_class_object(&mut self, class_name: String, class_id: ClassId) -> VMPartialResult<'a, Reference<'a>>{
         if !self.class_objects.contains_key(&class_id){
             let class_object = get_or_init!(self.new_object("java/lang/Class")?);
             let string_object = get_or_init!(self.new_string_object(class_name)?);
@@ -499,6 +497,17 @@ impl<'a> VM<'a>{
         } else {
             Ok(VMResultType::Ok(self.class_objects[&class_id]))
         }
+    }
+
+    pub fn new_class_object_by_class(&mut self, class: ClassRef<'a>) -> VMPartialResult<'a, Reference<'a>>{
+        let class_id = class.id;
+        let class_name = class.name.clone();
+        self.new_class_object(class_name, class_id)
+    }
+
+    pub fn new_class_object_by_name(&mut self, class_name: String) -> VMPartialResult<'a, Reference<'a>> {
+        let class_id = get_or_init_special!(self.get_or_resolve_class(class_name.as_str())?, |v: ClassRef| v.id);
+        self.new_class_object(class_name, class_id)
     }
 
     pub fn extract_class_from_class_object(&mut self, object: Reference<'a>) -> VMPartialResult<'a, ClassRef<'a>>{

@@ -249,15 +249,15 @@ fn delegate_system_map_library_name<'a>(vm: &mut VM<'a>, _ : ClassRef<'a>, _: Op
 fn delegate_get_primitive_class<'a>(vm: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
     let string = VM::extract_string_from_object(args.get(0).unwrap())?;
     match string.as_str() {
-        "int"     => non_failing_some(Value::Reference(get_or_init!(vm.new_class_object(  "java/lang/Integer".to_string())?))),
-        "long"    => non_failing_some(Value::Reference(get_or_init!(vm.new_class_object(     "java/lang/Long".to_string())?))),
-        "short"   => non_failing_some(Value::Reference(get_or_init!(vm.new_class_object(    "java/lang/Short".to_string())?))),
-        "char"    => non_failing_some(Value::Reference(get_or_init!(vm.new_class_object("java/lang/Character".to_string())?))),
-        "byte"    => non_failing_some(Value::Reference(get_or_init!(vm.new_class_object(     "java/lang/Byte".to_string())?))),
-        "float"   => non_failing_some(Value::Reference(get_or_init!(vm.new_class_object(    "java/lang/Float".to_string())?))),
-        "double"  => non_failing_some(Value::Reference(get_or_init!(vm.new_class_object(   "java/lang/Double".to_string())?))),
-        "boolean" => non_failing_some(Value::Reference(get_or_init!(vm.new_class_object(  "java/lang/Boolean".to_string())?))),
-        "void"    => non_failing_some(Value::Reference(get_or_init!(vm.new_class_object(     "java/lang/Void".to_string())?))),
+        "int"     => non_failing_some(Value::Reference(get_or_init!(vm.new_class_object_by_name(  "java/lang/Integer".to_string())?))),
+        "long"    => non_failing_some(Value::Reference(get_or_init!(vm.new_class_object_by_name(     "java/lang/Long".to_string())?))),
+        "short"   => non_failing_some(Value::Reference(get_or_init!(vm.new_class_object_by_name(    "java/lang/Short".to_string())?))),
+        "char"    => non_failing_some(Value::Reference(get_or_init!(vm.new_class_object_by_name("java/lang/Character".to_string())?))),
+        "byte"    => non_failing_some(Value::Reference(get_or_init!(vm.new_class_object_by_name(     "java/lang/Byte".to_string())?))),
+        "float"   => non_failing_some(Value::Reference(get_or_init!(vm.new_class_object_by_name(    "java/lang/Float".to_string())?))),
+        "double"  => non_failing_some(Value::Reference(get_or_init!(vm.new_class_object_by_name(   "java/lang/Double".to_string())?))),
+        "boolean" => non_failing_some(Value::Reference(get_or_init!(vm.new_class_object_by_name(  "java/lang/Boolean".to_string())?))),
+        "void"    => non_failing_some(Value::Reference(get_or_init!(vm.new_class_object_by_name(     "java/lang/Void".to_string())?))),
         _ => Err(VmError::ValidationError(format!("Expected extractable string")))
     }
 }
@@ -270,7 +270,7 @@ fn delegate_get_component_type<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, class_objec
 
     let array_class = get_or_init!(vm.get_or_resolve_class(class_name.as_str())?);
     if let Some(array_info) = &array_class.array_info{
-        let component_class_object = get_or_init!(vm.new_class_object(array_info.component_type.to_class_name())?);
+        let component_class_object = get_or_init!(vm.new_class_object_by_name(array_info.component_type.to_class_name())?);
         non_failing_some(Value::Reference(component_class_object))
     } else {
         Err(VmError::ValidationError(format!("Expected Array object but found '{:?}'", class_object)))
@@ -304,7 +304,7 @@ fn delegate_get_declared_fields0<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, class_obj
             //modifiers
             java_field.set_field(8, Value::Integer(field.flags.iter().cloned().map(|flag| flag as u16 as i32).reduce(|flag1, flag2| flag1 | flag2).unwrap_or(0)));
             //type
-            let type_class_object = get_or_init!(vm.new_class_object(field.field_type.to_class_name())?);
+            let type_class_object = get_or_init!(vm.new_class_object_by_name(field.field_type.to_class_name())?);
             java_field.set_field(7, Value::Reference(type_class_object));
             debug!("field name: {}", field.name);
             content.push(Value::Reference(java_field));
@@ -339,13 +339,13 @@ fn delegate_get_declared_constructors0<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, cla
 
             let mut parameters = Vec::new();
             for field_type in constructor.descriptor.args.iter(){
-                let parameter_class = get_or_init!(vm.new_class_object(field_type.to_class_name())?);
+                let parameter_class = get_or_init!(vm.new_class_object_by_name(field_type.to_class_name())?);
                 parameters.push(Value::Reference(parameter_class));
             }
             let mut exceptions = Vec::new();
             if let Some(exception_vec) = constructor.exceptions.clone(){
                 for exception in exception_vec.0{
-                    let parameter_class = get_or_init!(vm.new_class_object(exception)?);
+                    let parameter_class = get_or_init!(vm.new_class_object_by_name(exception)?);
                     exceptions.push(Value::Reference(parameter_class));
                 }
             }
@@ -382,7 +382,7 @@ fn delegate_get_super_class<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, class_object: 
         let class = get_or_init!(vm.extract_class_from_class_object(obj)?);
         match class.superclass {
             Some(super_class) => {
-                let super_class_object = get_or_init!(vm.new_class_object(super_class.name.clone())?);
+                let super_class_object = get_or_init!(vm.new_class_object_by_name(super_class.name.clone())?);
                 non_failing_some(Value::Reference(super_class_object))
             }
             None => non_failing_some(Value::Null)
@@ -399,7 +399,7 @@ fn delegate_for_name0<'a>(vm: &mut VM<'a>,  _: ClassRef<'a>, _: Option<Reference
         let name = VM::extract_string_from_object(&name)?;
         let name = name.replace(".", "/");
         //let class = vm.find_class_by_name(name)?;
-        non_failing_some(Value::Reference(get_or_init!(vm.new_class_object(name)?)))
+        non_failing_some(Value::Reference(get_or_init!(vm.new_class_object_by_name(name)?)))
     } else {
         Err(VmError::ValidationError("no name".to_string()))
     }
@@ -457,7 +457,7 @@ fn delegate_find_loaded_class0<'a>(vm: &mut VM<'a>,  _: ClassRef<'a>, _: Option<
     if let Some(str_object) = args.get(0) {
         let class_name = VM::extract_string_from_object(&str_object)?;
         if vm.class_manager.find_class_by_name(class_name.as_str()).is_some() {
-            non_failing_some(Value::Reference(get_or_init!(vm.new_class_object(class_name)?)))
+            non_failing_some(Value::Reference(get_or_init!(vm.new_class_object_by_name(class_name)?)))
         } else {
             non_failing_some(Value::Null)
         }
@@ -471,7 +471,7 @@ fn delegate_find_bootstrap_class<'a>(vm: &mut VM<'a>,  _: ClassRef<'a>, _: Optio
     if let Some(str_object) = args.get(0) {
         let class_name = VM::extract_string_from_object(&str_object)?;
         if vm.class_manager.find_class_by_name(class_name.as_str()).is_some() {
-            non_failing_some(Value::Reference(get_or_init!(vm.new_class_object(class_name)?)))
+            non_failing_some(Value::Reference(get_or_init!(vm.new_class_object_by_name(class_name)?)))
         } else {
             non_failing_some(Value::Null)
         }
@@ -509,7 +509,7 @@ fn delegate_get_class<'a>(vm: &mut VM<'a>, class: ClassRef<'a>, object: Option<R
     debug!("getClass");
     if let Some(obj) = object {
         debug!("{} obj: {:?}", class.name, obj.class_name);
-        let class_object = get_or_init!(vm.new_class_object(obj.class_name.clone())?);
+        let class_object = get_or_init!(vm.new_class_object_by_name(obj.class_name.clone())?);
         non_failing_some(Value::Reference(class_object))
     } else {
         Err(VmError::ValidationError("Object is Null".to_string()))
@@ -705,14 +705,14 @@ fn delegate_get_caller_class<'a>(vm: &mut VM<'a>, class : ClassRef<'a>, _: Optio
     if vm.init_call_stack.frames.len() == 0{
         let frame_index = vm.call_stack.frames.len() - 2;
         if let Some(frame) = vm.call_stack.frames.get(frame_index){
-            non_failing_some(Value::Reference(get_or_init!(vm.new_class_object(frame.class_and_method.class.name.clone())?)))
+            non_failing_some(Value::Reference(get_or_init!(vm.new_class_object_by_name(frame.class_and_method.class.name.clone())?)))
         } else {
             Err(VmError::ValidationError("There is no parent Callframe".to_string()))
         }
     } else {
         //FIXME not sure if this works if the caller class is on the init call stack
         if let Some(class_and_method) = &vm.call_stack.current_frame{
-            non_failing_some(Value::Reference(get_or_init!(vm.new_class_object(class_and_method.class.name.clone())?)))
+            non_failing_some(Value::Reference(get_or_init!(vm.new_class_object_by_name(class_and_method.class.name.clone())?)))
         } else {
             Err(VmError::ValidationError("There is no parent Callframe (in clinit)".to_string()))
         }

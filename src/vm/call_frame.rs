@@ -1107,7 +1107,7 @@ impl<'a> CallFrame<'a>{
             }
             ConstantPoolEntry::Class(name_index) => {
                 if let Some(ConstantPoolEntry::Utf8(string)) = self.class_and_method.class.get_constant(name_index){
-                    let class_object = get_or_init!(vm.new_class_object(string)?);
+                    let class_object = get_or_init!(vm.new_class_object_by_name(string)?);
                     Value::Reference(class_object)
                 } else {
                     warn!("expected but didnt find string object");
