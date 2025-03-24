@@ -110,6 +110,7 @@ pub fn register_all_natives(registry: &mut NativeMethodRegistry){
     registry.register("sun/misc/Unsafe", "getObject", "(Ljava/lang/Object;J)Ljava/lang/Object;", delegate_get_object_volatile);
     registry.register("sun/misc/Unsafe", "putOrderedObject", "(Ljava/lang/Object;JLjava/lang/Object;)V", delegate_put_ordered_object);
     registry.register("sun/misc/Unsafe", "defineClass", "(Ljava/lang/String;[BIILjava/lang/ClassLoader;Ljava/security/ProtectionDomain;)Ljava/lang/Class;", delegate_define_class);
+    registry.register("sun/misc/Unsafe", "allocateInstance", "(Ljava/lang/Class;)Ljava/lang/Object;", delegate_allocate_instance);
     registry.register("sun/reflect/Reflection", "getCallerClass", "()Ljava/lang/Class;", delegate_get_caller_class);
     registry.register("sun/reflect/Reflection", "getClassAccessFlags", "(Ljava/lang/Class;)I", delegate_get_class_access_flags);
     registry.register("java/lang/Thread", "currentThread", "()Ljava/lang/Thread;", delegate_current_thread);
@@ -698,6 +699,34 @@ fn delegate_put_ordered_object<'a>(vm: &mut VM<'a>, _ : ClassRef<'a>, _: Option<
         non_failing_none()
     } else {
         Err(VmError::ValidationError(format!("Expected a reference or array but got: {:?}", args)))
+    }
+}
+
+fn delegate_define_class<'a>(vm: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
+    if let (Some(class_name_value), Some(Value::Reference(bytes_value)), Some(start), Some(end)) = (args.get(0), args.get(1), args.get(2), args.get(3)) {
+        let class_name = VM::extract_string_from_object(class_name_value)?;
+        let bytes = if let ReferenceType::Array(_, _, data) = &bytes_value.reference_type{
+            data.borrow().iter().map(|val| if let Value::Integer(byte) = val {*byte as u8} else {0}).collect()
+        } else {
+            Vec::new()
+        };
+        let (start, end) = (start.expect_int()?, end.expect_int()?);
+        let bytes = bytes.into_iter().skip(start as usize).take((end - start) as usize).collect::<Vec<_>>();
+        let class_object = get_or_init!(vm.define_class(class_name.as_str(), bytes)?);
+        non_failing_some(Value::Reference(class_object))
+    } else {
+        Err(VmError::ValidationError(format!("define_class: expected string_object, byte array, start and end ints but got: {:?}, {:?}, {:?}, {:?}", args.get(0), args.get(1), args.get(2), args.get(3))))
+    }
+}
+
+fn delegate_allocate_instance<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
+    if let Some(Value::Reference(class_object)) = args.get(0){
+        let class_name_field = class_object.get_field(5);
+        let class_name = VM::extract_string_from_object(&class_name_field)?;
+        let object = get_or_init!(vm.new_object(class_name.as_str())?);
+        non_failing_some(Value::Reference(object))
+    } else {
+        Err(VmError::ValidationError(format!("Expected a class reference to allocate but got: {:?}", args)))
     }
 }
 

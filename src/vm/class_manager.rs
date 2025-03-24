@@ -9,6 +9,7 @@ use crate::field_info::{field_type_from_str, parse_field_type};
 use crate::vm::class::{ArrayInfo, Class, ClassId, ClassRef};
 use crate::vm::class_path::ClassPath;
 use crate::vm::class_path_entry::ClassLoadingError;
+use crate::vm::result::VMResult;
 use crate::vm::VmError;
 
 #[derive(Debug, Clone)]
@@ -62,7 +63,12 @@ impl<'a> ClassManager<'a>{
 
     pub fn resolve_class(&mut self, class_name: &str) -> Result<ClassesToInitialize<'a>, VmError>{
         let (class_to_load_name, array_info) = self.try_create_array_class(class_name)?;
-        let parsed_class = parse_class_file(&self.class_path, class_to_load_name.as_str())?;
+        let bytes = self.class_path.resolve(class_to_load_name.as_str()).map_err(|e| VmError::ParseError(ClassParseError::from(e)))?.ok_or(ClassParseError::ResolveError(class_name.to_string()))?;
+        self.parse_and_load_class(class_name, class_to_load_name.as_str(), array_info, bytes)
+    }
+
+    pub fn parse_and_load_class(&mut self, class_name: &str, class_to_load_name: &str, array_info: Option<ArrayInfo>, bytes: Vec<u8>) -> VMResult<ClassesToInitialize<'a>>{
+        let parsed_class = parse_class_file(bytes, class_to_load_name)?;
         let next_id = self.next_id;
         self.next_id += 1;
 
@@ -119,7 +125,7 @@ impl<'a> ClassManager<'a>{
             }
         }
         if class_ref.array_info.is_some() {
-            if let ResolvedClass::NewClass(array_class) = self.get_or_resolve_class(class_to_load_name.as_str())? {
+            if let ResolvedClass::NewClass(array_class) = self.get_or_resolve_class(class_to_load_name)? {
                 for to_initialize in array_class.to_initialize.iter() {
                     classes_to_init.push(to_initialize)
                 }

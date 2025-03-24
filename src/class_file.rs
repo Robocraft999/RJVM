@@ -82,9 +82,8 @@ pub fn get_constant_printable(constant_pool: &ConstantPool, index: u16) -> Strin
     }
 }
 
-pub fn parse_class_file(class_path: &ClassPath, class_name: &str) -> Result<ClassFile, ClassParseError> {
-    //TODO error handling
-    let mut bytes = class_path.resolve(class_name)?.ok_or(ClassParseError::ResolveError(class_name.to_string()))?.into_iter();
+pub fn parse_class_file(bytes: Vec<u8>, class_name: &str) -> Result<ClassFile, ClassParseError> {
+    let mut bytes = bytes.into_iter();
 
     let magic = parse_u4(&mut bytes)?;
     let _minor_version = parse_u2(&mut bytes)?;

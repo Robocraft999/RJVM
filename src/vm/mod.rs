@@ -346,6 +346,24 @@ impl<'a> VM<'a>{
         }
     }
 
+    pub fn define_class(&mut self, class_name: &str, bytes: Vec<u8>) -> VMPartialResult<'a, Reference<'a>>{
+        let resolved = self.find_class_by_name(class_name.to_string());
+        if resolved.is_none() {
+            let to_init = self.class_manager.parse_and_load_class(class_name, class_name, None, bytes)?;
+            return Ok(VMResultType::NeedsClassInit(
+                to_init.to_initialize
+                    .iter()
+                    .map(|class| self.init_class(class))
+                    .filter(Option::is_some)
+                    .map(Option::unwrap)
+                    .collect(),
+                true
+            ))
+        }
+        let resolved = resolved.unwrap();
+        self.new_class_object_by_class(resolved)
+    }
+
     fn init_class(&mut self, class: ClassRef<'a>) -> Option<CallFrame<'a>>{
         if class.transitive_field_count > 0 && !class.is_array(){
             let static_object = self.new_object_from_class(class);
