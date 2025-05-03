@@ -1,10 +1,10 @@
 [package]
 name = "rjvm"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [dependencies]
-strum_macros = "0.26.3"
+strum_macros = "0.26.4"
 zip = { version = "2.2.0", features = ["deflate"] }
 thiserror = "1.0.63"
 typed-arena = "2.0.2"
