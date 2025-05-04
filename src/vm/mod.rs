@@ -526,10 +526,10 @@ impl<'a> VM<'a>{
     }
     
     pub fn check_if_subclass_of(&mut self, class_name: &str, of_name: &str) -> VMPartialResult<'a, bool>{
-        println!("HELPME  {}", class_name);
+        //println!("HELPME  {}", class_name);
         let mut current_class = get_or_init!(self.get_or_resolve_class(of_name)?);
         loop {
-            println!("HELPME2 {}", current_class.name);
+            //println!("HELPME2 {}", current_class.name);
             if current_class.name == class_name {
                 return Ok(VMResultType::Ok(true));
             }

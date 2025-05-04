@@ -132,6 +132,7 @@ impl<'a> CallFrame<'a>{
                             let reference = get_or_init!(self.get_constant_as_value(vm, index)?);
                             println!("{:?}", reference);
                             println!();
+                            unimplemented!("INVOKEDYNAMIC is not supported yet");
                         }
 
                         Instruction::RETURN => {
@@ -449,7 +450,7 @@ impl<'a> CallFrame<'a>{
                             let value = self.stack.pop().unwrap();
                             let index = self.pop_int()?;
                             let popped = self.stack.pop().unwrap();
-                            debug!("XASTORE: {:?} <- {:?}", popped, value);
+                            debug!("XASTORE: {:?}[{}] <- {:?}", popped, index, value);
                             if let Value::Reference(array_ref) = popped{
                                 array_ref.set_element(index as usize, value);
                             }
@@ -517,7 +518,9 @@ impl<'a> CallFrame<'a>{
                         //TODO add type validation
                         Instruction::AALOAD | Instruction::IALOAD | Instruction::BALOAD | Instruction::CALOAD | Instruction::SALOAD => {
                             let index = self.pop_int()?;
-                            if let Some(Value::Reference(array_ref)) = self.stack.pop(){
+                            let popped = self.stack.pop();
+                            debug!("XALOAD: {:?}[{}]", popped, index);
+                            if let Some(Value::Reference(array_ref)) = popped{
                                 self.stack.push(array_ref.get_element(index as usize));
                             }
                         }

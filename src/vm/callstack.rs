@@ -76,7 +76,7 @@ impl<'a> CallStack<'a> {
                         panic!("Wrong class name!: {}, expected: {}", reference.class_name, class_name);
                     }*/
                 } else {
-                    panic!("Wrong argument type!: {:?}, expected: {}", arg1, class_name);
+                    panic!("Wrong argument type for {} [{}, off({})]!: {:?}, expected: {}\nfull args: {:?}", class_and_method.format(), i, offset, arg1, class_name, args);
                 }
             }
         }
@@ -131,12 +131,19 @@ impl<'a> CallStack<'a> {
         //let last_frame = self.frames.last().unwrap();
         self.frames_infos.push(format!("{:?} {}", call_frame.pc, call_frame.class_and_method.format()));
         self.frames.push(call_frame);
-        error!("PUSH {:?}", self.frames.last().unwrap());
+        info!("PUSH {:?}", self.frames.last().unwrap());
+        if self.frames.len() > 200{
+            for (index, call_frame_info) in self.frames.iter().enumerate(){
+                //error!("[{}]: {:?}, stack={}, locals={}", index, call_frame.pc, call_frame.stack, call_frame.locals);
+                println!("[{}]: {:?}", index, call_frame_info);
+            }
+            panic!("Stack overflow");
+        }
     }
 
     pub fn pop_call_frame(&mut self) -> CallFrame<'a>{
         //self.frames.pop();
-        error!("POP  {:?}", self.frames.last().unwrap());
+        info!("POP  {:?}", self.frames.last().unwrap());
         self.frames_infos.pop();
         self.frames.pop().unwrap()
     }

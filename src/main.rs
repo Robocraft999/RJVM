@@ -99,6 +99,11 @@ fn run_and_catch_method<'a>(vm: &'a mut VM<'a>, class_name: &str, method_name: &
         Err(error) => {
             error!("Error: {}", error);
             //vm.call_stack.print_call_stack();
+            println!("Frames:");
+            for (index, call_frame_info) in vm.call_stack.frames.iter().enumerate(){
+                //error!("[{}]: {:?}, stack={}, locals={}", index, call_frame.pc, call_frame.stack, call_frame.locals);
+                println!("[{}]: {:?}", index, call_frame_info);
+            }
         }
     }
 }
@@ -120,7 +125,7 @@ fn main() {
             panic!();
         }
     };
-    //simple_logger::SimpleLogger::new().with_level(LevelFilter::Debug).without_timestamps().init().unwrap();
+    //simple_logger::SimpleLogger::new().with_level(LevelFilter::Trace).without_timestamps().init().unwrap();
     //vm.get_or_resolve_class("java/lang/CharacterData").expect("msg");
     match init_system(&mut vm){
         Ok(_) => {}

@@ -612,7 +612,7 @@ fn delegate_static_field_offset<'a>(vm: &mut VM<'a>, class : ClassRef<'a>, objec
 }
 
 fn delegate_get_object_volatile<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
-    println!("get_object_volatile args: {:?}", args);
+    debug!("get_object_volatile args: {:?}", args);
     if let (Some(Value::Reference(o)), Some(Value::Long(index))) = (args.get(0), args.get(1)) {
         if o.is_array(){
             return non_failing_some(o.get_element(*index as usize  - 16));
@@ -683,7 +683,7 @@ fn delegate_get_byte<'a>(vm: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<
 }
 
 fn delegate_put_ordered_object<'a>(vm: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
-    println!("put_ordered_object args: {:?}", args);
+    debug!("put_ordered_object args: {:?}", args);
     if let (Some(Value::Reference(o)), Some(Value::Long(index)), Some(x)) = (args.get(0), args.get(1), args.get(3)) {
         if o.is_array(){
             o.set_element(*index as usize  - 16, x.clone());
