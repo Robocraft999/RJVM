@@ -402,6 +402,17 @@ impl<'a> CallFrame<'a>{
                                 self.pc.0 = default as u16;
                             }
                         }
+                        Instruction::TABLESWITCH(default, low, high, offsets) => {
+                            let index = self.pop_int()?;
+                            if index < low || index > high{
+                                debug!("TABLESWITCH default {}", default);
+                                self.pc = ProgramCounter((self.last_pc.0 as i32 + default) as u16);
+                            } else {
+                                let offset = offsets[(index - low) as usize];
+                                debug!("TABLESWITCH[{}]: {}", index, offset);
+                                self.pc = ProgramCounter((self.last_pc.0 as i32 + offset) as u16);
+                            }
+                        }
                         Instruction::ISTORE(index) => { self.execute_istore(index as usize)? }
                         Instruction::ISTORE0 => { self.execute_istore(0)? }
                         Instruction::ISTORE1 => { self.execute_istore(1)? }

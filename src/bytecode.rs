@@ -48,7 +48,7 @@ pub fn parse_instruction(code_bytes: &Vec<u8>, mut pc: usize) -> Result<(Instruc
     let opcode = parse_u1(code_bytes, &mut pc)?;
     let result = if let Some(instruction) = Instruction::from_repr(opcode){
         match instruction{
-            TABLESWITCH => {
+            TABLESWITCH(_, _, _, _) => {
                 let instruction_pc = pc - 1;
                 //let padding = pc % 4;
                 //ti: 4 -> pc = 5 -> padding = 1 -> dbi = 5+1=6  X
@@ -72,7 +72,7 @@ pub fn parse_instruction(code_bytes: &Vec<u8>, mut pc: usize) -> Result<(Instruc
                     offsets.push(parse_i4(code_bytes, &mut pc)?);
                 }
 
-                TABLESWITCH
+                TABLESWITCH(default, low, high, offsets)
             }
             LOOKUPSWITCH(_, _) => {
                 let padding = (4 - (pc % 4)) % 4;
@@ -81,7 +81,7 @@ pub fn parse_instruction(code_bytes: &Vec<u8>, mut pc: usize) -> Result<(Instruc
                     parse_u1(code_bytes, &mut pc)?;
                 }
 
-                let default = (instruction_pc as i32 + parse_i4(code_bytes, &mut pc)?) as u32;
+                let default = (instruction_pc as i32 + parse_i4(code_bytes, &mut pc)?);
                 let npairs = parse_i4(code_bytes, &mut pc)?;
 
                 let mut offsets = Vec::new();
@@ -372,8 +372,8 @@ pub enum Instruction{
     JSR(u16)       = 0xa8,
     RET(u8)        = 0xa9,
 
-    TABLESWITCH    = 0xaa,
-    LOOKUPSWITCH(u32, Vec<i32>)   = 0xab,
+    TABLESWITCH(i32, i32, i32, Vec<i32>) = 0xaa,
+    LOOKUPSWITCH(i32, Vec<i32>)          = 0xab,
 
     IRETURN  = 0xac,
     LRETURN  = 0xad,
