@@ -112,7 +112,7 @@ fn run_and_catch_method<'a>(vm: &'a mut VM<'a>, class_name: &str, method_name: &
 
 fn main() {
     let mut class_path = ClassPath::default();
-    class_path.push("resources;resources/rt.jar;resources/LogicSim.jar;resources/lib/unix;resources/lib").expect("TODO: panic message");
+    class_path.push("resources;resources/rt.jar;resources/LogicSim.jar;resources/k7bot-v1.24.0.jar;resources/lib/unix;resources/lib").expect("TODO: panic message");
 
     let mut vm = VM::new(class_path);
     

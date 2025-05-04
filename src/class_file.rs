@@ -1,4 +1,5 @@
 use std::fmt::{Debug, Formatter};
+use std::str::FromStr;
 use cesu8::from_java_cesu8;
 use log::info;
 use crate::access_flags::{parse_class_flags, parse_field_flags, parse_method_flags, ClassFlags};
@@ -7,10 +8,11 @@ use crate::bytes::{parse_u1, parse_u2, parse_u4, parse_u8};
 use crate::class_file_version::ClassFileVersion;
 use crate::constants::{BytecodeBehavior, ConstantPool, ConstantPoolEntry};
 use crate::error::ClassParseError;
-use crate::field_info::{field_type_from_str, FieldInfo};
+use crate::field_info::{FieldInfo, FieldType};
 use crate::method_info::{MethodDescriptor, MethodInfo};
 use crate::vm::class_path::ClassPath;
 use crate::vm::class_path_entry::ClassLoadingError;
+use crate::vm::result::VMResult;
 
 pub struct ClassFile{
     pub magic: u32,
@@ -82,7 +84,7 @@ pub fn get_constant_printable(constant_pool: &ConstantPool, index: u16) -> Strin
     }
 }
 
-pub fn parse_class_file(bytes: Vec<u8>, class_name: &str) -> Result<ClassFile, ClassParseError> {
+pub fn parse_class_file(bytes: Vec<u8>, class_name: &str) -> VMResult<ClassFile> {
     let mut bytes = bytes.into_iter();
 
     let magic = parse_u4(&mut bytes)?;

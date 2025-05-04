@@ -227,7 +227,7 @@ fn delegate_init_system_props<'a>(vm: &mut VM<'a>, _ : ClassRef<'a>, _: Option<R
         ("sun.boot.library.path", "/home/admin/.jdks/temurin-22.0.1/lib".to_string()),
         ("user.dir", env::current_dir().unwrap().to_string_lossy().to_string()),
         ("user.home", env::home_dir().unwrap().to_string_lossy().to_string()),
-        ("os.name", "linux".to_string()),
+        ("os.name", "Linux".to_string()),
     ];
     if env::consts::OS == "windows"{
         props = vec![
@@ -236,7 +236,7 @@ fn delegate_init_system_props<'a>(vm: &mut VM<'a>, _ : ClassRef<'a>, _: Option<R
             ("sun.boot.library.path", "C:\\Users\\Admin\\.jdks\\azul-22.0.1\\bin".to_string()),
             ("user.dir", env::current_dir().unwrap().to_string_lossy().to_string()),
             ("user.home", env::home_dir().unwrap().to_string_lossy().to_string()),
-            ("os.name", "windows".to_string()),
+            ("os.name", "Windows".to_string()),
         ];
     }
     let properties_set_method = vm.try_resolve_class_method("java/util/Properties", "setProperty", "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/Object;")?;
@@ -1095,7 +1095,7 @@ fn delegate_find_signal<'a>(_: &mut VM<'a>, _: ClassRef<'a>, _: Option<Reference
             "TERM" => 15,
             _      => -1
         };
-        println!("Signal name: {} {}", name, result);
+        debug!("Signal name: {} {}", name, result);
         if result > 0{
             return non_failing_some(Value::Integer(result))
         }
