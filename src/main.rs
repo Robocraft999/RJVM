@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+use std::env;
 use std::fmt::{Debug, Formatter};
 use std::io::Read;
 use std::str::FromStr;
@@ -81,14 +83,14 @@ fn init_system(vm: &mut VM) -> Result<(), VmError>{
     Ok(())
 }
 
-fn run_and_catch_method<'a>(vm: &'a mut VM<'a>, class_name: &str, method_name: &str, method_descriptor: &str){
+fn run_and_catch_method<'a>(vm: &'a mut VM<'a>, class_name: &str, method_name: &str, method_descriptor: &str, args: Vec<Value<'a>>){
     if let VMResultType::NeedsClassInit(classes, _) = vm.get_or_resolve_class(class_name).unwrap().clone(){
         for frame in classes{
             vm.invoke_frame(frame).unwrap();
         }
     }
     let main_method = vm.try_resolve_class_method(class_name, method_name, method_descriptor).unwrap();
-    let result = vm.invoke_new_frame(main_method, None, vec![Value::Null]);
+    let result = vm.invoke_new_frame(main_method, None, args);
     match result {
         Ok(res) => {
             println!("result: {res:?}");
@@ -141,7 +143,11 @@ fn main() {
 
     //vm.class_manager.get_or_resolve_class("Empty").expect("TODO: panic message");
     //run_and_catch_method(&mut vm, "Test", "main", "([Ljava/lang/String;)V");
-    run_and_catch_method(&mut vm, "logicsim/App", "main", "([Ljava/lang/String;)V");
+    //run_and_catch_method(&mut vm, "logicsim/App", "main", "([Ljava/lang/String;)V");
+    let args = env::args().skip(1).map(|s| Value::Reference(vm.try_new_string_object(s).unwrap())).collect();
+    let args_array = vm.try_new_array(1, FieldType::Object("java/lang/String".to_string()).to_array_field_type(1), RefCell::new(args)).unwrap();
+    let p_args = vec![Value::Reference(args_array)];
+    run_and_catch_method(&mut vm, "de/klassenserver7b/k7bot/Main", "main", "([Ljava/lang/String;)V", p_args);
 
     //parse_class_file(&class_path, "java/lang/Exception");
 
