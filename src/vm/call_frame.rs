@@ -548,8 +548,10 @@ impl<'a> CallFrame<'a>{
                             }
                         })?}
                         Instruction::LADD => { self.execute_j_arithmetic(|val1, val2| Ok(val1.wrapping_add(val2)))? }
+                        Instruction::LSUB => { self.execute_j_arithmetic(|val1, val2| Ok(val1.wrapping_sub(val2)))? }
                         Instruction::LMUL => { self.execute_j_arithmetic(|val1, val2| Ok(val1.wrapping_mul(val2)))? }
                         Instruction::LAND => { self.execute_j_arithmetic(|val1, val2| Ok(val1 & val2))? },
+                        Instruction::LOR =>  { self.execute_j_arithmetic(|val1, val2| Ok(val1 | val2))? }
                         Instruction::LXOR => { self.execute_j_arithmetic(|val1, val2| Ok(val1 ^ val2))? }
                         Instruction::LUSHR => { self.execute_ji_arithmetic(|val1, val2| {
                             if val1 > 0{
