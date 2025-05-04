@@ -65,10 +65,15 @@ impl<'a> CallStack<'a> {
     }
 
     pub fn create_call_frame<'frame>(class_and_method: ClassAndMethod<'frame>, object: Option<Reference<'frame>>, args: Vec<Value<'frame>>) -> CallFrame<'frame> {
+        let mut offset = 0;
         for (i, arg) in class_and_method.method.descriptor.args.iter().enumerate() {
-            let arg1 = args.get(i).unwrap();
+            let mut arg1 = args.get(i + offset).unwrap();
+            if arg1 == &Value::Dummy {
+                offset += 1;
+                arg1 = args.get(i + offset).unwrap();
+            }
             if let FieldType::Object(class_name) = arg{
-                if arg1 == &Value::Null || arg1 == &Value::Dummy{
+                if arg1 == &Value::Null{
                     continue
                 }
                 if let Value::Reference(reference) = arg1{
