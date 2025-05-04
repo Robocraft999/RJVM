@@ -2,12 +2,13 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
 use std::rc::Rc;
+use std::str::FromStr;
 use log::{debug, error, info, trace, warn};
 use crate::attribute::ProgramCounter;
 use crate::bytecode::{Instruction, parse_instruction, printable_instructions};
 use crate::class_file::get_constant_printable;
 use crate::constants::ConstantPoolEntry;
-use crate::field_info::{FieldType, PrimitiveType};
+use crate::field_info::{extract_component_type_from_array_class, FieldType, PrimitiveType};
 use crate::get_or_init;
 use crate::method_info::MethodDescriptor;
 use crate::vm::java_error::JavaError;
@@ -166,7 +167,7 @@ impl<'a> CallFrame<'a>{
                             let class_name = self.class_and_method.get_constant_utf8(index).unwrap();
                             debug!("ANEWARRAY {}[{}]", class_name, count);
                             let array_content = vec![Value::Null; count as usize];
-                            let result = vm.new_array(1, FieldType::Object(class_name), RefCell::new(array_content))?;
+                            let result = vm.new_array(1, FieldType::Object(class_name).to_array_field_type(1), RefCell::new(array_content))?;
                             let array = Value::Reference(match result {
                                 VMResultType::Ok(value) => value,
                                 VMResultType::NeedsClassInit(classes, reenter) => {
@@ -175,6 +176,13 @@ impl<'a> CallFrame<'a>{
                                 }
                                 _ => unreachable!("[ANEWARRAY] got unexpected result: {:?}", result)
                             });
+                            self.stack.push(array);
+                        }
+                        Instruction::MULTIANEWARRAY(index, dimensions) => {
+                            let class_name = self.class_and_method.get_constant_utf8(index).unwrap();
+                            let array_field_type = FieldType::from_str(class_name.as_str())?;
+                            let array = get_or_init!(self.execute_create_array(vm, array_field_type, dimensions as usize)?);
+                            debug!("MULTIANEWARRAY {}", class_name);
                             self.stack.push(array);
                         }
                         Instruction::NEWARRAY(atype) => {
@@ -192,7 +200,7 @@ impl<'a> CallFrame<'a>{
                             let count = self.pop_int()?;
                             debug!("NEWARRAY {:?}[{}]", primitive_type, count);
                             let array_content = vec![Value::Null; count as usize];
-                            let result = vm.new_array(1, primitive_type, RefCell::new(array_content))?;
+                            let result = vm.new_array(1, primitive_type.to_array_field_type(1), RefCell::new(array_content))?;
                             let array = Value::Reference(match result {
                                 VMResultType::Ok(value) => value,
                                 VMResultType::NeedsClassInit(classes, reenter) => {
@@ -957,6 +965,36 @@ impl<'a> CallFrame<'a>{
         let value = self.pop_int().unwrap();
         if cmp(value){
             self.pc.0 = offset;
+        }
+    }
+
+    fn execute_create_array(&mut self, vm: &mut VM<'a>, array_field_type: FieldType, dims: usize) -> VMPartialResult<'a, Value<'a>>{
+        if let FieldType::Array(_, component_type) = array_field_type{
+            //ensure that the array class get loaded before popping the count(s)
+            for i in 0..dims{
+                let _ = get_or_init!(vm.get_or_resolve_class(component_type.clone().to_array_field_type(i+1).to_class_name().as_str())?);
+            }
+            let mut content = Vec::new();
+            for i in 0..dims{
+                let current_dim = self.pop_int()?;
+                if current_dim == 0{
+                    break;
+                }
+                let mut local_content = Vec::new();
+                if i == 0{
+                    local_content = vec![component_type.get_default_value(); current_dim as usize];
+                    content = local_content;
+                    continue
+                }
+                for _ in 0..current_dim{
+                    local_content.push(Value::Reference(vm.try_new_array(dims, component_type.clone().to_array_field_type(i), RefCell::new(content.clone()))?))
+                }
+                content = local_content;
+            }
+            //FIXME component_type.to_array_field_type(dims) is just array_field_type
+            Ok(VMResultType::Ok(Value::Reference(vm.try_new_array(dims, component_type.to_array_field_type(dims), RefCell::new(content))?)))
+        } else {
+            Err(VmError::ValidationError(format!("Field type for creating an array must be FieldType::Array but is {:?}", array_field_type)))
         }
     }
 

@@ -202,7 +202,7 @@ pub fn parse_class_file(bytes: Vec<u8>, class_name: &str) -> Result<ClassFile, C
         let flags = parse_field_flags(parse_u2(&mut bytes)?);
         let name = get_constant_printable(&constant_pool, parse_u2(&mut bytes)?);
         let descriptor = get_constant_printable(&constant_pool, parse_u2(&mut bytes)?);
-        let field_type = field_type_from_str(descriptor.as_str());
+        let field_type = FieldType::from_str(descriptor.as_str())?;
         let attributes_count = parse_u2(&mut bytes)?;
         let mut attributes = Vec::new();
         let mut deprecated = false;

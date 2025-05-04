@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::time::{SystemTime, UNIX_EPOCH};
 use log::{debug, trace, warn};
-use crate::field_info::{field_type_from_str, get_class_descriptor, FieldType, PrimitiveType};
+use crate::field_info::{get_class_descriptor, FieldType, PrimitiveType};
 use crate::get_or_init;
 use crate::method_info::MethodDescriptor;
 use crate::vm::class::{ClassAndMethod, ClassId, ClassRef};
@@ -320,7 +320,7 @@ fn delegate_get_declared_fields0<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, class_obj
                 }
             }
         }
-        non_failing_some(Value::Reference(get_or_init!(vm.new_array(1, FieldType::Object("java/lang/reflect/Field".to_string()), RefCell::new(content))?)))
+        non_failing_some(Value::Reference(get_or_init!(vm.new_array(1, FieldType::Object("java/lang/reflect/Field".to_string()).to_array_field_type(1), RefCell::new(content))?)))
     } else {
         //FIXME i dont know if this should be none
         non_failing_none()
@@ -351,10 +351,10 @@ fn delegate_get_declared_constructors0<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, cla
                 }
             }
             //parameterTypes
-            java_constructor.set_field(6, Value::Reference(get_or_init!(vm.new_array(1, FieldType::Object("java/lang/Class".to_string()), RefCell::new(parameters))?)));
+            java_constructor.set_field(6, Value::Reference(get_or_init!(vm.new_array(1, FieldType::Object("java/lang/Class".to_string()).to_array_field_type(1), RefCell::new(parameters))?)));
             
             //exceptionTypes
-            java_constructor.set_field(7, Value::Reference(get_or_init!(vm.new_array(1, FieldType::Object("java/lang/Class".to_string()), RefCell::new(exceptions))?)));
+            java_constructor.set_field(7, Value::Reference(get_or_init!(vm.new_array(1, FieldType::Object("java/lang/Class".to_string()).to_array_field_type(1), RefCell::new(exceptions))?)));
 
             let flags = constructor.flags.iter().map(|flag| flag.clone() as u16).reduce(|flag1, flag2| flag1 | flag2).unwrap_or(0);
             //modifiers
@@ -362,7 +362,7 @@ fn delegate_get_declared_constructors0<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, cla
 
             content.push(Value::Reference(java_constructor));
         }
-        non_failing_some(Value::Reference(get_or_init!(vm.new_array(1, FieldType::Object("java/lang/reflect/Constructor".to_string()), RefCell::new(content))?)))
+        non_failing_some(Value::Reference(get_or_init!(vm.new_array(1, FieldType::Object("java/lang/reflect/Constructor".to_string()).to_array_field_type(1), RefCell::new(content))?)))
     } else {
         Err(VmError::ValidationError("Expected Class object".to_string()))
     }
@@ -533,9 +533,9 @@ fn delegate_clone<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, reference: Option<Refere
     debug!("clone");
     if let Some(obj) = reference{
         if obj.is_array(){
-            if let ReferenceType::Array(dims, field_type, content) = &obj.reference_type{
+            if let ReferenceType::Array(dims, component_type, content) = &obj.reference_type{
                 debug!("Cloning array: {:?}", reference);
-                let new_array = Value::Reference(get_or_init!(vm.new_array(*dims, field_type.clone(), content.clone())?));
+                let new_array = Value::Reference(get_or_init!(vm.new_array(*dims, component_type.clone().to_array_field_type(*dims), content.clone())?));
                 non_failing_some(new_array)
             } else {
                 Err(VmError::ValidationError("Expected array to be cloned".to_string()))

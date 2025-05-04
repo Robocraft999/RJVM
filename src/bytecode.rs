@@ -135,6 +135,7 @@ pub fn parse_instruction(code_bytes: &Vec<u8>, mut pc: usize) -> Result<(Instruc
             ALOAD(_) => ALOAD(parse_u1(code_bytes, &mut pc)?),
             NEW(_) => NEW(parse_u2(code_bytes, &mut pc)?),
             ANEWARRAY(_) => ANEWARRAY(parse_u2(code_bytes, &mut pc)?),
+            MULTIANEWARRAY(_, _) => MULTIANEWARRAY(parse_u2(code_bytes, &mut pc)?, parse_u1(code_bytes, &mut pc)?),
             NEWARRAY(_) => NEWARRAY(parse_u1(code_bytes, &mut pc)?),
             IINC(_, _) => IINC(parse_u1(code_bytes, &mut pc)?, parse_i1(code_bytes, &mut pc)?),
             CHECKCAST(_) => CHECKCAST(parse_u2(code_bytes, &mut pc)?),

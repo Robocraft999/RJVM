@@ -425,29 +425,17 @@ impl<'a> VM<'a>{
         self.static_class_objects.get(&id).cloned()
     }
 
-    pub fn new_array(&mut self, dims: usize, field_type: FieldType, content: RefCell<Vec<Value<'a>>>) -> VMPartialResult<'a, Reference<'a>>{
-        let class_name = match field_type.clone(){
-            FieldType::Object(class_name) => {
-                "[L".to_string() + &class_name + ";"
-            }
-            FieldType::Primitive(primitive_type) => {
-                "[".to_string() + match primitive_type {
-                    PrimitiveType::Boolean => "Z",
-                    PrimitiveType::Byte => "B",
-                    PrimitiveType::Char => "C",
-                    PrimitiveType::Short => "S",
-                    PrimitiveType::Integer => "I",
-                    PrimitiveType::Long => "J",
-                    PrimitiveType::Float => "F",
-                    PrimitiveType::Double => "D",
-                }
-            }
+    pub fn new_array(&mut self, dims: usize, array_field_type: FieldType, content: RefCell<Vec<Value<'a>>>) -> VMPartialResult<'a, Reference<'a>>{
+        let (class_name, component_type) = if let FieldType::Array(class_name, component_type) = array_field_type {
+            (class_name, component_type)
+        } else {
+            unreachable!("The field type for creating an array has to be an array field type")
         };
-        get_or_init_special!(self.get_or_resolve_class(class_name.as_str())?, |class| Ok(VMResultType::Ok(self.object_allocator.allocate_array(class, dims, field_type, content))))
+        get_or_init_special!(self.get_or_resolve_class(class_name.as_str())?, |class| Ok(VMResultType::Ok(self.object_allocator.allocate_array(class, dims, *component_type, content))))
     }
 
-    pub fn try_new_array(&mut self, dims: usize, field_type: FieldType, content: RefCell<Vec<Value<'a>>>) -> VMResult<Reference<'a>>{
-        let result = self.new_array(dims, field_type, content)?;
+    pub fn try_new_array(&mut self, dims: usize, array_field_type: FieldType, content: RefCell<Vec<Value<'a>>>) -> VMResult<Reference<'a>>{
+        let result = self.new_array(dims, array_field_type, content)?;
         if let VMResultType::Ok(object) = result {
             Ok(object)
         } else {
@@ -472,7 +460,7 @@ impl<'a> VM<'a>{
         let char_array: Vec<Value<'a>> = string.chars().map(|c| Value::Integer(c as i32)).collect();
         let char_array = RefCell::new(char_array);
 
-        let char_array = Value::Reference(get_or_init!(self.new_array(1, FieldType::Primitive(PrimitiveType::Char), char_array)?));
+        let char_array = Value::Reference(get_or_init!(self.new_array(1, FieldType::Primitive(PrimitiveType::Char).to_array_field_type(1), char_array)?));
 
         let string_object = get_or_init!(self.new_object("java/lang/String")?);
 

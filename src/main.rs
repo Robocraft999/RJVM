@@ -13,7 +13,7 @@ use crate::bytes::{parse_u1, parse_u2, parse_u4, parse_u8};
 use crate::class_file_version::ClassFileVersion;
 use crate::constants::*;
 use crate::error::ClassParseError;
-use crate::field_info::{field_type_from_str, FieldInfo};
+use crate::field_info::{FieldInfo, FieldType};
 use crate::method_info::{MethodDescriptor, MethodInfo};
 use crate::vm::{VM, VmError};
 use crate::vm::class::{ClassAndMethod, ClassRef};
