@@ -67,6 +67,7 @@ pub fn register_all_natives(registry: &mut NativeMethodRegistry){
     registry.register("java/lang/System", "currentTimeMillis", "()J", delegate_millis_time);
     registry.register("java/lang/System", "identityHashCode", "(Ljava/lang/Object;)I", delegate_identity_hash_code);
     registry.register("java/lang/System", "setOut0", "(Ljava/io/PrintStream;)V", delegate_set_out);
+    registry.register("java/lang/System", "setErr0", "(Ljava/io/PrintStream;)V", delegate_set_err);
     registry.register("java/lang/System", "arraycopy", "(Ljava/lang/Object;ILjava/lang/Object;II)V", delegate_arraycopy);
     registry.register("java/lang/System", "initProperties", "(Ljava/util/Properties;)Ljava/util/Properties;", delegate_init_system_props);
     registry.register("java/lang/System", "mapLibraryName", "(Ljava/lang/String;)Ljava/lang/String;", delegate_system_map_library_name);
@@ -133,6 +134,8 @@ pub fn register_all_natives(registry: &mut NativeMethodRegistry){
     registry.register("rjvm/io/WinFileSystem",  "getBooleanAttributes0", "(Ljava/io/File;)I", delegate_get_boolean_attribute);
     registry.register("rjvm/io/WinFileSystem", "canonicalize0", "(Ljava/lang/String;)Ljava/lang/String;", delegate_canonicalize0);
     registry.register("rjvm/io/WinFileSystem", "getFinalPath0", "(Ljava/lang/String;)Ljava/lang/String;", delegate_get_final_path0);
+    registry.register("sun/nio/fs/UnixNativeDispatcher", "init", "()I", delegate_init_unix_fs_dispatcher);
+    registry.register("sun/nio/fs/UnixNativeDispatcher", "getcwd", "()[B", delegate_getcwd);
     registry.register("sun/misc/VM", "initialize", "()V", delegate_init_vm);
     registry.register("java/util/concurrent/atomic/AtomicLong", "VMSupportsCS8", "()Z", delegate_vm_supports_cs8);
     registry.register("sun/misc/Signal", "findSignal", "(Ljava/lang/String;)I", delegate_find_signal);
@@ -172,6 +175,19 @@ fn delegate_identity_hash_code<'a>(_: &mut VM<'a>, _ : ClassRef<'a>, _: Option<R
 }
 
 fn delegate_set_out<'a>(vm: &mut VM<'a>, class : ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
+    if let Some(static_object) = vm.get_static_class_object(class.id){
+        if let Some(Value::Reference(object)) = args.get(0){
+            static_object.set_field(1, Value::Reference(object));
+            non_failing_none()
+        } else {
+            Err(VmError::ValidationError(format!("Expected Object but found '{:?}'", args.get(0))))
+        }
+    } else {
+        Err(VmError::ValidationError(format!("Couldn't find static Object of class {}", class.name)))
+    }
+}
+
+fn delegate_set_err<'a>(vm: &mut VM<'a>, class : ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
     if let Some(static_object) = vm.get_static_class_object(class.id){
         if let Some(Value::Reference(object)) = args.get(0){
             static_object.set_field(2, Value::Reference(object));
@@ -1038,6 +1054,18 @@ fn delegate_get_final_path0<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, _: Option<Refe
     } else {
         Err(VmError::ValidationError("Can't getFinalPath0 with 0 arguments".to_string()))
     }
+}
+
+fn delegate_init_unix_fs_dispatcher<'a>(_: &mut VM<'a>, _: ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
+    non_failing_some(Value::Integer(0))
+}
+
+fn delegate_getcwd<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
+    let current_working_dir = env::current_dir().unwrap();
+    debug!("getcwd -> '{}'", current_working_dir.display());
+    let bytes = current_working_dir.into_os_string().as_encoded_bytes().iter().map(|b| Value::Integer(*b as i32)).collect::<Vec<_>>();
+    let path_ref = get_or_init!(vm.new_array(1, FieldType::Primitive(PrimitiveType::Byte).to_array_field_type(1), RefCell::new(bytes))?);
+    non_failing_some(Value::Reference(path_ref))
 }
 
 fn delegate_init_vm<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, object: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
