@@ -4,6 +4,7 @@ use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::time::{SystemTime, UNIX_EPOCH};
+use libloading::{library_filename, Library, Symbol};
 use log::{debug, trace, warn};
 use crate::field_info::{get_class_descriptor, FieldType, PrimitiveType};
 use crate::get_or_init;
@@ -500,7 +501,22 @@ fn delegate_find_bootstrap_class<'a>(vm: &mut VM<'a>,  _: ClassRef<'a>, _: Optio
 fn delegate_native_lib_load<'a>(vm: &mut VM<'a>,  _: ClassRef<'a>, object: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
     debug!("nativeLib::load {:?}", object);
     if let Some(obj) = object {
+        //handle
         obj.set_field(0, Value::Long(1));
+        let name_field = obj.get_field(3);//args.get(0).unwrap();
+        let name = VM::extract_string_from_object(&name_field)?;
+        println!("name: {name}");
+
+        unsafe {
+            let lib_name = name;
+            //let lib_name = library_filename(name);
+            println!("name: {lib_name:?}");
+            let lib = Library::new(lib_name).unwrap(); // Load the "hello_world" library
+            let func: Symbol<fn()> = lib.get(b"JNI_OnLoad").unwrap(); // Get the function pointer
+
+            func() // Call the function
+        }
+
         non_failing_none()
     } else {
         Err(VmError::ValidationError("this is null".to_string()))
