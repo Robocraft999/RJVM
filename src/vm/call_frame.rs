@@ -12,7 +12,7 @@ use crate::field_info::{extract_component_type_from_array_class, FieldType, Prim
 use crate::get_or_init;
 use crate::method_info::MethodDescriptor;
 use crate::vm::java_error::JavaError;
-use crate::vm::{VM, VmError};
+use crate::vm::{bytecode, VmError, VM};
 use crate::vm::callstack::CallStack;
 use crate::vm::class::{ClassAndMethod, ClassRef};
 use crate::vm::result::{VMPartialResult, VMResultType};
@@ -34,6 +34,7 @@ impl<'a> CallFrame<'a>{
             for class in vm.class_manager.classes.iter_mut(){
                 //println!("{class:?}");
             }
+            bytecode::get_blocks(&code.code);
             info!("");
             info!("METHOD_NAME: {}.{}{}", self.class_and_method.class.name, self.class_and_method.method.name, self.class_and_method.method.descriptor.as_str());
             info!("{:?}", printable_instructions(&code.code));

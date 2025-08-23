@@ -40,6 +40,7 @@ mod gc;
 mod java_native_method_impl;
 mod r#unsafe;
 pub mod result;
+mod bytecode;
 
 pub struct VM<'a>{
     pub class_manager: ClassManager<'a>,

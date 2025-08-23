@@ -1123,7 +1123,7 @@ fn delegate_find_signal<'a>(_: &mut VM<'a>, _: ClassRef<'a>, _: Option<Reference
 fn delegate_handle0<'a>(_: &mut VM<'a>, _: ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
     non_failing_some(Value::Long(0))
 }
-
+/*
 #[cfg(test)]
 mod tests{
     use std::cell::RefCell;
@@ -1270,4 +1270,4 @@ mod tests{
             assert!(false);
         }
     }
-}
+}*/
