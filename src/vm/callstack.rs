@@ -1,5 +1,8 @@
 use std::cell::RefCell;
 use log::{trace, warn};
+use crate::attribute::{Code, ExceptionTable, VisibleRuntimeAnnotations};
+use crate::bytecode::Instruction;
+use crate::constants::ConstantPool;
 use super::call_frame::CallFrame;
 use crate::VM;
 use crate::Value;
@@ -7,7 +10,10 @@ use crate::VmError;
 use crate::vm::ClassAndMethod;
 use crate::vm::info;
 use crate::error;
+use crate::field_info::FieldType;
+use crate::method_info::{MethodDescriptor, MethodInfo};
 use crate::ProgramCounter;
+use crate::vm::class::{Class, ClassId, ClassRef};
 use crate::vm::result::{VMPartialResult, VMResult, VMResultType};
 use crate::vm::value::Reference;
 
@@ -26,7 +32,59 @@ impl<'a> CallStack<'a> {
         }
     }
 
-    pub fn create_call_frame<'frame>(class_and_method: ClassAndMethod<'frame>, object: Option<Reference<'frame>>, args: Vec<Value<'frame>>) -> VMResult<CallFrame<'frame>> {
+    pub fn create_returning_frame<'frame>(class: ClassRef<'frame>, object: Value<'frame>) -> CallFrame<'frame> {
+        let method = &class.methods[0];
+        let class_and_method = ClassAndMethod {
+            class,
+            method,
+        };
+        let locals = Vec::new();
+        CallFrame{
+            class_and_method,
+            locals,
+            pc: ProgramCounter(0),
+            last_pc: ProgramCounter(0),
+            stack: vec![object]
+        }
+    }
+    
+    pub fn create_throwing_frame<'frame>(class: ClassRef<'frame>, object: Value<'frame>) -> CallFrame<'frame> {
+        let method = &class.methods[1];
+        let class_and_method = ClassAndMethod {
+            class,
+            method,
+        };
+        let locals = Vec::new();
+        CallFrame{
+            class_and_method,
+            locals,
+            pc: ProgramCounter(0),
+            last_pc: ProgramCounter(0),
+            stack: vec![object]
+        }
+    }
+
+    pub fn create_call_frame<'frame>(class_and_method: ClassAndMethod<'frame>, object: Option<Reference<'frame>>, args: Vec<Value<'frame>>) -> CallFrame<'frame> {
+        let mut offset = 0;
+        for (i, arg) in class_and_method.method.descriptor.args.iter().enumerate() {
+            let mut arg1 = args.get(i + offset).unwrap();
+            if arg1 == &Value::Dummy {
+                offset += 1;
+                arg1 = args.get(i + offset).unwrap();
+            }
+            if let FieldType::Object(class_name) = arg{
+                if arg1 == &Value::Null{
+                    continue
+                }
+                if let Value::Reference(reference) = arg1{
+                    /*if &reference.class_name != class_name{
+                        panic!("Wrong class name!: {}, expected: {}", reference.class_name, class_name);
+                    }*/
+                } else {
+                    panic!("Wrong argument type for {} [{}, off({})]!: {:?}, expected: {}\nfull args: {:?}", class_and_method.format(), i, offset, arg1, class_name, args);
+                }
+            }
+        }
         let locals = if !class_and_method.method.is_native(){
             let mut empty_locals = vec![Value::Uninitialized; class_and_method.get_max_locals()];
             for i in 0..args.len(){
@@ -57,12 +115,13 @@ impl<'a> CallStack<'a> {
         assert_eq!(args_amount, class_and_method.method.get_args_count(), "Args has not the correct length (was {}, expected {})", args_amount, class_and_method.method.get_args_count());
         info!("NEW CALL FRAME with {:?} locals, \nobject=({:?}), \nargs=({:?}), \nmax_locals=[{}]", locals, object, args, class_and_method.get_max_locals());
 
-        Ok(CallFrame{
+        CallFrame{
             class_and_method,
             locals,
             pc: ProgramCounter(0),
+            last_pc: ProgramCounter(0),
             stack: Vec::new()
-        })
+        }
     }
 
     pub fn push_call_frame(&mut self, call_frame: CallFrame<'a>){
@@ -77,12 +136,19 @@ impl<'a> CallStack<'a> {
         //let last_frame = self.frames.last().unwrap();
         self.frames_infos.push(format!("{:?} {}", call_frame.pc, call_frame.class_and_method.format()));
         self.frames.push(call_frame);
-        error!("PUSH {:?}", self.frames.last().unwrap());
+        info!("PUSH {:?}", self.frames.last().unwrap());
+        if self.frames.len() > 200{
+            for (index, call_frame_info) in self.frames.iter().enumerate(){
+                //error!("[{}]: {:?}, stack={}, locals={}", index, call_frame.pc, call_frame.stack, call_frame.locals);
+                println!("[{}]: {:?}", index, call_frame_info);
+            }
+            panic!("Stack overflow");
+        }
     }
 
     pub fn pop_call_frame(&mut self) -> CallFrame<'a>{
         //self.frames.pop();
-        error!("POP  {:?}", self.frames.last().unwrap());
+        info!("POP  {:?}", self.frames.last().unwrap());
         self.frames_infos.pop();
         self.frames.pop().unwrap()
     }
@@ -144,15 +210,23 @@ impl<'a> CallStack<'a> {
                     self.push_call_frame(frame);
                     Ok(VMResultType::ExceptionThrown(error, throwable))
                 }
+                VMResultType::NeedsClassInit(frames, reenter) => {
+                    trace!("et execution returned NeedsClassInit, returning frames {:?}", frames);
+                    frame.pc = frame.last_pc.clone();
+                    if reenter {
+                        self.push_call_frame(frame);
+                    }
+                    Ok(VMResultType::NeedsClassInit(frames, reenter))
+                }
             }
             //Ok(res)
         }
     }
 
     pub fn print_call_stack(&self) {
-        for (index, call_frame_info) in self.frames_infos.iter().enumerate(){
+        for (index, call_frame_info) in self.frames.iter().enumerate(){
             //error!("[{}]: {:?}, stack={}, locals={}", index, call_frame.pc, call_frame.stack, call_frame.locals);
-            warn!("[{}]: {}", index, call_frame_info);
+            warn!("[{}]: {:?}", index, call_frame_info);
         }
     }
 }

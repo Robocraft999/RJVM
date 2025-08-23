@@ -1,7 +1,7 @@
 use std::fmt::{Debug, Formatter};
 
 use crate::access_flags::{ClassFlag, ClassFlags};
-use crate::attribute::VisibleRuntimeAnnotations;
+use crate::attribute::{BootstrapMethods, VisibleRuntimeAnnotations};
 use crate::constants::{ConstantPool, ConstantPoolEntry};
 use crate::field_info::{FieldInfo, FieldType, PrimitiveType};
 use crate::method_info::MethodInfo;
@@ -19,6 +19,7 @@ pub struct Class<'a>{
     pub fields: Vec<FieldInfo>,
     pub methods: Vec<MethodInfo>,
     pub annotations: VisibleRuntimeAnnotations,
+    pub bootstrap_methods: BootstrapMethods,
     pub transitive_field_count: usize,
     pub first_field_index: usize,
     pub array_info: Option<ArrayInfo>
@@ -87,21 +88,7 @@ impl<'a> Class<'a>{
                 if let Some(constant_value) = field.constant_value.clone(){
                     self.get_constant_as_value(constant_value.constant_index)
                 } else {
-                    match &field.field_type{
-                        FieldType::Primitive(primitive) => {
-                            match primitive {
-                                PrimitiveType::Boolean => Value::Integer(0),
-                                PrimitiveType::Byte => Value::Integer(0),
-                                PrimitiveType::Short => Value::Integer(0),
-                                PrimitiveType::Integer => Value::Integer(0),
-                                PrimitiveType::Long => Value::Long(0),
-                                PrimitiveType::Float => Value::Float(0f32),
-                                PrimitiveType::Double => Value::Double(0f64),
-                                PrimitiveType::Char => Value::Integer(0),
-                            }
-                        }
-                        FieldType::Object(_) => Value::Null,
-                    }
+                    field.field_type.get_default_value()
                 }
             });
         let mut superclass_values = match self.superclass {

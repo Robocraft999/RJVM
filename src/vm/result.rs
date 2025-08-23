@@ -10,6 +10,7 @@ pub enum VMResultType<'f, T> {
     Ok(T),
     CallPaused(CallFrame<'f>),
     ExceptionThrown(VmError, Value<'f>),
+    NeedsClassInit(Vec<CallFrame<'f>>, bool)
 }
 
 impl<'a, T> VMResultType<'a, T> {

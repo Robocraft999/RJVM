@@ -2,12 +2,14 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
 use std::rc::Rc;
+use std::str::FromStr;
 use log::{debug, error, info, trace, warn};
 use crate::attribute::ProgramCounter;
 use crate::bytecode::{Instruction, parse_instruction, printable_instructions};
 use crate::class_file::get_constant_printable;
 use crate::constants::ConstantPoolEntry;
-use crate::field_info::{FieldType, PrimitiveType};
+use crate::field_info::{extract_component_type_from_array_class, FieldType, PrimitiveType};
+use crate::get_or_init;
 use crate::method_info::MethodDescriptor;
 use crate::vm::java_error::JavaError;
 use crate::vm::{VM, VmError};
@@ -21,6 +23,7 @@ pub struct CallFrame<'a>{
     pub class_and_method: ClassAndMethod<'a>,
     pub locals: Vec<Value<'a>>,
     pub pc: ProgramCounter,
+    pub last_pc: ProgramCounter,
     pub stack: Vec<Value<'a>>,
 }
 
@@ -37,6 +40,7 @@ impl<'a> CallFrame<'a>{
 
             loop {
                 if let Ok((instruction, pc)) = parse_instruction(&code.code, self.pc.0 as usize) {
+                    self.last_pc = self.pc.clone();
                     self.pc = ProgramCounter(pc as u16);
                     trace!("{:?}", instruction);
                     trace!("stack=");
@@ -64,24 +68,24 @@ impl<'a> CallFrame<'a>{
                             let (class_name, field_name, descriptor) = self.class_and_method.get_constant_field_info_descriptor(index).expect("GIB MICH DIE FELD2");
                             //let (field_index, info) = self.class_and_method.class.find_field(field_name.as_str()).unwrap();
                             //let class = vm.class_manager.find_class_by_name(class_name.as_str()).unwrap();
-                            let class = vm.get_or_resolve_class(class_name.as_str())?;
+                            let class = get_or_init!(vm.get_or_resolve_class(class_name.as_str())?);
                             let (field_index, info, class_id) = class.find_field_static(field_name.as_str()).unwrap();
                             let object = vm.get_static_class_object(class_id).unwrap();
                             debug!("GETSTATIC {} {} {} {:?}", field_name, descriptor, field_index, info);
                             self.stack.push(object.get_field(field_index));
                         }
                         Instruction::LDC(index) => {
-                            let value = self.get_constant_as_value(vm, index as u16)?;
+                            let value = get_or_init!(self.get_constant_as_value(vm, index as u16)?);
                             self.stack.push(value);
                             debug!("LDC: {:?}", get_constant_printable(constants, index as u16))
                         }
                         Instruction::LDCW(index) => {
-                            let value = self.get_constant_as_value(vm, index)?;
+                            let value = get_or_init!(self.get_constant_as_value(vm, index)?);
                             self.stack.push(value);
                             debug!("LDCW: {:?}", get_constant_printable(constants, index))
                         }
                         Instruction::LDC2W(index) => {
-                            let value = self.get_constant_as_value(vm, index)?;
+                            let value = get_or_init!(self.get_constant_as_value(vm, index)?);
                             self.stack.push(value);
                             debug!("LDC2W: {}", get_constant_printable(constants, index))
                         }
@@ -90,7 +94,7 @@ impl<'a> CallFrame<'a>{
                             let target_class = if class_name == self.class_and_method.class.name {
                                 self.class_and_method.class
                             } else {
-                                vm.get_or_resolve_class(class_name.as_str())?
+                                get_or_init!(vm.get_or_resolve_class(class_name.as_str())?)
                             };
                             let (field_index, info) = target_class.find_field(field_name.as_str()).unwrap();
                             debug!("PUTFIELD {}.{} {} {} {:?}", class_name, field_name, descriptor, field_index, info);
@@ -109,7 +113,7 @@ impl<'a> CallFrame<'a>{
                             let target_class = if class_name == self.class_and_method.class.name {
                                 self.class_and_method.class
                             } else {
-                                vm.get_or_resolve_class(class_name.as_str())?
+                                get_or_init!(vm.get_or_resolve_class(class_name.as_str())?)
                             };
                             let (field_index, _) = target_class.find_field(field_name.as_str()).unwrap();
                             let object = self.stack.pop().unwrap();
@@ -123,21 +127,38 @@ impl<'a> CallFrame<'a>{
                         Instruction::INVOKESPECIAL(index) => { return self.execute_invoke(vm, index, InvokeKind::SPECIAL) }
                         Instruction::INVOKESTATIC(index) => { return self.execute_invoke(vm, index, InvokeKind::STATIC) }
                         Instruction::INVOKEINTERFACE(index, _, _) => { return self.execute_invoke(vm, index, InvokeKind::INTERFACE) }
+                        Instruction::INVOKEDYNAMIC(index, _, _) => {
+                            println!("{}", index);
+                            let reference = get_or_init!(self.get_constant_as_value(vm, index)?);
+                            println!("{:?}", reference);
+                            println!();
+                            unimplemented!("INVOKEDYNAMIC is not supported yet");
+                        }
 
                         Instruction::RETURN => {
                             info!("RETURN");
                             return Ok(VMResultType::Ok(None));
                         }
-                        Instruction::IRETURN | Instruction::LRETURN | Instruction::FRETURN | Instruction::DRETURN | Instruction::ARETURN=> {
+                        Instruction::IRETURN | Instruction::LRETURN | Instruction::FRETURN | Instruction::DRETURN=> {
                             //TODO check for types
-                            let value = self.stack.pop();
+                            let value = self.stack.pop().unwrap();
                             info!("RETURN {:?}", value);
-                            return Ok(VMResultType::Ok(value));
+                            return Ok(VMResultType::Ok(Some(value)));
+                        }
+                        Instruction::ARETURN => {
+                            let value = self.stack.pop().unwrap();
+                            return if let Value::Reference(reference) = value {
+                                Ok(VMResultType::Ok(Some(Value::Reference(reference))))
+                            } else if value == Value::Null {
+                                Ok(VMResultType::Ok(Some(Value::Null)))
+                            } else {
+                                Err(VmError::ValidationError(format!("Tried to return a value of type: {:?} but expected reference", value)))
+                            }
                         }
                         Instruction::NEW(index) => {
                             let class_name = self.class_and_method.get_constant_utf8(index).unwrap();
                             //let res = vm.invoke_method(class_name.as_str(), "<init>", "()V")?;
-                            let new_object = vm.new_object(class_name.as_str())?;
+                            let new_object = get_or_init!(vm.new_object(class_name.as_str())?);
 
                             debug!("NEW: {} {} {:?}", index, get_constant_printable(constants, index), &new_object);
                             self.stack.push(Value::Reference(new_object));
@@ -147,7 +168,22 @@ impl<'a> CallFrame<'a>{
                             let class_name = self.class_and_method.get_constant_utf8(index).unwrap();
                             debug!("ANEWARRAY {}[{}]", class_name, count);
                             let array_content = vec![Value::Null; count as usize];
-                            let array = Value::Reference(vm.new_array(1, FieldType::Object(class_name), RefCell::new(array_content))?);
+                            let result = vm.new_array(1, FieldType::Object(class_name).to_array_field_type(1), RefCell::new(array_content))?;
+                            let array = Value::Reference(match result {
+                                VMResultType::Ok(value) => value,
+                                VMResultType::NeedsClassInit(classes, reenter) => {
+                                    self.stack.push(Value::Integer(count));
+                                    return Ok(VMResultType::NeedsClassInit(classes, reenter));
+                                }
+                                _ => unreachable!("[ANEWARRAY] got unexpected result: {:?}", result)
+                            });
+                            self.stack.push(array);
+                        }
+                        Instruction::MULTIANEWARRAY(index, dimensions) => {
+                            let class_name = self.class_and_method.get_constant_utf8(index).unwrap();
+                            let array_field_type = FieldType::from_str(class_name.as_str())?;
+                            let array = get_or_init!(self.execute_create_array(vm, array_field_type, dimensions as usize)?);
+                            debug!("MULTIANEWARRAY {}", class_name);
                             self.stack.push(array);
                         }
                         Instruction::NEWARRAY(atype) => {
@@ -165,7 +201,15 @@ impl<'a> CallFrame<'a>{
                             let count = self.pop_int()?;
                             debug!("NEWARRAY {:?}[{}]", primitive_type, count);
                             let array_content = vec![Value::Null; count as usize];
-                            let array = Value::Reference(vm.new_array(1, primitive_type, RefCell::new(array_content))?);
+                            let result = vm.new_array(1, primitive_type.to_array_field_type(1), RefCell::new(array_content))?;
+                            let array = Value::Reference(match result {
+                                VMResultType::Ok(value) => value,
+                                VMResultType::NeedsClassInit(classes, reenter) => {
+                                    self.stack.push(Value::Integer(count));
+                                    return Ok(VMResultType::NeedsClassInit(classes, reenter));
+                                }
+                                _ => unreachable!("[NEWARRAY] got unexpected result: {:?}", result)
+                            });
                             self.stack.push(array);
                         }
                         Instruction::ARRAYLENGTH => {
@@ -175,14 +219,15 @@ impl<'a> CallFrame<'a>{
                                 if let ReferenceType::Array(_, _, content) = &reference.reference_type{
                                     self.stack.push(Value::Integer(content.borrow().len() as i32));
                                 } else {
-                                    return VMPartialResult::Err(VmError::ValidationError("Expected an Array ref but found: Object ref".to_string()))
+                                    return Err(VmError::ValidationError("Expected an Array ref but found: Object ref".to_string()))
                                 }
                             } else if let Some(Value::Null) = popped{
-                                return VMPartialResult::Err(VmError::JavaException(JavaError::NullPointerException("Expected an array".to_string())))
+                                return Err(VmError::JavaException(JavaError::NullPointerException("Expected an array".to_string())))
                             } else {
-                                return VMPartialResult::Err(VmError::ValidationError(format!("Expected an array ref but found: {:?}", &popped)))
+                                return Err(VmError::ValidationError(format!("Expected an array ref but found: {:?}", &popped)))
                             }
                         }
+                        //TODO instead of popping try to copy and insert
                         Instruction::DUP => {
                             debug!("DUP");
                             let value = self.stack.pop().unwrap();
@@ -196,24 +241,44 @@ impl<'a> CallFrame<'a>{
                             self.stack.push(value);
                         }
                         Instruction::DUP2 => {
-                            let optional_value1 = self.stack.pop();
-                            let optional_value2 = self.stack.pop();
-                            if let (Some(value1), Some(value2)) = (optional_value1.clone(), optional_value2) {
-                                debug!("DUP2 Comp type 1");
+                            debug!("DUP2");
+                            let value1 = self.stack.pop().unwrap();
+                            if value1.get_computational_type() == 1{
+                                let value2 = self.stack.pop().unwrap();
                                 self.stack.push(value2.clone());
+                                self.stack.push(value2);
+                            }
+                            self.stack.push(value1.clone());
+                            self.stack.push(value1);
+                        }
+                        Instruction::DUP2X1 => {
+                            debug!("DUP2X1");
+                            let value1 = self.stack.pop().unwrap();
+                            let value2 = self.stack.pop().unwrap();
+                            if value1.get_computational_type() == 1{
+                                let value3 = self.stack.pop().unwrap();
+                                self.stack.push(value2.clone());
+                                self.stack.push(value1.clone());
+                                self.stack.push(value3);
+                                self.stack.push(value2);
+                                self.stack.push(value1);
+                            } else {
                                 self.stack.push(value1.clone());
                                 self.stack.push(value2);
                                 self.stack.push(value1);
-                            } else if let Some(value) = optional_value1{
-                                debug!("DUP2 Comp type 2");
-                                self.stack.push(value.clone());
-                                self.stack.push(value);
                             }
                         }
                         Instruction::POP => {
                             debug!("POP");
                             if self.stack.pop().is_none(){
-                                warn!("Expected a value to pop");
+                                return Err(VmError::ValidationError("Expected a value to pop but Stack was empty".to_string()));
+                            }
+                        }
+                        Instruction::POP2 => {
+                            debug!("POP2");
+                            let popped = self.stack.pop().unwrap();
+                            if popped.get_computational_type() == 1{
+                                self.stack.pop().unwrap();
                             }
                         }
                         Instruction::IF_ACMPNE(offset) => {
@@ -346,6 +411,17 @@ impl<'a> CallFrame<'a>{
                                 self.pc.0 = default as u16;
                             }
                         }
+                        Instruction::TABLESWITCH(default, low, high, offsets) => {
+                            let index = self.pop_int()?;
+                            if index < low || index > high{
+                                debug!("TABLESWITCH default {}", default);
+                                self.pc = ProgramCounter((self.last_pc.0 as i32 + default) as u16);
+                            } else {
+                                let offset = offsets[(index - low) as usize];
+                                debug!("TABLESWITCH[{}]: {}", index, offset);
+                                self.pc = ProgramCounter((self.last_pc.0 as i32 + offset) as u16);
+                            }
+                        }
                         Instruction::ISTORE(index) => { self.execute_istore(index as usize)? }
                         Instruction::ISTORE0 => { self.execute_istore(0)? }
                         Instruction::ISTORE1 => { self.execute_istore(1)? }
@@ -369,12 +445,12 @@ impl<'a> CallFrame<'a>{
                         Instruction::ASTORE1 => { self.execute_astore(1)? }
                         Instruction::ASTORE2 => { self.execute_astore(2)? }
                         Instruction::ASTORE3 => { self.execute_astore(3)? }
-                        Instruction::IASTORE | Instruction::AASTORE | Instruction::CASTORE | Instruction::BASTORE => {
+                        Instruction::IASTORE | Instruction::AASTORE | Instruction::CASTORE | Instruction::BASTORE | Instruction::SASTORE => {
                             //TODO validate type of value to fit instruction
                             let value = self.stack.pop().unwrap();
                             let index = self.pop_int()?;
                             let popped = self.stack.pop().unwrap();
-                            debug!("XASTORE: {:?}", popped);
+                            debug!("XASTORE: {:?}[{}] <- {:?}", popped, index, value);
                             if let Value::Reference(array_ref) = popped{
                                 array_ref.set_element(index as usize, value);
                             }
@@ -440,9 +516,11 @@ impl<'a> CallFrame<'a>{
                             }
                         }
                         //TODO add type validation
-                        Instruction::AALOAD | Instruction::IALOAD | Instruction::BALOAD | Instruction::CALOAD => {
+                        Instruction::AALOAD | Instruction::IALOAD | Instruction::BALOAD | Instruction::CALOAD | Instruction::SALOAD => {
                             let index = self.pop_int()?;
-                            if let Some(Value::Reference(array_ref)) = self.stack.pop(){
+                            let popped = self.stack.pop();
+                            debug!("XALOAD: {:?}[{}]", popped, index);
+                            if let Some(Value::Reference(array_ref)) = popped{
                                 self.stack.push(array_ref.get_element(index as usize));
                             }
                         }
@@ -470,7 +548,11 @@ impl<'a> CallFrame<'a>{
                             }
                         })?}
                         Instruction::LADD => { self.execute_j_arithmetic(|val1, val2| Ok(val1.wrapping_add(val2)))? }
+                        Instruction::LSUB => { self.execute_j_arithmetic(|val1, val2| Ok(val1.wrapping_sub(val2)))? }
+                        Instruction::LMUL => { self.execute_j_arithmetic(|val1, val2| Ok(val1.wrapping_mul(val2)))? }
                         Instruction::LAND => { self.execute_j_arithmetic(|val1, val2| Ok(val1 & val2))? },
+                        Instruction::LOR =>  { self.execute_j_arithmetic(|val1, val2| Ok(val1 | val2))? }
+                        Instruction::LXOR => { self.execute_j_arithmetic(|val1, val2| Ok(val1 ^ val2))? }
                         Instruction::LUSHR => { self.execute_ji_arithmetic(|val1, val2| {
                             if val1 > 0{
                                 Ok(val1 >> (val2 & 0x1f))
@@ -509,6 +591,15 @@ impl<'a> CallFrame<'a>{
                                 self.stack.push(Value::Integer(int));
                             } else {
                                 warn!("I2B Conversion failed, because {value:?} is not of type Int")
+                            }
+                        }
+                        Instruction::I2S => {
+                            let value = self.stack.pop().unwrap();
+                            debug!("I2S");
+                            if let Value::Integer(int) = value {
+                                self.stack.push(Value::Integer(int));
+                            } else {
+                                warn!("I2S Conversion failed, because {value:?} is not of type Int")
                             }
                         }
                         Instruction::I2L => {
@@ -598,6 +689,8 @@ impl<'a> CallFrame<'a>{
                             debug!("CHECKCAST {}", get_constant_printable(constants, constant_index));
                         }
                         Instruction::INSTANCEOF(constant_index) => {
+                            let of_class = get_or_init!(vm.get_or_resolve_class(get_constant_printable(constants, constant_index).as_str())?);
+
                             let object = self.stack.pop().unwrap();
                             if object == Value::Null{
                                 self.stack.push(Value::from(false));
@@ -605,7 +698,6 @@ impl<'a> CallFrame<'a>{
                             }
                             let object = object.expect_reference()?;
                             let object_class = vm.find_class_by_id(object.class_id).unwrap();
-                            let of_class = vm.get_or_resolve_class(get_constant_printable(constants, constant_index).as_str())?;
                             let mut instance_of = false;
                             let mut to_check = vec![object_class];
                             while let Some(next_class) = to_check.pop() {
@@ -881,8 +973,41 @@ impl<'a> CallFrame<'a>{
         }
     }
 
+    fn execute_create_array(&mut self, vm: &mut VM<'a>, array_field_type: FieldType, dims: usize) -> VMPartialResult<'a, Value<'a>>{
+        if let FieldType::Array(_, component_type) = array_field_type{
+            //ensure that the array class get loaded before popping the count(s)
+            for i in 0..dims{
+                let _ = get_or_init!(vm.get_or_resolve_class(component_type.clone().to_array_field_type(i+1).to_class_name().as_str())?);
+            }
+            let mut content = Vec::new();
+            for i in 0..dims{
+                let current_dim = self.pop_int()?;
+                if current_dim == 0{
+                    break;
+                }
+                let mut local_content = Vec::new();
+                if i == 0{
+                    local_content = vec![component_type.get_default_value(); current_dim as usize];
+                    content = local_content;
+                    continue
+                }
+                for _ in 0..current_dim{
+                    local_content.push(Value::Reference(vm.try_new_array(dims, component_type.clone().to_array_field_type(i), RefCell::new(content.clone()))?))
+                }
+                content = local_content;
+            }
+            //FIXME component_type.to_array_field_type(dims) is just array_field_type
+            Ok(VMResultType::Ok(Value::Reference(vm.try_new_array(dims, component_type.to_array_field_type(dims), RefCell::new(content))?)))
+        } else {
+            Err(VmError::ValidationError(format!("Field type for creating an array must be FieldType::Array but is {:?}", array_field_type)))
+        }
+    }
+
     fn execute_invoke(&mut self, vm: &mut VM<'a>, index: u16, kind: InvokeKind) -> VMPartialResult<'a, Option<Value<'a>>> {
         let (class_name, method_name, descriptor) = self.class_and_method.get_constant_method_info_descriptor(index).expect("GIB MICH DIE METHODE");
+        trace!("loading class to execute on: '{}'", class_name.as_str());
+        let class = get_or_init!(vm.get_or_resolve_class(class_name.as_str())?);
+        trace!("finished loading class to execute on: '{}'", class_name.as_str());
         let args_count = MethodDescriptor::new(descriptor.clone()).args.len();
         let mut args = Vec::new();
         for _ in 0..args_count{
@@ -894,17 +1019,8 @@ impl<'a> CallFrame<'a>{
             args.insert(0, popped);
         }
 
-        trace!("loading class to execute on: '{}'", class_name.as_str());
-        let class = vm.get_or_resolve_class(class_name.as_str())?;
-        trace!("finished loading class to execute on: '{}'", class_name.as_str());
         let class_and_method = match kind {
-            InvokeKind::STATIC => {
-                class
-                    .find_method(method_name.as_str(), descriptor.as_str())
-                    .map(|method| ClassAndMethod {class, method})
-                    .ok_or(VmError::JavaException(JavaError::MethodNotFoundException(format!("{:?} {}.{}{}", kind, class.name,  method_name, descriptor))))?
-            }
-            InvokeKind::SPECIAL => {
+            InvokeKind::SPECIAL | InvokeKind::STATIC => {
                 class
                     .find_method(method_name.as_str(), descriptor.as_str())
                     .map(|method| ClassAndMethod {class, method})
@@ -952,7 +1068,7 @@ impl<'a> CallFrame<'a>{
             trace!("    [{}] {:?}", index, value);
         }
         debug!("INVOKE{:?}: {}{} on {:?}", kind, method_name, descriptor, receiver);
-        let call_frame = CallStack::create_call_frame(class_and_method, receiver, args)?;
+        let call_frame = CallStack::create_call_frame(class_and_method, receiver, args);
         Ok(VMResultType::CallPaused(call_frame))
         //Ok(VMResultType::Ok(Some(Value::Null)))
         /*let res = vm.invoke(class_and_method, receiver, args)?.to_option();
@@ -1025,7 +1141,7 @@ impl<'a> CallFrame<'a>{
         Err(VmError::ValidationError(format!("Expected Integer to pop but found {:?}", popped)))
     }
 
-    fn get_constant_as_value(&mut self, vm: &mut VM<'a>, index: u16) -> Result<Value<'a>, VmError>{
+    fn get_constant_as_value(&mut self, vm: &mut VM<'a>, index: u16) -> VMPartialResult<'a, Value<'a>>{
         let constant_value = self.class_and_method.class.get_constant(index).unwrap();
         let value = match constant_value {
             ConstantPoolEntry::Integer(value) => Value::Integer(value),
@@ -1034,7 +1150,8 @@ impl<'a> CallFrame<'a>{
             ConstantPoolEntry::Double(value) => Value::Double(value),
             ConstantPoolEntry::String(string_index) => {
                 if let Some(ConstantPoolEntry::Utf8(string)) = self.class_and_method.class.get_constant(string_index){
-                    let string_object = vm.new_string_object(string)?;
+                    //FIXME maybe needs preloading
+                    let string_object = get_or_init!(vm.new_string_object(string)?);
                     Value::Reference(string_object)
                 } else {
                     //return Err(ValidationError("Expected string".to_string()));
@@ -1044,22 +1161,53 @@ impl<'a> CallFrame<'a>{
             }
             ConstantPoolEntry::Class(name_index) => {
                 if let Some(ConstantPoolEntry::Utf8(string)) = self.class_and_method.class.get_constant(name_index){
-                    let class_object = vm.new_class_object(string)?;
+                    let class_object = get_or_init!(vm.new_class_object_by_name(string)?);
                     Value::Reference(class_object)
                 } else {
                     warn!("expected but didnt find string object");
                     Value::Null
                 }
             }
+            ConstantPoolEntry::InvokeDynamic(bootstrap_method_index, name_and_type_index) => {
+                if let Some(ConstantPoolEntry::NameAndType(name_index, type_index)) = self.class_and_method.class.get_constant(name_and_type_index){
+                    println!("{:?} {:?}", self.class_and_method.class.get_constant(name_index), self.class_and_method.class.get_constant(type_index))
+                }
+                println!("{:?}", self.class_and_method.class.bootstrap_methods.0.get(bootstrap_method_index as usize));
+                Value::Null
+            }
             _ => unimplemented!("Constant of type {constant_value:?} cannot be converted to a value")
         };
-        Ok(value)
+        Ok(VMResultType::Ok(value))
+    }
+
+    fn get_instruction_at(&self, pc: ProgramCounter) -> Option<Instruction>{
+        if let Some(code) = &self.class_and_method.method.code{
+            if let Ok((instruction, _)) = parse_instruction(&code.code, self.pc.0 as usize) {
+                Some(instruction)
+            } else {
+                None
+            }
+        } else {
+            None
+        }
     }
 }
 
 impl Debug for CallFrame<'_>{
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Method: {} at {:?}", self.class_and_method.format(), self.pc)
+        let instruction = self.get_instruction_at(self.pc.clone());
+        let mut line_number = -1;
+        if let Some(code) = &self.class_and_method.method.code{
+            if let Some(line_number_table) = &code.line_number_table{
+                for entry in line_number_table.0.iter().rev(){
+                    if entry.program_counter.0 < self.pc.0 || (self.pc.0 == 0 && entry.program_counter.0 == 0) {
+                        line_number = entry.line_number.0 as i32;
+                        break;
+                    }
+                }
+            }  
+        };
+        write!(f, "Method: {}:{} at {:?} ({:?})", self.class_and_method.format(), line_number, self.pc, instruction)
     }
 }
 

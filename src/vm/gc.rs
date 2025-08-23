@@ -37,12 +37,12 @@ impl<'a> ObjectAllocator<'a>{
         }
     }
 
-    pub fn allocate_array(&self, class: ClassRef<'a>, dims: usize, field_type: FieldType, content: RefCell<Vec<Value<'a>>>) -> Reference<'a>{
+    pub fn allocate_array(&self, class: ClassRef<'a>, dims: usize, component_type: FieldType, content: RefCell<Vec<Value<'a>>>) -> Reference<'a>{
         let array = ReferenceValue{
             id: *self.next_object_id.borrow(),
             class_id: class.id,
             class_name: class.name.to_string(),
-            reference_type: ReferenceType::Array(dims, field_type, content),
+            reference_type: ReferenceType::Array(dims, component_type, content),
         };
 
         let new_object = self.arena.alloc(array);

@@ -1,16 +1,18 @@
 use std::fmt::{Debug, Formatter};
+use std::str::FromStr;
 use cesu8::from_java_cesu8;
 use log::info;
 use crate::access_flags::{parse_class_flags, parse_field_flags, parse_method_flags, ClassFlags};
-use crate::attribute::{Annotation, Attribute, Code, ConstantValue, ExceptionTable, ExceptionTableEntry, LineNumber, LineNumberTable, LineNumberTableEntry, ProgramCounter, VisibleRuntimeAnnotations};
+use crate::attribute::{Annotation, Attribute, BootstrapMethod, BootstrapMethods, Code, ConstantValue, ExceptionTable, ExceptionTableEntry, Exceptions, LineNumber, LineNumberTable, LineNumberTableEntry, ProgramCounter, VisibleRuntimeAnnotations};
 use crate::bytes::{parse_u1, parse_u2, parse_u4, parse_u8};
 use crate::class_file_version::ClassFileVersion;
-use crate::constants::{ConstantPool, ConstantPoolEntry};
+use crate::constants::{BytecodeBehavior, ConstantPool, ConstantPoolEntry};
 use crate::error::ClassParseError;
-use crate::field_info::{field_type_from_str, FieldInfo};
+use crate::field_info::{FieldInfo, FieldType};
 use crate::method_info::{MethodDescriptor, MethodInfo};
 use crate::vm::class_path::ClassPath;
 use crate::vm::class_path_entry::ClassLoadingError;
+use crate::vm::result::VMResult;
 
 pub struct ClassFile{
     pub magic: u32,
@@ -24,6 +26,7 @@ pub struct ClassFile{
     pub methods: Vec<MethodInfo>,
     pub deprecated: bool,
     pub runtime_visible_annotations: VisibleRuntimeAnnotations,
+    pub bootstrap_methods: BootstrapMethods,
     pub source_file: Option<String>
 }
 
@@ -81,9 +84,8 @@ pub fn get_constant_printable(constant_pool: &ConstantPool, index: u16) -> Strin
     }
 }
 
-pub fn parse_class_file(class_path: &ClassPath, class_name: &str) -> Result<ClassFile, ClassParseError> {
-    //TODO error handling
-    let mut bytes = class_path.resolve(class_name)?.ok_or(ClassParseError::ResolveError(class_name.to_string()))?.into_iter();
+pub fn parse_class_file(bytes: Vec<u8>, class_name: &str) -> VMResult<ClassFile> {
+    let mut bytes = bytes.into_iter();
 
     let magic = parse_u4(&mut bytes)?;
     let _minor_version = parse_u2(&mut bytes)?;
@@ -202,7 +204,7 @@ pub fn parse_class_file(class_path: &ClassPath, class_name: &str) -> Result<Clas
         let flags = parse_field_flags(parse_u2(&mut bytes)?);
         let name = get_constant_printable(&constant_pool, parse_u2(&mut bytes)?);
         let descriptor = get_constant_printable(&constant_pool, parse_u2(&mut bytes)?);
-        let field_type = field_type_from_str(descriptor.as_str());
+        let field_type = FieldType::from_str(descriptor.as_str())?;
         let attributes_count = parse_u2(&mut bytes)?;
         let mut attributes = Vec::new();
         let mut deprecated = false;
@@ -254,6 +256,7 @@ pub fn parse_class_file(class_path: &ClassPath, class_name: &str) -> Result<Clas
         let mut attributes = Vec::new();
         let mut deprecated = false;
         let mut code = None;
+        let mut exceptions = None;
         for _ in 0..attributes_count{
             let name = get_constant_printable(&constant_pool, parse_u2(&mut bytes)?);
             let attribute_length = parse_u4(&mut bytes)?;
@@ -333,6 +336,15 @@ pub fn parse_class_file(class_path: &ClassPath, class_name: &str) -> Result<Clas
                 "Deprecated" => {
                     deprecated = true
                 }
+                "Exceptions" => {
+                    let number_of_exceptions = parse_u2(&mut bytes)?;
+                    let mut exception_vec = Vec::new();
+                        for _ in 0..number_of_exceptions{
+                        let name = get_constant_printable(&constant_pool, parse_u2(&mut bytes)?);
+                        exception_vec.push(name);
+                    }
+                    exceptions = Some(Exceptions(exception_vec));
+                }
                 _ => {
                     let mut info = Vec::new();
                     for _ in 0..attribute_length{
@@ -353,12 +365,14 @@ pub fn parse_class_file(class_path: &ClassPath, class_name: &str) -> Result<Clas
             deprecated,
             attributes,
             code,
+            exceptions
         });
     }
     let attributes_count = parse_u2(&mut bytes)?;
     let mut deprecated = false;
     let mut source_file = None;
     let mut runtime_visible_annotations = VisibleRuntimeAnnotations(Vec::new());
+    let mut bootstrap_methods = BootstrapMethods(Vec::new());
 
     for _ in 0..attributes_count{
         let name = get_constant_printable(&constant_pool, parse_u2(&mut bytes)?);
@@ -376,6 +390,41 @@ pub fn parse_class_file(class_path: &ClassPath, class_name: &str) -> Result<Clas
                     annotations.push(Annotation::new(&constant_pool, &mut bytes)?);
                 }
                 runtime_visible_annotations = VisibleRuntimeAnnotations(annotations)
+            }
+            "BootstrapMethods" => {
+                let num_bootstrap_methods = parse_u2(&mut bytes)?;
+                let mut bootstrap_methods_vec = Vec::new();
+                for _ in 0..num_bootstrap_methods {
+                    let bootstrap_method_handle = parse_u2(&mut bytes)?;
+                    let method_handle = constant_pool.0.get(bootstrap_method_handle as usize - 1).unwrap();
+                    println!("BootstrapMethods {:?}", &method_handle);
+                    let mut args = Vec::new();
+
+                    let num_bootstrap_arguments = parse_u2(&mut bytes)?;
+                    for _ in 0..num_bootstrap_arguments {
+                        let argument_index = parse_u2(&mut bytes)?;
+                        args.push(argument_index);
+                    }
+                    if let ConstantPoolEntry::MethodHandle(kind, method_ref_index) = method_handle {
+                        println!("Handle: {}", kind);
+                        let method_ref = constant_pool.0.get(*method_ref_index as usize - 1).unwrap();
+                        if let ConstantPoolEntry::Methodref(class_index, name_and_type_index) = method_ref{
+                            println!("{}", get_constant_printable(&constant_pool, *class_index));
+                            let name_and_type = constant_pool.0.get(*name_and_type_index as usize - 1).unwrap();
+                            if let ConstantPoolEntry::NameAndType(name_index, type_index) = name_and_type {
+                                let method = BootstrapMethod{
+                                    kind: BytecodeBehavior::from_repr(*kind).unwrap(),
+                                    class_name: get_constant_printable(&constant_pool, *class_index),
+                                    method_name: get_constant_printable(&constant_pool, *name_index),
+                                    method_descriptor: get_constant_printable(&constant_pool, *type_index),
+                                    arguments_indices: args,
+                                };
+                                bootstrap_methods_vec.push(method);
+                            }
+                        }
+                    }
+                }
+                bootstrap_methods = BootstrapMethods(bootstrap_methods_vec);
             }
             _ => {
                 let mut info = Vec::new();
@@ -398,7 +447,8 @@ pub fn parse_class_file(class_path: &ClassPath, class_name: &str) -> Result<Clas
         methods,
         deprecated,
         runtime_visible_annotations,
-        source_file
+        bootstrap_methods,
+        source_file,
     };
 
     info!("------------------------------------");

@@ -2,15 +2,20 @@ package rjvm.io;
 
 import internal.Extends;
 import java.io.File;
+import java.io.IOException;
 
 @Extends("java.io.FileSystem")
 final class UnixFileSystem{
+    private final char slash = '/';
+    private final char colon = ':';
+    private final String userDir = normalize(System.getProperty("user.dir"));
+
     public char getSeparator(){
-        return '/';
+        return slash;
     }
 
     public char getPathSeparator(){
-        return '/';
+        return colon;
     }
 
     /* A normal Unix pathname contains no duplicate slashes and does not end
@@ -57,6 +62,13 @@ final class UnixFileSystem{
         return pathname.startsWith("/") ? 1 : 0;
     }
 
+    public String canonicalize(String path) throws IOException {
+        return canonicalize0(path);
+    }
+    private native String canonicalize0(String path) throws IOException;
+
+    /* -- Attribute accessors -- */
+
     public int getBooleanAttributes(File f) {
         int rv = getBooleanAttributes0(f);
         return rv | isHidden(f);
@@ -67,5 +79,37 @@ final class UnixFileSystem{
     private static int isHidden(File f) {
         //return f.getName().startsWith(".") ? BA_HIDDEN : 0;
         return f.getName().startsWith(".") ? 8 : 0;
+    }
+
+    public String getDefaultParent() {
+        return "/";
+    }
+
+    private static String trimSeparator(String s) {
+        int len = s.length();
+        if (len > 1 && s.charAt(len - 1) == '/')
+            return s.substring(0, len - 1);
+        return s;
+    }
+
+    public String resolve(String parent, String child) {
+        if (child.isEmpty()) return parent;
+        if (child.charAt(0) == '/') {
+            if (parent.equals("/")) return child;
+            return trimSeparator(parent + child);
+        }
+        if (parent.equals("/")) return trimSeparator(parent + child);
+        return trimSeparator(parent + '/' + child);
+    }
+
+    /* -- Path operations -- */
+
+    public boolean isAbsolute(File f) {
+        return (prefixLength(f.getPath()) != 0);
+    }
+
+    public String resolve(File f) {
+        if (isAbsolute(f)) return f.getPath();
+        return resolve(userDir, f.getPath());
     }
 }

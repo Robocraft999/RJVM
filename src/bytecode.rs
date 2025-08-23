@@ -48,7 +48,7 @@ pub fn parse_instruction(code_bytes: &Vec<u8>, mut pc: usize) -> Result<(Instruc
     let opcode = parse_u1(code_bytes, &mut pc)?;
     let result = if let Some(instruction) = Instruction::from_repr(opcode){
         match instruction{
-            TABLESWITCH => {
+            TABLESWITCH(_, _, _, _) => {
                 let instruction_pc = pc - 1;
                 //let padding = pc % 4;
                 //ti: 4 -> pc = 5 -> padding = 1 -> dbi = 5+1=6  X
@@ -72,7 +72,7 @@ pub fn parse_instruction(code_bytes: &Vec<u8>, mut pc: usize) -> Result<(Instruc
                     offsets.push(parse_i4(code_bytes, &mut pc)?);
                 }
 
-                TABLESWITCH
+                TABLESWITCH(default, low, high, offsets)
             }
             LOOKUPSWITCH(_, _) => {
                 let padding = (4 - (pc % 4)) % 4;
@@ -81,7 +81,7 @@ pub fn parse_instruction(code_bytes: &Vec<u8>, mut pc: usize) -> Result<(Instruc
                     parse_u1(code_bytes, &mut pc)?;
                 }
 
-                let default = (instruction_pc as i32 + parse_i4(code_bytes, &mut pc)?) as u32;
+                let default = (instruction_pc as i32 + parse_i4(code_bytes, &mut pc)?);
                 let npairs = parse_i4(code_bytes, &mut pc)?;
 
                 let mut offsets = Vec::new();
@@ -135,6 +135,7 @@ pub fn parse_instruction(code_bytes: &Vec<u8>, mut pc: usize) -> Result<(Instruc
             ALOAD(_) => ALOAD(parse_u1(code_bytes, &mut pc)?),
             NEW(_) => NEW(parse_u2(code_bytes, &mut pc)?),
             ANEWARRAY(_) => ANEWARRAY(parse_u2(code_bytes, &mut pc)?),
+            MULTIANEWARRAY(_, _) => MULTIANEWARRAY(parse_u2(code_bytes, &mut pc)?, parse_u1(code_bytes, &mut pc)?),
             NEWARRAY(_) => NEWARRAY(parse_u1(code_bytes, &mut pc)?),
             IINC(_, _) => IINC(parse_u1(code_bytes, &mut pc)?, parse_i1(code_bytes, &mut pc)?),
             CHECKCAST(_) => CHECKCAST(parse_u2(code_bytes, &mut pc)?),
@@ -154,9 +155,9 @@ pub fn parse_instruction(code_bytes: &Vec<u8>, mut pc: usize) -> Result<(Instruc
             ASTORE0 | ASTORE1 | ASTORE2 | ASTORE3 | IASTORE | BASTORE | CASTORE | SASTORE | LASTORE | FASTORE | DASTORE | AASTORE |
             LSTORE0 | LSTORE1 | LSTORE2 | LSTORE3 |
             DSTORE0 | DSTORE1 | DSTORE2 | DSTORE3 |
-            DUP | DUPX1 | DUP2 | LCMP | ATHROW |
+            DUP | DUPX1 | DUP2 | DUP2X1 | LCMP | ATHROW |
             IADD | LADD | DADD | FADD | ISUB | LSUB | FSUB | DSUB | IMUL | LMUL | FMUL | DMUL | IDIV | LDIV | FDIV | DDIV |
-            ARRAYLENGTH | POP | NOP |
+            ARRAYLENGTH | POP | NOP | POP2 |
             LUSHR | LSHR | LSHL | ISHL | ISHR | IUSHR | IOR | LOR | IXOR | LXOR | IAND | LAND | INEG | LNEG | FNEG | IREM |
             MONITORENTER | MONITOREXIT |
             I2L | I2F | I2D | I2B | I2C | I2S | L2I | L2F | L2D | F2I | F2L | F2D | D2I | D2L | D2F |
@@ -372,8 +373,8 @@ pub enum Instruction{
     JSR(u16)       = 0xa8,
     RET(u8)        = 0xa9,
 
-    TABLESWITCH    = 0xaa,
-    LOOKUPSWITCH(u32, Vec<i32>)   = 0xab,
+    TABLESWITCH(i32, i32, i32, Vec<i32>) = 0xaa,
+    LOOKUPSWITCH(i32, Vec<i32>)          = 0xab,
 
     IRETURN  = 0xac,
     LRETURN  = 0xad,

@@ -1,14 +1,16 @@
 use std::collections::HashMap;
+use std::str::FromStr;
 use log::info;
 use regex::Regex;
 use typed_arena::Arena;
 use crate::attribute::ElementValue;
 use crate::class_file::{parse_class_file, ClassFile};
 use crate::error::ClassParseError;
-use crate::field_info::{field_type_from_str, parse_field_type};
+use crate::field_info::{extract_component_type_from_array_class, FieldType};
 use crate::vm::class::{ArrayInfo, Class, ClassId, ClassRef};
 use crate::vm::class_path::ClassPath;
 use crate::vm::class_path_entry::ClassLoadingError;
+use crate::vm::result::VMResult;
 use crate::vm::VmError;
 
 #[derive(Debug, Clone)]
@@ -35,8 +37,8 @@ pub(crate) struct ClassesToInitialize<'a> {
 
 pub struct ClassManager<'a>{
     pub class_path: ClassPath,
-    classes_by_name: HashMap<String, ClassRef<'a>>,
-    classes_by_id: HashMap<ClassId, ClassRef<'a>>,
+    pub classes_by_name: HashMap<String, ClassRef<'a>>,
+    pub classes_by_id: HashMap<ClassId, ClassRef<'a>>,
     pub classes: Arena<Class<'a>>,
     next_id: u32,
 }
@@ -48,7 +50,7 @@ impl<'a> ClassManager<'a>{
             classes_by_name: HashMap::new(),
             classes_by_id: HashMap::new(),
             classes: Arena::with_capacity(100),
-            next_id: 0,
+            next_id: 1,
         }
     }
 
@@ -62,7 +64,12 @@ impl<'a> ClassManager<'a>{
 
     pub fn resolve_class(&mut self, class_name: &str) -> Result<ClassesToInitialize<'a>, VmError>{
         let (class_to_load_name, array_info) = self.try_create_array_class(class_name)?;
-        let parsed_class = parse_class_file(&self.class_path, class_to_load_name.as_str())?;
+        let bytes = self.class_path.resolve(class_to_load_name.as_str()).map_err(|e| VmError::ParseError(ClassParseError::from(e)))?.ok_or(ClassParseError::ResolveError(class_name.to_string()))?;
+        self.parse_and_load_class(class_name, class_to_load_name.as_str(), array_info, bytes)
+    }
+
+    pub fn parse_and_load_class(&mut self, class_name: &str, class_to_load_name: &str, array_info: Option<ArrayInfo>, bytes: Vec<u8>) -> VMResult<ClassesToInitialize<'a>>{
+        let parsed_class = parse_class_file(bytes, class_to_load_name)?;
         let next_id = self.next_id;
         self.next_id += 1;
 
@@ -96,6 +103,7 @@ impl<'a> ClassManager<'a>{
             fields: parsed_class.fields,
             methods: parsed_class.methods,
             annotations: parsed_class.runtime_visible_annotations,
+            bootstrap_methods: parsed_class.bootstrap_methods,
             transitive_field_count: superclass_field_count + fields_count,
             first_field_index: superclass_field_count,
             array_info
@@ -118,7 +126,7 @@ impl<'a> ClassManager<'a>{
             }
         }
         if class_ref.array_info.is_some() {
-            if let ResolvedClass::NewClass(array_class) = self.get_or_resolve_class(class_to_load_name.as_str())? {
+            if let ResolvedClass::NewClass(array_class) = self.get_or_resolve_class(class_to_load_name)? {
                 for to_initialize in array_class.to_initialize.iter() {
                     classes_to_init.push(to_initialize)
                 }
@@ -135,7 +143,7 @@ impl<'a> ClassManager<'a>{
         })
     }
 
-    fn resolve_super_and_interfaces_and_annotations(&mut self, class_file: &ClassFile) -> Result<HashMap<String, ResolvedClass<'a>>, VmError>{
+    fn resolve_super_and_interfaces_and_annotations(&mut self, class_file: &ClassFile) -> VMResult<HashMap<String, ResolvedClass<'a>>>{
         let mut resolved_classes = HashMap::new();
         if let Some(super_class_name) = &class_file.super_class{
             let resolved_class = self.get_or_resolve_class(super_class_name)?;
@@ -146,29 +154,22 @@ impl<'a> ClassManager<'a>{
             resolved_classes.insert(interface_name.clone(), resolved_class);
         }
         for annotation in class_file.runtime_visible_annotations.0.iter(){
-            let parsed_name = field_type_from_str(annotation.name.as_str()).to_class_name();
+            let parsed_name = FieldType::from_str(annotation.name.as_str())?.to_class_name();
             let resolved_class = self.get_or_resolve_class(parsed_name.as_str())?;
             resolved_classes.insert(parsed_name, resolved_class);
         }
         Ok(resolved_classes)
     }
 
-    fn try_create_array_class(&self, class_name: &str) -> Result<(String, Option<ArrayInfo>), VmError>{
-        let r = Regex::new(r"(?<array>\[+)?(?:(?<primitive>[ZBSIJFDC])|L(?<object>[/a-zA-Z$0-9]+);)").unwrap();
-        if let Some(cap) = r.captures(class_name){
-            if let Some(arr) = cap.name("array"){
-                let dims = arr.len();
-                let component_type = parse_field_type(cap.name("object").map(|m| m.as_str()), cap.name("primitive").map(|m| m.as_str()), None);
-                let new_class_name = component_type.to_class_name();
-                info!("{}", new_class_name);
-                let array_info = ArrayInfo{
-                    dims,
-                    component_type,
-                };
-                Ok((new_class_name, Some(array_info)))
-            } else {
-                Ok((class_name.to_string(), None))
-            }
+    fn try_create_array_class(&self, class_name: &str) -> VMResult<(String, Option<ArrayInfo>)>{
+        if let Ok((component_type, dims)) = extract_component_type_from_array_class(class_name){
+            let new_class_name = component_type.to_class_name();
+            info!("{}", new_class_name);
+            let array_info = ArrayInfo{
+                dims,
+                component_type,
+            };
+            Ok((new_class_name, Some(array_info)))
         } else {
             Ok((class_name.to_string(), None))
         }

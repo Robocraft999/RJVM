@@ -74,6 +74,19 @@ impl<'a> Value<'a>{
             Err(VmError::ValidationError(format!("Expected reference but found {:?}", self)))
         }
     }
+    
+    pub fn get_computational_type(&self) -> i32{
+        match self {
+            Value::Uninitialized => -1,
+            Value::Reference(_) => 1,
+            Value::Integer(_) => 1,
+            Value::Long(_) => 2,
+            Value::Float(_) => 1,
+            Value::Double(_) => 2,
+            Value::Dummy => -1,
+            Value::Null => 1,
+        }
+    }
 }
 
 impl From<bool> for Value<'_>{
@@ -154,7 +167,18 @@ impl<'a> ReferenceValue<'a>{
             _ => format!("{:?}", field)
         };
         match &self.reference_type {
-            ReferenceType::Object(fields) => fields.borrow().iter().map(object).collect(),
+            ReferenceType::Object(fields) => {
+                if self.class_name == "java/lang/String" {
+                    let internal = VM::extract_string_from_char_arr(&self.get_field(0)).unwrap_or("VMError".to_string());
+                    let mut components = Vec::new();
+                    components.push(internal);
+                    let mut other_fields = fields.borrow().iter().skip(1).map(object).collect();
+                    components.append(&mut other_fields);
+                    components
+                } else {
+                    fields.borrow().iter().map(object).collect()
+                }
+            },
             ReferenceType::Array(_, field_type, content) => {
                 if let FieldType::Primitive(PrimitiveType::Char) = field_type {
                     let chars: Vec<char> = content.borrow().iter().map(|e| if let Value::Integer(val) = e {char::from_u32(*val as u32).unwrap()} else {'?'}).collect();
