@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use crate::{bytecode::Instruction, vm::value::Value};
 
 mod il;
@@ -16,9 +18,14 @@ pub enum InstructionBlock<'a>{
     Jump(usize, Instruction)
 }
 
-pub fn get_blocks(bytes: &Vec<u8>){
-    let raw = raw::get_blocks(bytes);
-    let il = il::get_blocks(bytes);
+const USE_RAW: bool = false;
+
+pub fn get_blocks(bytes: &Vec<u8>) -> BTreeMap<u16, InstructionBlock>{
+    if USE_RAW{
+        raw::get_blocks(bytes).into_iter().enumerate().map(|(i, b)| (i as u16, b)).collect()
+    } else {
+        il::get_blocks(bytes)
+    }
 }
 
 #[cfg(test)]
@@ -81,9 +88,10 @@ mod tests{
             InstructionBlock::Single(Instruction::ALOAD0), 
             InstructionBlock::Single(Instruction::GETFIELD(19)), 
             InstructionBlock::Single(Instruction::INVOKEVIRTUAL(36)),
-            InstructionBlock::AStoreWithoutPop(2),
+            InstructionBlock::Single(Instruction::ASTORE2),
+            InstructionBlock::Single(Instruction::ALOAD2),
             InstructionBlock::Single(Instruction::INVOKEINTERFACE(40, 1, 0)),
-            InstructionBlock::Single(Instruction::IFEQ(19)),
+            InstructionBlock::Single(Instruction::IFEQ(45)),
             InstructionBlock::Single(Instruction::ALOAD2),
             InstructionBlock::Single(Instruction::INVOKEINTERFACE(46, 1, 0)),
             InstructionBlock::Single(Instruction::CHECKCAST(27)),
@@ -91,13 +99,17 @@ mod tests{
             InstructionBlock::Single(Instruction::GETFIELD(50)),
             InstructionBlock::Single(Instruction::ALOAD1),
             InstructionBlock::Single(Instruction::INVOKEINTERFACE(54, 2, 0)),
-            InstructionBlock::Single(Instruction::IFNE(18)),
+            InstructionBlock::Single(Instruction::IFNE(42)),
             InstructionBlock::ConstReturn(Value::Integer(1)),
-            InstructionBlock::Single(Instruction::GOTO(4)),
+            InstructionBlock::Single(Instruction::GOTO(8)),
             InstructionBlock::ConstReturn(Value::Integer(0)),
         ];
-        for (index, expected_block) in expected.iter().enumerate(){
-            assert_eq!(expected_block, &blocks[index], "Instruction does not match. Expected {:?}, but found {:?}", expected_block, blocks[index]);
+        println!("{:#?}", blocks);
+        assert_eq!(expected.len(), blocks.len());
+        let mut actual_block_iter = blocks.values();
+        let mut expected_block_iter = expected.iter();
+        while let (Some(expected), Some(actual)) = (expected_block_iter.next(), actual_block_iter.next()){
+            assert_eq!(expected, actual, "Instruction does not match. Expected {:?}, but found {:?}", expected, actual);
         }
     }
 }

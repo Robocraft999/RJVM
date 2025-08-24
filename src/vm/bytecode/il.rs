@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use crate::{bytecode::{parse_instruction, Instruction}, vm::{bytecode::InstructionBlock, value::Value}};
 
@@ -22,19 +22,30 @@ macro_rules! store_without_pop {
     };
 }
 
-pub fn get_blocks(bytes: &Vec<u8>) -> HashMap<u16, InstructionBlock>{
+pub fn get_blocks(bytes: &Vec<u8>) -> BTreeMap<u16, InstructionBlock>{
     let mut indices: Vec<u16> = Vec::new();
     let mut code_to_instruction_map: HashMap<u16, Instruction> = HashMap::new();
+    let mut labels: Vec<u16> = Vec::new();
     let mut pc = 0;
 
     while pc < bytes.len(){
         if let Ok((instruction, new_pc)) = parse_instruction(bytes, pc){
+            match instruction{
+                Instruction::GOTO(t) | Instruction::IF_ACMPEQ(t) | Instruction::IF_ACMPNE(t) | 
+                Instruction::IF_ICMPEQ(t) | Instruction::IF_ICMPGE(t) | Instruction::IF_ICMPGT(t) |
+                Instruction::IF_ICMPLE(t) | Instruction::IF_ICMPLT(t) | Instruction::IF_ICMPNE(t) |
+                Instruction::IFEQ(t) | Instruction::IFNE(t) | Instruction::IFGT(t) |
+                Instruction::IFLT(t) | Instruction::IFGE(t) | Instruction::IFLE(t) |
+                Instruction::IFNULL(t) | Instruction::IFNONNULL(t)
+                => {labels.push(t);}
+                _ => {}
+            }
             code_to_instruction_map.insert(pc as u16, instruction);
             indices.push(pc as u16);
             pc = new_pc;
         }
     }
-    let mut blocks = HashMap::new();
+    let mut blocks = BTreeMap::new();
     let mut index_index = 0;
     let num_indices = indices.len();
     while index_index < num_indices{
@@ -73,8 +84,14 @@ pub fn get_blocks(bytes: &Vec<u8>) -> HashMap<u16, InstructionBlock>{
             Instruction::ACONST_NULL => const_ret!(Instruction::ARETURN, Value::Null, next, InstructionBlock::Single(instruction)),
             instruction => {(1, InstructionBlock::Single(instruction))}
         };
-        blocks.insert(index, block);
-        index_index += offset;
+        let end_index = if index_index + offset < num_indices{indices[index_index + offset]} else {indices[num_indices-1]};
+        if labels.iter().any(|&l| l > index && l < end_index){
+            blocks.insert(index, InstructionBlock::Single(code_to_instruction_map[&index].clone()));
+            index_index += 1;
+        } else {
+            blocks.insert(index, block);
+            index_index += offset;
+        }
     }
     blocks
 }
