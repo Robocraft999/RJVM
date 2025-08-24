@@ -20,7 +20,10 @@ use crate::vm::value::Reference;
 pub struct CallStack<'a>{
     pub frames: Vec<CallFrame<'a>>,
     frames_infos : Vec<String>,
-    pub current_frame: Option<ClassAndMethod<'a>>
+    pub current_frame: Option<ClassAndMethod<'a>>,
+    operand_stacks: Vec<Vec<Value<'a>>>,
+    locals_stack: Vec<Vec<Value<'a>>>,
+    pcs: Vec<ProgramCounter>,
 }
 
 impl<'a> CallStack<'a> {
@@ -29,6 +32,9 @@ impl<'a> CallStack<'a> {
             frames: Vec::new(),
             frames_infos : Vec::new(),
             current_frame: None,
+            operand_stacks: Vec::new(),
+            locals_stack: Vec::new(),
+            pcs: Vec::new(),
         }
     }
 
@@ -155,6 +161,30 @@ impl<'a> CallStack<'a> {
     
     pub fn add_to_top_stack(&mut self, value: Option<Value<'a>>){
         self.frames.last_mut().unwrap().prepare_reentry(value);
+    }
+
+    pub fn push_operand_value(&mut self, val: Value<'a>){
+        self.operand_stacks.last_mut().unwrap().push(val);
+    }
+
+    pub fn pop_operand_value(&mut self) -> Value<'a>{
+        self.operand_stacks.last_mut().unwrap().pop().unwrap() //TODO make it VMResult and add error type
+    }
+
+    pub fn store_local(&mut self, val: Value<'a>, index: usize){
+        self.locals_stack.last_mut().unwrap()[index] = val;
+    }
+
+    pub fn load_local(&self, index: usize) -> Value<'a>{
+        self.locals_stack.last().unwrap()[index].clone() //TODO same as above
+    }
+
+    pub fn set_pc(&mut self, val: u16){
+        *self.pcs.last_mut().unwrap() = ProgramCounter(val);
+    }
+
+    pub fn get_pc(&self) -> ProgramCounter{
+        *self.pcs.last().unwrap()
     }
 
     // Execute the last frame on the stack
