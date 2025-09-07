@@ -6,14 +6,17 @@ mod il;
 mod raw;
 
 #[derive(Debug, PartialEq, Clone)]
-pub enum InstructionBlock<'a>{
+pub enum InstructionBlock{
     Single(Instruction),
     AStoreWithoutPop(usize),
     IStoreWithoutPop(usize),
     LStoreWithoutPop(usize),
     FStoreWithoutPop(usize),
     DStoreWithoutPop(usize),
-    ConstReturn(Value<'a>),
+    IConstReturn(i32),
+    LConstReturn(i64),
+    FConstReturn(f32),
+    DConstReturn(f64),
     JumpLabel,
     Jump(usize, Instruction)
 }
@@ -100,9 +103,9 @@ mod tests{
             InstructionBlock::Single(Instruction::ALOAD1),
             InstructionBlock::Single(Instruction::INVOKEINTERFACE(54, 2, 0)),
             InstructionBlock::Single(Instruction::IFNE(42)),
-            InstructionBlock::ConstReturn(Value::Integer(1)),
+            InstructionBlock::IConstReturn(1),
             InstructionBlock::Single(Instruction::GOTO(8)),
-            InstructionBlock::ConstReturn(Value::Integer(0)),
+            InstructionBlock::IConstReturn(0),
         ];
         println!("{:#?}", blocks);
         assert_eq!(expected.len(), blocks.len());

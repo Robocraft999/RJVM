@@ -206,6 +206,14 @@ impl<'a> ClassAndMethod<'a>{
         if let Some(code) = &self.method.code{
             code.max_locals as usize
         } else {
+            self.method.descriptor.args.len() + if self.method.is_static() {0} else {1}
+        }
+    }
+
+    pub fn get_max_stack_size(&self) -> usize{
+        if let Some(code) = &self.method.code{
+            code.max_stack as usize
+        } else {
             0
         }
     }

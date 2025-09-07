@@ -245,7 +245,7 @@ fn delegate_init_system_props<'a>(vm: &mut VM<'a>, _ : ClassRef<'a>, _: Option<R
         //FIXME could be bad to unwrap
         let arg1 = vm.try_new_string_object(key.to_string()).unwrap();
         let arg2 = vm.try_new_string_object(value).unwrap();
-        CallStack::create_call_frame(properties_set_method.clone(), Some(properties_object), vec![Value::Reference(arg1), Value::Reference(arg2)])
+        vm.call_stack.create_and_push_call_frame(properties_set_method.clone(), Some(properties_object), vec![Value::Reference(arg1), Value::Reference(arg2)])
     }).collect();
     Ok(VMResultType::NeedsClassInit(frames, false))
 }
@@ -838,8 +838,8 @@ fn delegate_do_privileged<'a>(vm: &mut VM<'a>, class: ClassRef<'a>, _: Option<Re
     if let Some(Value::Reference(action)) = args.get(0){
         let class_name = vm.find_class_by_id(action.class_id).unwrap().name.as_str();
         let run = get_or_init!(vm.resolve_class_method(class_name, "run", "()Ljava/lang/Object;")?);
-        let frame = CallStack::create_call_frame(run, Some(action), vec![]);
-        Ok(VMResultType::NeedsClassInit(vec![frame], false))
+        vm.call_stack.create_and_push_call_frame(run, Some(action), vec![]);
+        Ok(VMResultType::NeedsClassInit(vec![()], false))
         //Ok(vm.invoke_new_frame(run, Some(action), vec![])?)
     } else {
         Err(VmError::ValidationError("Expected a action object reference".to_string()))
@@ -894,9 +894,9 @@ fn delegate_new_instance0<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, object: Option<R
                         Vec::new()
                     };
                     let object = get_or_init!(vm.new_object(class_and_method.class.name.as_str())?);
-                    let frame = CallStack::create_call_frame(class_and_method, Some(object), constructor_args);
-                    let return_frame = CallStack::create_returning_frame(vm.find_class_by_id(ClassId(0)).unwrap(), Value::Reference(object));
-                    return Ok(VMResultType::NeedsClassInit(vec![return_frame, frame], false));
+                    vm.call_stack.create_and_push_call_frame(class_and_method, Some(object), constructor_args);
+                    //let return_frame = CallStack::create_returning_frame(vm.find_class_by_id(ClassId(0)).unwrap(), Value::Reference(object));
+                    //return Ok(VMResultType::NeedsClassInit(vec![return_frame, frame], false));
                     return non_failing_some(Value::Reference(object))
                 }
             }
@@ -992,9 +992,9 @@ fn delegate_read_bytes<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, obj: Option<Referen
                 let exception_object = vm.try_new_object("java/io/IOException")?;
                 let init = vm.get_class_method(io_exception_class, "<init>", "(Ljava/lang/String;)V")?;
                 let details = get_or_init!(vm.new_string_object(format!("File {} was not found", path))?);
-                let init_frame = CallStack::create_call_frame(init, Some(exception_object), vec![Value::Reference(details)]);
-                let throw_frame = CallStack::create_throwing_frame(vm.find_class_by_id(ClassId(0)).unwrap(), Value::Reference(exception_object));
-                Ok(VMResultType::NeedsClassInit(vec![throw_frame, init_frame], false))
+                let init_frame = vm.call_stack.create_and_push_call_frame(init, Some(exception_object), vec![Value::Reference(details)]);
+                //let throw_frame = CallStack::create_throwing_frame(vm.find_class_by_id(ClassId(0)).unwrap(), Value::Reference(exception_object));
+                Ok(VMResultType::NeedsClassInit(vec![(), ()], false))
                 //Err(VmError::JavaException(JavaError::IOException(format!("File {} was not found", path))))
             }
         } else {
@@ -1092,10 +1092,10 @@ fn delegate_init_vm<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, object: Option<Referen
     let properties_object = static_vm_object.get_field(11).expect_reference()?;
 
     let properties_set_method = vm.try_resolve_class_method("java/util/Properties", "setProperty", "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/Object;")?;
-    let frame1 = CallStack::create_call_frame(properties_set_method, Some(properties_object), vec![Value::Reference(arg1), Value::Reference(arg2)]);
+    let frame1 = vm.call_stack.create_and_push_call_frame(properties_set_method, Some(properties_object), vec![Value::Reference(arg1), Value::Reference(arg2)]);
     let save_properties_method = vm.try_resolve_class_method("sun/misc/VM", "saveAndRemoveProperties", "(Ljava/util/Properties;)V")?;
-    let frame2 = CallStack::create_call_frame(save_properties_method, None, vec![Value::Reference(properties_object)]);
-    Ok(VMResultType::NeedsClassInit(vec![frame1, frame2], false))
+    let frame2 = vm.call_stack.create_and_push_call_frame(save_properties_method, None, vec![Value::Reference(properties_object)]);
+    Ok(VMResultType::NeedsClassInit(vec![(), ()], false))
 }
 
 fn delegate_vm_supports_cs8<'a>(_: &mut VM<'a>, _: ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{

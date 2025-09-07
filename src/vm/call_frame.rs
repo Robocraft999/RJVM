@@ -21,14 +21,10 @@ use crate::vm::value::{ReferenceType, Value};
 #[derive(Clone)]
 pub struct CallFrame<'a>{
     pub class_and_method: ClassAndMethod<'a>,
-    pub locals: Vec<Value<'a>>,
-    pub pc: ProgramCounter,
-    pub last_pc: ProgramCounter,
-    pub stack: Vec<Value<'a>>,
 }
 
 impl<'a> CallFrame<'a>{
-    pub fn execute(&mut self, vm: &mut VM<'a>) -> VMPartialResult<'a, Option<Value<'a>>>{
+    /*pub fn execute(&mut self, vm: &mut VM<'a>) -> VMPartialResult<'a, Option<Value<'a>>>{
         if let Some(code) = &self.class_and_method.method.code{
             let constants = &self.class_and_method.class.constants;
             for class in vm.class_manager.classes.iter_mut(){
@@ -1191,10 +1187,10 @@ impl<'a> CallFrame<'a>{
         } else {
             None
         }
-    }
+    }*/
 }
 
-impl Debug for CallFrame<'_>{
+/*impl Debug for CallFrame<'_>{
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let instruction = self.get_instruction_at(self.pc.clone());
         let mut line_number = -1;
@@ -1210,7 +1206,8 @@ impl Debug for CallFrame<'_>{
         };
         write!(f, "Method: {}:{} at {:?} ({:?})", self.class_and_method.format(), line_number, self.pc, instruction)
     }
-}
+}*/
+
 
 #[derive(Debug, PartialEq)]
 enum InvokeKind{

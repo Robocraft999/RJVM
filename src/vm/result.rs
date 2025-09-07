@@ -8,9 +8,9 @@ pub type VMResult<T> = Result<T, VmError>;
 #[derive(Debug, Clone)]
 pub enum VMResultType<'f, T> {
     Ok(T),
-    CallPaused(CallFrame<'f>),
+    CallPaused(()),
     ExceptionThrown(VmError, Value<'f>),
-    NeedsClassInit(Vec<CallFrame<'f>>, bool)
+    NeedsClassInit(Vec<()>, bool)
 }
 
 impl<'a, T> VMResultType<'a, T> {

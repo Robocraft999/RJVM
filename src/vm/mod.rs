@@ -13,8 +13,10 @@ use class_path::ClassPath;
 use value::Value;
 use crate::access_flags::MethodFlag;
 use crate::attribute::{BootstrapMethods, Code, ExceptionTable, ProgramCounter, VisibleRuntimeAnnotations};
+use crate::bytecode::Instruction;
 use crate::error::ClassParseError;
 use crate::field_info::{FieldType, PrimitiveType};
+use crate::vm::bytecode::InstructionBlock;
 use crate::{get_or_init, get_or_init_special};
 use crate::constants::ConstantPool;
 use crate::method_info::{MethodDescriptor, MethodInfo};
@@ -85,6 +87,7 @@ impl<'a> VM<'a>{
                     line_number_table: None,
                     exception_table: ExceptionTable(vec![]),
                 }),
+                code_blocks: None,
                 attributes: vec![],
                 exceptions: None,
             },
@@ -101,6 +104,7 @@ impl<'a> VM<'a>{
                     line_number_table: None,
                     exception_table: ExceptionTable(vec![]),
                 }),
+                code_blocks: None,
                 attributes: vec![],
                 exceptions: None,
             }],
@@ -137,9 +141,77 @@ impl<'a> VM<'a>{
     }
 
     pub fn invoke_new_frame(&mut self, class_and_method: ClassAndMethod<'a>, object: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
-        let frame = CallStack::create_call_frame(class_and_method, object, args);
-        self.invoke_frame(frame)
+        self.call_stack.create_and_push_call_frame(class_and_method, object, args);
+        self.invoke_current_frame()
     }
+
+    pub fn invoke_current_frame(&mut self) -> VMPartialResult<'a, Option<Value<'a>>> {
+        let mut last_result: Option<VMResultType<Option<Value>>> = None;
+        loop {
+            let current_result = if let Some(VMResultType::ExceptionThrown(error, ref throwable)) = last_result{
+                VMResultType::ExceptionThrown(error, throwable.clone())
+            } else {
+                let class_and_method = self.call_stack.frames.last().unwrap().class_and_method.clone();
+                if class_and_method.method.is_native(){
+                    self.execute_native(class_and_method)?
+                } else {
+                    executor::execute(self)?
+                }
+            };
+            last_result = None;
+            match current_result{
+                VMResultType::Ok(result) => {
+                    if self.call_stack.frames.is_empty(){
+                        return Ok(VMResultType::Ok(result));
+                    }
+                    self.call_stack.pop_call_frame();
+                    if let Some(value) = result{
+                        self.call_stack.push_operand_value(value);
+                    }
+                }
+                VMResultType::CallPaused(new_frame) => {
+                    /*self.call_stack.push_call_frame(new_frame)*/
+                    },
+                VMResultType::NeedsClassInit(classes, _) => {
+                    /*for new_frame in classes {
+                        self.call_stack.push_call_frame(new_frame);
+                    }*/
+                    let last_frame_index = self.call_stack.pcs.len() - classes.len() - 1;
+                    let current_pc = self.call_stack.pcs[last_frame_index];
+                    let previous_pc = self.call_stack.frames[last_frame_index].class_and_method.method.previous_pc(current_pc);
+                    *self.call_stack.pcs.get_mut(last_frame_index).unwrap() = ProgramCounter(previous_pc)
+                }
+                VMResultType::ExceptionThrown(error, throwable) => {
+                    if let VmError::JavaException(JavaError::JavaExceptionThrown(thrown_class_name, message)) = error {
+                        if let Some(error_frame) = self.call_stack.frames.last(){
+                            let class_and_method = error_frame.class_and_method.clone();
+                            let exception_table = class_and_method.method.get_exception_handlers().clone();
+                            let current_pc = &self.call_stack.get_pc();
+                            if let Some(handler_pc) = get_or_init!(self.try_resolve_exception_handler(exception_table, current_pc, thrown_class_name.as_str())?){
+                                self.call_stack.set_pc(handler_pc.0);
+                                self.call_stack.push_operand_value(throwable.clone());
+                                debug!("Exception thrown handled by {}", class_and_method.format());
+                            } else {
+                                self.call_stack.pop_call_frame();
+                                last_result = Some(VMResultType::ExceptionThrown(VmError::JavaException(JavaError::JavaExceptionThrown(thrown_class_name, message)), throwable));
+                                debug!("Exception handler not in this function {}", class_and_method.format());
+                            }
+                        } else {
+                            panic!("Could not handle {} thrown by a function with message: {}", thrown_class_name, message)
+                        }
+                    } else {
+                        unreachable!("Could not handle {} thrown by a function", error);
+                    }
+                }
+            }
+            self.call_stack.print_call_stack();
+        }
+    }
+
+    /*pub fn invoke_new_frame_old(&mut self, class_and_method: ClassAndMethod<'a>, object: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
+        let frame = CallStack::create_call_frame(class_and_method, object, args);
+        self.invoke_frame_old(frame)
+    }*/
     /*
     main_frame
         func1
@@ -204,7 +276,7 @@ impl<'a> VM<'a>{
         return main_res
      */
 
-    pub fn invoke_frame(&mut self, main_frame: CallFrame<'a>) -> VMPartialResult<'a, Option<Value<'a>>> {
+    /*pub fn invoke_frame(&mut self, main_frame: CallFrame<'a>) -> VMPartialResult<'a, Option<Value<'a>>> {
         self.call_stack.push_call_frame(main_frame);
         let vm_ptr: *mut VM = self;
         let mut last_result: Option<VMResultType<Option<Value>>> = None;
@@ -259,46 +331,53 @@ impl<'a> VM<'a>{
             }
             self.call_stack.print_call_stack();
         }
-    }
+    }*/
 
     fn execute_native(&mut self, class_and_method: ClassAndMethod<'a>) -> VMPartialResult<'a, Option<Value<'a>>> {
-        let call_frame = self.call_stack.pop_call_frame();
+        //let call_frame = self.call_stack.pop_call_frame();
+        
         let object = if class_and_method.method.is_static() {
             None
         } else {
-            match call_frame.locals.get(0) {
+            match self.call_stack.load_local(0) {
                 Some(local) => {
                     Some(local.expect_reference()?)
                 },
                 None => None
             }
         };
-        let args = call_frame.locals
+        let args = self.call_stack.locals_stack.last().unwrap()
             .iter()
             .cloned()
             .skip(if object.is_none() {0} else {1})
             .take_while(|value| value != &Value::Uninitialized)
             .collect::<Vec<_>>();
         let try_native = NativeMethodRegistry::invoke(self, &class_and_method, object, args);
+        debug!("TTT {:?}", try_native);
         if let Some(native) = try_native {
             Ok(match native? {
-                VMResultType::Ok(value) => {VMResultType::Ok(value)}
+                VMResultType::Ok(value) => {
+                    //self.call_stack.pop_call_frame();
+                    VMResultType::Ok(value)
+                }
                 VMResultType::CallPaused(frame) => {
-                    self.call_stack.push_call_frame(call_frame);
+                    //self.call_stack.push_call_frame(call_frame);
                     VMResultType::CallPaused(frame)
                 }
                 VMResultType::ExceptionThrown(error, throwable) => {
-                    self.call_stack.push_call_frame(call_frame);
+                    //self.call_stack.push_call_frame(call_frame);
                     VMResultType::ExceptionThrown(error, throwable)
                 }
                 VMResultType::NeedsClassInit(classes, reenter) => {
                     if reenter {
-                        self.call_stack.push_call_frame(call_frame);
+                        //self.call_stack.push_call_frame(call_frame);
                     }
+                    //FIXME maybe pop if !reenter, need to check
                     VMResultType::NeedsClassInit(classes, reenter)
                 }
             })
         } else {
+            debug!("native not found");
             if class_and_method.method.descriptor.return_type.is_some(){
                 Err(VmError::MethodCallError(format!("native {} returns a value which is probably used", class_and_method.format())))
             } else {
@@ -307,7 +386,7 @@ impl<'a> VM<'a>{
         }
     }
 
-    fn try_resolve_exception_handler(&mut self, exception_table: ExceptionTable, pc: ProgramCounter, thrown_class_name: &str) -> VMPartialResult<'a, Option<ProgramCounter>>{
+    fn try_resolve_exception_handler(&mut self, exception_table: ExceptionTable, pc: &ProgramCounter, thrown_class_name: &str) -> VMPartialResult<'a, Option<ProgramCounter>>{
         for handler in exception_table.0 {
             let can_handle = match handler.catch_type {
                 Some(ref class_name) => {
@@ -366,7 +445,7 @@ impl<'a> VM<'a>{
         self.new_class_object_by_class(resolved)
     }
 
-    fn init_class(&mut self, class: ClassRef<'a>) -> Option<CallFrame<'a>>{
+    fn init_class(&mut self, class: ClassRef<'a>) -> Option<()>{
         if class.transitive_field_count > 0 && !class.is_array(){
             let static_object = self.new_object_from_class(class);
             self.static_class_objects.insert(class.id, static_object);
@@ -375,7 +454,8 @@ impl<'a> VM<'a>{
                     class,
                     method: clinit_method,
                 };
-                return Some(CallStack::create_call_frame(class_and_method, Some(static_object), Vec::new()));
+                self.call_stack.create_and_push_call_frame(class_and_method, Some(static_object), Vec::new());
+                return Some(());
             }
         }
 
@@ -556,14 +636,22 @@ impl<'a> VM<'a>{
 pub enum VmError{
     #[error("{0}")]
     JavaException(#[from] JavaError),
+
     #[error("")]
     ParseError(#[from] ClassParseError),
+
     #[error("Methodcall to {0} failed")]
     MethodCallError(String),
+
     #[error("Validation failed: expected: {0}")]
     ValidationError(String),
+
     #[error("{0}")]
     CESU8Error(#[from] Cesu8DecodingError),
+
     #[error("{0}")]
     ClassNotLoadedError(String),
+
+    #[error("{0}")]
+    Unspecified(String),
 }

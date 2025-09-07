@@ -365,6 +365,7 @@ pub fn parse_class_file(bytes: Vec<u8>, class_name: &str) -> VMResult<ClassFile>
             deprecated,
             attributes,
             code,
+            code_blocks: None,
             exceptions
         });
     }

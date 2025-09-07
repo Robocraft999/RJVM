@@ -5,10 +5,34 @@ use crate::{bytecode::{parse_instruction, Instruction}, vm::{bytecode::Instructi
 macro_rules! const_ret {
     ($ret_type:pat, $val:expr, $next:expr, $default:expr) => {
         if let Some($ret_type) = $next{
-            (2, InstructionBlock::ConstReturn($val))
+            (2, $val)
         } else {
             (1, $default)
         }
+    };
+}
+
+macro_rules! iconst_ret {
+    ($val:expr, $next:expr, $default:expr) => {
+        const_ret!(Instruction::IRETURN, InstructionBlock::IConstReturn($val), $next, $default)
+    };
+}
+
+macro_rules! lconst_ret {
+    ($val:expr, $next:expr, $default:expr) => {
+        const_ret!(Instruction::LRETURN, InstructionBlock::LConstReturn($val), $next, $default)
+    };
+}
+
+macro_rules! fconst_ret {
+    ($val:expr, $next:expr, $default:expr) => {
+        const_ret!(Instruction::FRETURN, InstructionBlock::FConstReturn($val), $next, $default)
+    };
+}
+
+macro_rules! dconst_ret {
+    ($val:expr, $next:expr, $default:expr) => {
+        const_ret!(Instruction::DRETURN, InstructionBlock::DConstReturn($val), $next, $default)
     };
 }
 
@@ -67,21 +91,21 @@ pub fn get_blocks(bytes: &Vec<u8>) -> BTreeMap<u16, InstructionBlock>{
             Instruction::ASTORE2 => store_without_pop!(Instruction::ALOAD2, InstructionBlock::AStoreWithoutPop(2), next, InstructionBlock::Single(instruction)),
             Instruction::ASTORE3 => store_without_pop!(Instruction::ALOAD3, InstructionBlock::AStoreWithoutPop(3), next, InstructionBlock::Single(instruction)),
             //Const Return
-            Instruction::ICONST0 => const_ret!(Instruction::IRETURN, Value::Integer(0), next, InstructionBlock::Single(instruction)),
-            Instruction::ICONST1 => const_ret!(Instruction::IRETURN, Value::Integer(1), next, InstructionBlock::Single(instruction)),
-            Instruction::ICONST2 => const_ret!(Instruction::IRETURN, Value::Integer(2), next, InstructionBlock::Single(instruction)),
-            Instruction::ICONST3 => const_ret!(Instruction::IRETURN, Value::Integer(3), next, InstructionBlock::Single(instruction)),
-            Instruction::ICONST4 => const_ret!(Instruction::IRETURN, Value::Integer(4), next, InstructionBlock::Single(instruction)),
-            Instruction::ICONST5 => const_ret!(Instruction::IRETURN, Value::Integer(5), next, InstructionBlock::Single(instruction)),
-            Instruction::ICONSTM1 => const_ret!(Instruction::IRETURN, Value::Integer(-1), next, InstructionBlock::Single(instruction)),
-            Instruction::LCONST0 => const_ret!(Instruction::LRETURN, Value::Long(0), next, InstructionBlock::Single(instruction)),
-            Instruction::LCONST1 => const_ret!(Instruction::LRETURN, Value::Long(1), next, InstructionBlock::Single(instruction)),
-            Instruction::FCONST0 => const_ret!(Instruction::FRETURN, Value::Float(0.0), next, InstructionBlock::Single(instruction)),
-            Instruction::FCONST1 => const_ret!(Instruction::FRETURN, Value::Float(1.0), next, InstructionBlock::Single(instruction)),
-            Instruction::FCONST2 => const_ret!(Instruction::FRETURN, Value::Float(2.0), next, InstructionBlock::Single(instruction)),
-            Instruction::DCONST0 => const_ret!(Instruction::DRETURN, Value::Double(0.0), next, InstructionBlock::Single(instruction)),
-            Instruction::DCONST1 => const_ret!(Instruction::DRETURN, Value::Double(1.0), next, InstructionBlock::Single(instruction)),
-            Instruction::ACONST_NULL => const_ret!(Instruction::ARETURN, Value::Null, next, InstructionBlock::Single(instruction)),
+            Instruction::ICONST0 => iconst_ret!(0, next, InstructionBlock::Single(instruction)),
+            Instruction::ICONST1 => iconst_ret!(1, next, InstructionBlock::Single(instruction)),
+            Instruction::ICONST2 => iconst_ret!(2, next, InstructionBlock::Single(instruction)),
+            Instruction::ICONST3 => iconst_ret!(3, next, InstructionBlock::Single(instruction)),
+            Instruction::ICONST4 => iconst_ret!(4, next, InstructionBlock::Single(instruction)),
+            Instruction::ICONST5 => iconst_ret!(5, next, InstructionBlock::Single(instruction)),
+            Instruction::ICONSTM1 => iconst_ret!(-1, next, InstructionBlock::Single(instruction)),
+            Instruction::LCONST0 => lconst_ret!(0, next, InstructionBlock::Single(instruction)),
+            Instruction::LCONST1 => lconst_ret!(1, next, InstructionBlock::Single(instruction)),
+            Instruction::FCONST0 => fconst_ret!(0.0, next, InstructionBlock::Single(instruction)),
+            Instruction::FCONST1 => fconst_ret!(1.0, next, InstructionBlock::Single(instruction)),
+            Instruction::FCONST2 => fconst_ret!(2.0, next, InstructionBlock::Single(instruction)),
+            Instruction::DCONST0 => dconst_ret!(0.0, next, InstructionBlock::Single(instruction)),
+            Instruction::DCONST1 => dconst_ret!(1.0, next, InstructionBlock::Single(instruction)),
+            //Instruction::ACONST_NULL => const_ret!(Instruction::ARETURN, Value::Null, next, InstructionBlock::Single(instruction)),
             instruction => {(1, InstructionBlock::Single(instruction))}
         };
         let end_index = if index_index + offset < num_indices{indices[index_index + offset]} else {indices[num_indices-1]};

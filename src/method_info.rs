@@ -4,9 +4,9 @@ use lazy_regex::{lazy_regex, Lazy};
 use regex::Regex;
 
 use crate::access_flags::{MethodFlag, MethodFlags};
-use crate::attribute::{Attribute, Code, ExceptionTable, ExceptionTableEntry, Exceptions};
+use crate::attribute::{Attribute, Code, ExceptionTable, ExceptionTableEntry, Exceptions, ProgramCounter};
 use crate::field_info::{FieldType, PrimitiveType};
-use crate::vm::bytecode::InstructionBlock;
+use crate::vm::bytecode::{self, InstructionBlock};
 
 #[derive(Debug)]
 pub struct MethodInfo{
@@ -15,6 +15,7 @@ pub struct MethodInfo{
     pub descriptor: MethodDescriptor,
     pub deprecated: bool,
     pub code: Option<Code>,
+    pub code_blocks: Option<BTreeMap<u16, InstructionBlock>>,
     pub exceptions: Option<Exceptions>,
     pub attributes: Vec<Attribute>
 }
@@ -48,6 +49,18 @@ impl MethodInfo{
         } else {
             unreachable!("No exception handlers, because Code block is missing");
         }
+    }
+
+    pub fn get_code_block_at(&self, pc: ProgramCounter) -> &InstructionBlock{
+        &self.code_blocks.as_ref().unwrap()[&pc.0]
+    }
+
+    pub fn next_pc(&self, pc: ProgramCounter) -> Option<u16>{
+        self.code_blocks.as_ref().map(|blocks| blocks.range(pc.0+1..).next()).flatten().map(|t|*t.0)
+    }
+
+    pub fn previous_pc(&self, pc: ProgramCounter) -> u16{
+        self.code_blocks.as_ref().map(|blocks| blocks.range(..pc.0).next_back()).flatten().map(|t|*t.0).unwrap()
     }
 }
 
