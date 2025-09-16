@@ -9,6 +9,7 @@ pub type VMResult<T> = Result<T, VmError>;
 pub enum VMResultType<'f, T> {
     Ok(T),
     NativeOk(T),
+    NativeException(VmError, Value<'f>),
     CallPaused(()),
     ExceptionThrown(VmError, Value<'f>),
     NeedsClassInit(Vec<()>, bool)

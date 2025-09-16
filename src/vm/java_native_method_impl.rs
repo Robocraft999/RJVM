@@ -6,6 +6,7 @@ use std::str::FromStr;
 use std::time::{SystemTime, UNIX_EPOCH};
 use libloading::{library_filename, Library, Symbol};
 use log::{debug, trace, warn};
+use crate::error::ClassParseError;
 use crate::field_info::{get_class_descriptor, FieldType, PrimitiveType};
 use crate::get_or_init;
 use crate::method_info::MethodDescriptor;
@@ -15,6 +16,7 @@ use crate::vm::value::{Reference, ReferenceType, Value};
 use crate::vm::{VM, VmError};
 use crate::vm::call_frame::CallFrame;
 use crate::vm::callstack::CallStack;
+use crate::vm::java_error::JavaError::JavaExceptionThrown;
 use crate::vm::result::{VMPartialResult, VMResultType};
 
 pub struct NativeMethodRegistry<'a>{
@@ -283,7 +285,7 @@ fn delegate_get_primitive_class<'a>(vm: &mut VM<'a>, _ : ClassRef<'a>, _: Option
 
 fn delegate_get_component_type<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, class_object: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
     debug!("getComponentType \n'{:?}'\n'{:?}'", class_object, args);
-    let class_name = VM::extract_string_from_object(&class_object.unwrap().get_field(5))?;
+    let class_name = VM::extract_class_name_from_class_object(class_object.unwrap())?;
     //let field_type = field_type_from_str(class_name.as_str());
     debug!("getComponentType '{:?}'", class_name);
 
@@ -311,7 +313,7 @@ fn delegate_desired_assertion_status<'a>(vm: &mut VM<'a>, _ : ClassRef<'a>, _: O
 fn delegate_get_declared_fields0<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, class_object: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
     debug!("getDeclaredFields");
     if let Some(clazz) = class_object {
-        let class_name = VM::extract_string_from_object(&clazz.get_field(5))?;
+        let class_name = VM::extract_class_name_from_class_object(clazz)?;
         debug!("class name: {}", class_name);
         let mut content = Vec::new();
         for field in get_or_init!(vm.get_or_resolve_class(class_name.as_str())?).fields.iter(){
@@ -417,8 +419,34 @@ fn delegate_for_name0<'a>(vm: &mut VM<'a>,  _: ClassRef<'a>, _: Option<Reference
     if let Some(name) = args.get(0) {
         let name = VM::extract_string_from_object(&name)?;
         let name = name.replace(".", "/");
+        match vm.get_or_resolve_class(&name){
+            Ok(_) => non_failing_some(Value::Reference(get_or_init!(vm.new_class_object_by_name(name)?))),
+            Err(VmError::ParseError(ClassParseError::ResolveError(_))) => {
+                let exception_class_name = String::from("java/lang/ClassNotFoundException");
+                let exception_message = format!("Class {} was not found", name);
+
+                let exception_class = get_or_init!(vm.get_or_resolve_class(&exception_class_name)?);
+                let exception_object = vm.try_new_object(&exception_class_name)?;
+                //let init = vm.get_class_method(exception_class, "<init>", "(Ljava/lang/String;)V")?;
+                let details = get_or_init!(vm.new_string_object(exception_message.clone())?);
+                //detailsMessage
+                exception_object.set_field(2, Value::Reference(details));
+                //vm.call_stack.create_and_push_call_frame(init, Some(exception_object), vec![Value::Reference(details)], false);
+                Ok(VMResultType::NativeException(
+                    VmError::JavaException(
+                        JavaExceptionThrown(
+                            exception_class_name,
+                            exception_message,
+                            String::from("java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/Class;")
+                        )
+                    ),
+                    Value::Reference(exception_object)
+                ))
+            }
+            Err(err) => Err(err)
+        }
         //let class = vm.find_class_by_name(name)?;
-        non_failing_some(Value::Reference(get_or_init!(vm.new_class_object_by_name(name)?)))
+
     } else {
         Err(VmError::ValidationError("no name".to_string()))
     }
@@ -446,8 +474,7 @@ fn delegate_is_array<'a>(vm: &mut VM<'a>,  _: ClassRef<'a>, obj: Option<Referenc
 fn delegate_is_primitive<'a>(vm: &mut VM<'a>,  _: ClassRef<'a>, obj: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
     debug!("isPrimitive {:?}", obj);
     if let Some(obj) = obj {
-        let name_object = obj.get_field(5);
-        let name = VM::extract_string_from_object(&name_object)?;
+        let name = VM::extract_class_name_from_class_object(obj)?;
         non_failing_some(Value::Integer(match name.as_str() {
             "java/lang/Boolean" | "java/lang/Character" | "java/lang/Byte"  | "java/lang/Short"  |
             "java/lang/Integer" | "java/lang/Long"      | "java/lang/Float" | "java/lang/Double" |
@@ -465,7 +492,7 @@ fn delegate_is_assignable_from<'a>(vm: &mut VM<'a>,  _: ClassRef<'a>, obj: Optio
     if let (Some(object), Some(Value::Reference(other))) = (obj, args.get(0)) {
         let this_class = get_or_init!(vm.extract_class_from_class_object(object)?);
         let from_class = get_or_init!(vm.extract_class_from_class_object(other)?);
-        non_failing_some(Value::from(get_or_init!(vm.check_if_subclass_of(this_class.name.as_str(), from_class.name.as_str())?)))
+        non_failing_some(Value::from(vm.unchecked_check_if_subclass_of(this_class.name.as_str(), from_class.name.as_str())?))
     } else {
         Err(VmError::ValidationError("expected a class reference".to_string()))
     }
@@ -508,7 +535,7 @@ fn delegate_native_lib_load<'a>(vm: &mut VM<'a>,  _: ClassRef<'a>, object: Optio
         let name = VM::extract_string_from_object(&name_field)?;
         println!("name: {name}");
 
-        unsafe {
+        /*unsafe {
             let lib_name = name;
             //let lib_name = library_filename(name);
             println!("name: {lib_name:?}");
@@ -516,7 +543,7 @@ fn delegate_native_lib_load<'a>(vm: &mut VM<'a>,  _: ClassRef<'a>, object: Optio
             let func: Symbol<fn()> = lib.get(b"JNI_OnLoad").unwrap(); // Get the function pointer
 
             func() // Call the function
-        }
+        }*/
 
         non_failing_none()
     } else {
@@ -754,8 +781,7 @@ fn delegate_define_class<'a>(vm: &mut VM<'a>, _ : ClassRef<'a>, _: Option<Refere
 
 fn delegate_allocate_instance<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
     if let Some(Value::Reference(class_object)) = args.get(0){
-        let class_name_field = class_object.get_field(5);
-        let class_name = VM::extract_string_from_object(&class_name_field)?;
+        let class_name = VM::extract_class_name_from_class_object(class_object)?;
         let object = get_or_init!(vm.new_object(class_name.as_str())?);
         non_failing_some(Value::Reference(object))
     } else {
@@ -982,6 +1008,7 @@ fn delegate_read_bytes<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, obj: Option<Referen
                     Ok(Some(Value::Integer((end - start) as i32)))
                 }*/
             } else {
+                unimplemented!("see getName0");
                 let exception_object = vm.try_new_object("java/io/IOException")?;
                 let init = vm.get_class_method(io_exception_class, "<init>", "(Ljava/lang/String;)V")?;
                 let details = get_or_init!(vm.new_string_object(format!("File {} was not found", path))?);

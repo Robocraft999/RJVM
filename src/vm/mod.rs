@@ -188,6 +188,33 @@ impl<'a> VM<'a>{
                         }
                     }
                 }
+                VMResultType::NativeException(error, throwable) => {
+                    if let VmError::JavaException(JavaError::JavaExceptionThrown(thrown_class_name, message, origin)) = error {
+                        let _frame = self.call_stack.pop_call_frame_at(frame_index);
+                        let calling_frame_index = frame_index - 1;
+                        let calling_frame = self.call_stack.frames.get(calling_frame_index).unwrap();
+
+                        let class_and_method = calling_frame.class_and_method.clone();
+                        let exception_table = class_and_method.method.get_exception_handlers();
+                        let current_pc = &self.call_stack.pcs.get(calling_frame_index).unwrap();
+                        //[unchecked] class already loaded by native
+                        if let Some(handler_pc) = self.unchecked_resolve_exception_handler(exception_table, current_pc, thrown_class_name.as_str())? {
+                            self.call_stack.pcs[calling_frame_index] = handler_pc;
+                            self.call_stack.operand_stacks[calling_frame_index].push(throwable);
+                            #[cfg(feature = "debug")]
+                            {
+                                self.debug_helper.exception_helper.push(format!("Handled Native {} by {}\n└-- thrown by {} with message: {}", thrown_class_name, class_and_method.format(), origin, message));
+                            }
+                        } else {
+                            //unimplemented!("that's a problem, because we still have to run the initializer of the exception before searching for an exception handler in the stack")
+                            self.call_stack.pop_call_frame();
+                            last_result = Some(VMResultType::ExceptionThrown(VmError::JavaException(JavaError::JavaExceptionThrown(thrown_class_name, message, origin)), throwable));
+                            debug!("Exception handler not in this function {}", class_and_method.format());
+                        }
+                    } else {
+                        unreachable!("Should not happen if all natives are configured correct")
+                    }
+                }
                 VMResultType::CallPaused(new_frame) => {
                     /*self.call_stack.push_call_frame(new_frame)*/
                     },
@@ -204,13 +231,15 @@ impl<'a> VM<'a>{
                     if let VmError::JavaException(JavaError::JavaExceptionThrown(thrown_class_name, message, origin)) = error {
                         if let Some(error_frame) = self.call_stack.frames.last(){
                             let class_and_method = error_frame.class_and_method.clone();
-                            let exception_table = class_and_method.method.get_exception_handlers().clone();
+                            let exception_table = class_and_method.method.get_exception_handlers();
                             let current_pc = &self.call_stack.get_pc();
-                            if let Some(handler_pc) = get_or_init!(self.try_resolve_exception_handler(exception_table, current_pc, thrown_class_name.as_str())?){
+                            //[unchecked] class already loaded by method
+                            if let Some(handler_pc) = self.unchecked_resolve_exception_handler(exception_table, current_pc, thrown_class_name.as_str())?{
                                 self.call_stack.set_pc(handler_pc.0);
                                 self.call_stack.push_operand_value(throwable.clone());
-                                if cfg!(feature = "debug") {
-                                    self.debug_helper.exception_helper.push(format!("Handled Exception {} handled by {}\n└-- thrown by {} with message: {}", thrown_class_name, class_and_method.format(), origin, message));
+                                #[cfg(feature = "debug")]
+                                {
+                                    self.debug_helper.exception_helper.push(format!("Handled {} by {}\n└-- thrown by {} with message: {}", thrown_class_name, class_and_method.format(), origin, message));
                                 }
                                 debug!("Exception thrown handled by {}", class_and_method.format());
                             } else {
@@ -219,7 +248,8 @@ impl<'a> VM<'a>{
                                 debug!("Exception handler not in this function {}", class_and_method.format());
                             }
                         } else {
-                            if cfg!(feature = "debug") {
+                            #[cfg(feature = "debug")]
+                            {
                                 self.debug_helper.exception_helper.push(format!("Could not handle {} thrown by function {} with message: {}", thrown_class_name, origin, message));
                                 self.debug_helper.exception_helper.print();
                             }
@@ -392,22 +422,27 @@ impl<'a> VM<'a>{
         }
     }
 
-    fn try_resolve_exception_handler(&mut self, exception_table: ExceptionTable, pc: &ProgramCounter, thrown_class_name: &str) -> VMPartialResult<'a, Option<ProgramCounter>>{
-        for handler in exception_table.0 {
+    fn resolve_exception_handler(&mut self, exception_table: &ExceptionTable, pc: &ProgramCounter, thrown_class_name: &str) -> VMPartialResult<'a, Option<ProgramCounter>>{
+        let _ = self.get_or_resolve_class(thrown_class_name)?;
+        self.unchecked_resolve_exception_handler(exception_table, pc, thrown_class_name).map(VMResultType::Ok)
+    }
+
+    fn unchecked_resolve_exception_handler(&self, exception_table: &ExceptionTable, pc: &ProgramCounter, thrown_class_name: &str) -> VMResult<Option<ProgramCounter>>{
+        for handler in &exception_table.0 {
             let can_handle = match handler.catch_type {
                 Some(ref class_name) => {
-                    get_or_init!(self.check_if_subclass_of(class_name.as_str(), thrown_class_name)?)
+                    self.unchecked_check_if_subclass_of(class_name.as_str(), thrown_class_name)?
                 }
                 None => true
             };
             if can_handle{
                 //FIXME check if end_pc is inclusive or exclusive
                 if handler.start_pc.0 <= pc.0 && pc.0 <= handler.end_pc.0{
-                    return Ok(VMResultType::Ok(Some(handler.handler_pc)));
+                    return Ok(Some(handler.handler_pc));
                 }
             }
         }
-        Ok(VMResultType::Ok(None))
+        Ok(None)
     }
 
     pub fn get_or_resolve_class(&mut self, class_name: &str) -> VMPartialResult<'a, ClassRef<'a>>{
@@ -431,6 +466,10 @@ impl<'a> VM<'a>{
         } else {
             Ok(VMResultType::Ok(resolved.get_class()))
         }
+    }
+
+    pub fn try_get_class(&self, class_name: &str) -> VMResult<ClassRef<'a>>{
+        self.find_class_by_name(class_name.to_owned()).ok_or(VmError::ClassNotLoadedError(format!("[try_get_class]: Class not loaded: {}", class_name)))
     }
 
     pub fn define_class(&mut self, class_name: &str, bytes: Vec<u8>) -> VMPartialResult<'a, Reference<'a>>{
@@ -582,7 +621,7 @@ impl<'a> VM<'a>{
     pub fn new_class_object(&mut self, class_name: String, class_id: ClassId) -> VMPartialResult<'a, Reference<'a>>{
         if !self.class_objects.contains_key(&class_id){
             let class_object = get_or_init!(self.new_object("java/lang/Class")?);
-            let string_object = get_or_init!(self.new_string_object(class_name)?);
+            let string_object = get_or_init!(self.new_string_object(class_name.replace("/", "."))?);
 
             //name
             class_object.set_field(5, Value::Reference(string_object));
@@ -614,18 +653,23 @@ impl<'a> VM<'a>{
         Ok(VMResultType::Ok(class))
     }
     
-    pub fn check_if_subclass_of(&mut self, class_name: &str, of_name: &str) -> VMPartialResult<'a, bool>{
-        //println!("HELPME  {}", class_name);
-        let mut current_class = get_or_init!(self.get_or_resolve_class(of_name)?);
+    pub fn extract_class_name_from_class_object(object: Reference<'a>) -> VMResult<String>{
+        let name_object = object.get_field(5);
+        let name = VM::extract_string_from_object(&name_object)?;
+        let name = name.replace(".", "/");
+        Ok(name)
+    }
+
+    pub fn unchecked_check_if_subclass_of(&self, class_name: &str, of_name: &str) -> VMResult<bool>{
+        let mut current_class = self.try_get_class(of_name)?;
         loop {
-            //println!("HELPME2 {}", current_class.name);
             if current_class.name == class_name {
-                return Ok(VMResultType::Ok(true));
+                return Ok(true);
             }
             if let Some(super_class) = current_class.superclass {
                 current_class = super_class;
             } else {
-                return Ok(VMResultType::Ok(false));
+                return Ok(false);
             }
         }
     }

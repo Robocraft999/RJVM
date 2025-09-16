@@ -374,6 +374,7 @@ pub enum Instruction{
     RET(u8)        = 0xa9,
 
     TABLESWITCH(i32, i32, i32, Vec<i32>) = 0xaa,
+    //TODO use vector of (i32, u16)
     LOOKUPSWITCH(i32, Vec<i32>)          = 0xab,
 
     IRETURN  = 0xac,

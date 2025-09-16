@@ -133,7 +133,7 @@ fn main() {
     println!("Booting up VM");
     let mut vm = VM::new(class_path);
     
-    simple_logger::SimpleLogger::new().with_level(LevelFilter::Trace).without_timestamps().init().unwrap();
+    //simple_logger::SimpleLogger::new().with_level(LevelFilter::Trace).without_timestamps().init().unwrap();
     //run_and_catch_method(&mut vm, "Test", "main", "([Ljava/lang/String;)V");
     //return
 
@@ -151,13 +151,21 @@ fn main() {
         Err(error) => {
             println!("'{}'", error);
             error!("Init System: {}", error);
+            #[cfg(feature = "debug")]
+            {
+                vm.debug_helper.exception_helper.print();
+            }
             panic!();
         }
     }
 
-    //simple_logger::SimpleLogger::new().with_level(LevelFilter::Trace).without_timestamps().init().unwrap();
+    #[cfg(feature = "debug")]
+    {
+        vm.debug_helper.exception_helper.print();
+    }
+
+    simple_logger::SimpleLogger::new().with_level(LevelFilter::Error).without_timestamps().init().unwrap();
     println!("Init complete. Starting Main Program");
-    panic!();
 
     //vm.class_manager.get_or_resolve_class("Empty").expect("TODO: panic message");
     //run_and_catch_method(&mut vm, "Test", "main", "([Ljava/lang/String;)V");
@@ -165,7 +173,8 @@ fn main() {
     let args = env::args().skip(1).map(|s| Value::Reference(vm.try_new_string_object(s).unwrap())).collect();
     let args_array = vm.try_new_array(1, FieldType::Object("java/lang/String".to_string()).to_array_field_type(1), RefCell::new(args)).unwrap();
     let p_args = vec![Value::Reference(args_array)];
-    run_and_catch_method(&mut vm, "de/klassenserver7b/k7bot/Main", "main", "([Ljava/lang/String;)V", p_args);
+    //run_and_catch_method(&mut vm, "de/klassenserver7b/k7bot/Main", "main", "([Ljava/lang/String;)V", p_args);
+    run_and_catch_method(&mut vm, "Hello", "main", "([Ljava/lang/String;)V", p_args);
 
     //parse_class_file(&class_path, "java/lang/Exception");
 

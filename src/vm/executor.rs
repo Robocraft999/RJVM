@@ -112,7 +112,7 @@ pub fn execute_current_block<'a>(vm: &mut VM<'a>) -> Option<VMPartialResult<'a, 
                 Instruction::ALOAD2 => wrap_error!(aload(vm, 2)),
                 Instruction::ALOAD3 => wrap_error!(aload(vm, 3)),
 
-                Instruction::IALOAD | Instruction::AALOAD | Instruction::CALOAD => {
+                Instruction::IALOAD | Instruction::AALOAD | Instruction::BALOAD | Instruction::CALOAD => {
                     let index = vm.call_stack.pop_operand_value().unwrap().expect_int().unwrap();
                     let array = vm.call_stack.pop_operand_value();
                     debug!("XALOAD: {:?}[{}]", array, index);
@@ -122,6 +122,7 @@ pub fn execute_current_block<'a>(vm: &mut VM<'a>) -> Option<VMPartialResult<'a, 
                 }
 
                 Instruction::ISTORE(index) => wrap_error!(istore(vm, *index as usize)),
+                Instruction::LSTORE(index) => wrap_error!(lstore(vm, *index as usize)),
                 Instruction::ASTORE(index) => wrap_error!(astore(vm, *index as usize)),
 
                 Instruction::ISTORE0 => wrap_error!(istore(vm, 0)),
@@ -129,10 +130,10 @@ pub fn execute_current_block<'a>(vm: &mut VM<'a>) -> Option<VMPartialResult<'a, 
                 Instruction::ISTORE2 => wrap_error!(istore(vm, 2)),
                 Instruction::ISTORE3 => wrap_error!(istore(vm, 3)),
 
-                Instruction::LSTORE0 => lstore(vm, 0),
-                Instruction::LSTORE1 => lstore(vm, 1),
-                Instruction::LSTORE2 => lstore(vm, 2),
-                Instruction::LSTORE3 => lstore(vm, 3),
+                Instruction::LSTORE0 => wrap_error!(lstore(vm, 0)),
+                Instruction::LSTORE1 => wrap_error!(lstore(vm, 1)),
+                Instruction::LSTORE2 => wrap_error!(lstore(vm, 2)),
+                Instruction::LSTORE3 => wrap_error!(lstore(vm, 3)),
 
                 Instruction::ASTORE0 => wrap_error!(astore(vm, 0)),
                 Instruction::ASTORE1 => wrap_error!(astore(vm, 1)),
@@ -188,10 +189,18 @@ pub fn execute_current_block<'a>(vm: &mut VM<'a>) -> Option<VMPartialResult<'a, 
                 Instruction::LADD => wrap_error!(execute_l_arithmetic(vm, |val1, val2| Ok(val1.wrapping_add(val2)))),
 
                 Instruction::ISUB => wrap_error!(execute_i_arithmetic(vm, |val1, val2| Ok(val1.wrapping_sub(val2)))),
+                Instruction::LSUB => wrap_error!(execute_l_arithmetic(vm, |val1, val2| Ok(val1.wrapping_sub(val2)))),
 
                 Instruction::IMUL => wrap_error!(execute_i_arithmetic(vm, |val1, val2| Ok(val1.wrapping_mul(val2)))),
                 Instruction::FMUL => wrap_error!(execute_f_arithmetic(vm, |val1, val2| Ok(val1 * val2))),
 
+                Instruction::IDIV => wrap_error!(execute_i_arithmetic(vm, |val1, val2| {
+                    if val2 != 0 {
+                        Ok(val1.wrapping_div(val2))
+                    } else {
+                        Err(VmError::JavaException(JavaError::DivisionByZero))
+                    }
+                })),
                 Instruction::FDIV => wrap_error!(execute_f_arithmetic(vm, |val1, val2| {
                     if val2 != 0.0 {
                         Ok(val1 / val2)
@@ -230,6 +239,7 @@ pub fn execute_current_block<'a>(vm: &mut VM<'a>) -> Option<VMPartialResult<'a, 
                     }
                 }
 
+                //TODO fix conversions to work always
                 Instruction::I2L => {
                     let value = vm.call_stack.pop_operand_value().unwrap();
                     debug!("I2L");
@@ -264,6 +274,24 @@ pub fn execute_current_block<'a>(vm: &mut VM<'a>) -> Option<VMPartialResult<'a, 
                         vm.call_stack.push_operand_value(Value::Integer(val as i32));
                     } else {
                         warn!("F2I Conversion failed, because {value:?} is not of type Float")
+                    }
+                }
+                Instruction::I2B => {
+                    let value = vm.call_stack.pop_operand_value().unwrap();
+                    debug!("I2B");
+                    if let Value::Integer(val) = value {
+                        vm.call_stack.push_operand_value(Value::Integer((val as u8) as i32));
+                    } else {
+                        warn!("I2B Conversion failed, because {value:?} is not of type Integer")
+                    }
+                }
+                Instruction::I2C => {
+                    let value = vm.call_stack.pop_operand_value().unwrap();
+                    debug!("I2C");
+                    if let Value::Integer(val) = value {
+                        vm.call_stack.push_operand_value(Value::Integer((val as u16) as i32));
+                    } else {
+                        warn!("I2C Conversion failed, because {value:?} is not of type Integer")
                     }
                 }
 
@@ -322,6 +350,7 @@ pub fn execute_current_block<'a>(vm: &mut VM<'a>) -> Option<VMPartialResult<'a, 
                                 vm.call_stack.set_pc(*target);
                             }
                         }
+                        (Value::Null, Value::Null) => vm.call_stack.set_pc(*target),
                         _ => {}
                     };
                 }
@@ -335,16 +364,29 @@ pub fn execute_current_block<'a>(vm: &mut VM<'a>) -> Option<VMPartialResult<'a, 
                                 vm.call_stack.set_pc(*target);
                             }
                         }
+                        (Value::Reference(_), Value::Null) | (Value::Null, Value::Reference(_)) => vm.call_stack.set_pc(*target),
                         _ => {}
                     };
                 }
 
                 Instruction::GOTO(target) => vm.call_stack.set_pc(*target),
 
-                Instruction::INVOKEVIRTUAL(index) => { return Some(execute_invoke(vm, *index, InvokeKind::VIRTUAL)) }
-                Instruction::INVOKESPECIAL(index) => { return Some(execute_invoke(vm, *index, InvokeKind::SPECIAL)) }
-                Instruction::INVOKESTATIC(index) => { return Some(execute_invoke(vm, *index, InvokeKind::STATIC)) }
-                Instruction::INVOKEINTERFACE(index, _, _) => { return Some(execute_invoke(vm, *index, InvokeKind::INTERFACE)) }
+                Instruction::LOOKUPSWITCH(default, pair_stream) => {
+                    let popped = vm.call_stack.pop_operand_value().unwrap().expect_int().unwrap();
+                    debug!("LOOKUPSWITCH: {}", popped);
+                    let mut use_default = true;
+                    for chunk in pair_stream.chunks(2){
+                        let (int_match, target) = (chunk[0], chunk[1]);
+                        if int_match == popped{
+                            vm.call_stack.set_pc(target as u16);
+                            use_default = false;
+                            break;
+                        }
+                    }
+                    if use_default{
+                        vm.call_stack.set_pc(*default as u16);
+                    }
+                }
 
                 Instruction::IRETURN | Instruction::LRETURN | Instruction::FRETURN | Instruction::ARETURN => {
                     //TODO seperate for validation
@@ -409,6 +451,11 @@ pub fn execute_current_block<'a>(vm: &mut VM<'a>) -> Option<VMPartialResult<'a, 
                     }
                 }
 
+                Instruction::INVOKEVIRTUAL(index) => { return Some(execute_invoke(vm, *index, InvokeKind::VIRTUAL)) }
+                Instruction::INVOKESPECIAL(index) => { return Some(execute_invoke(vm, *index, InvokeKind::SPECIAL)) }
+                Instruction::INVOKESTATIC(index) => { return Some(execute_invoke(vm, *index, InvokeKind::STATIC)) }
+                Instruction::INVOKEINTERFACE(index, _, _) => { return Some(execute_invoke(vm, *index, InvokeKind::INTERFACE)) }
+
                 Instruction::NEW(index) => {
                     let class_name = class_and_method.get_constant_utf8(*index).unwrap();
                     let new_object = get_or_init_option!(vm.new_object(class_name.as_str()));
@@ -464,8 +511,9 @@ pub fn execute_current_block<'a>(vm: &mut VM<'a>) -> Option<VMPartialResult<'a, 
                         let string_value = error.get_field(2);
                         let string = VM::extract_string_from_object(&string_value).unwrap();
                         let exception_name = vm.class_manager.find_class_by_id(error.class_id).unwrap().name.clone();
-                        if cfg!(feature = "debug"){
-                            vm.debug_helper.exception_helper.push(format!("Throw   Exception {}: {}\n└-- thrown by {} at {}", exception_name, string, class_and_method.format(), vm.call_stack.get_pc().0));
+                        #[cfg(feature = "debug")]
+                        {
+                            vm.debug_helper.exception_helper.push(format!("Throw   {}: {}\n└-- thrown by {} at {}", exception_name, string, class_and_method.format(), vm.call_stack.get_pc().0));
                         }
                         return Some(Ok(VMResultType::ExceptionThrown(VmError::JavaException(JavaError::JavaExceptionThrown(exception_name, string, class_and_method.format())), Value::Reference(error))));
                     }
@@ -567,11 +615,12 @@ fn istore(vm: &mut VM, index: usize) -> VMResult<()> {
 }
 
 //TODO validation
-fn lstore(vm: &mut VM, index: usize){
+fn lstore(vm: &mut VM, index: usize) -> VMResult<()> {
     let value = vm.call_stack.pop_operand_value().unwrap();
     debug!("LSTORE{} {:?}", index, value);
     vm.call_stack.store_local(value, index);
     vm.call_stack.store_local(Value::Dummy, index+1);
+    Ok(())
 }
 
 fn astore(vm: &mut VM, index: usize) -> VMResult<()> {
@@ -853,7 +902,6 @@ fn get_method_interface_virtual<'a>(class: ClassRef<'a>, method_name: &str, desc
 fn get_constant_as_value<'a>(vm: &mut VM<'a>, index: u16) -> VMPartialResult<'a, Value<'a>>{
     let class_and_method = &vm.call_stack.frames.last().unwrap().class_and_method.clone();
     let constant_value = class_and_method.class.get_constant(index).unwrap();
-    println!("TTT {} {:?}", index, constant_value);
     let value = match constant_value {
         ConstantPoolEntry::Integer(value) => Value::Integer(value),
         ConstantPoolEntry::Long(value) => Value::Long(value),
