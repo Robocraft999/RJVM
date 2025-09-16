@@ -157,6 +157,7 @@ fn main() {
 
     //simple_logger::SimpleLogger::new().with_level(LevelFilter::Trace).without_timestamps().init().unwrap();
     println!("Init complete. Starting Main Program");
+    panic!();
 
     //vm.class_manager.get_or_resolve_class("Empty").expect("TODO: panic message");
     //run_and_catch_method(&mut vm, "Test", "main", "([Ljava/lang/String;)V");

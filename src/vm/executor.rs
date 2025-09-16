@@ -33,7 +33,7 @@ pub fn execute_current_block<'a>(vm: &mut VM<'a>) -> Option<VMPartialResult<'a, 
     let class_and_method = &vm.call_stack.frames.last().unwrap().class_and_method.clone();
     let block = class_and_method.method.get_code_block_at(vm.call_stack.get_pc());
     let current_pc = vm.call_stack.get_pc();
-    trace!("{:?}", block);
+    trace!(">{:03} {:?}", current_pc.0, block);
     trace!("stack[{}]=", class_and_method.get_max_stack_size());
     for (index, value) in vm.call_stack.operand_stacks.last().unwrap().iter().enumerate(){
         trace!("    [{}] {:?}", index, value);
