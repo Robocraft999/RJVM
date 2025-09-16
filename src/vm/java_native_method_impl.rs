@@ -396,8 +396,8 @@ fn delegate_get_class_modifiers<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, class_obje
     }
 }
 
-fn delegate_get_super_class<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, class_object: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
-    if let Some(obj) = class_object{
+fn delegate_get_super_class<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, this: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
+    if let Some(obj) = this {
         let class = get_or_init!(vm.extract_class_from_class_object(obj)?);
         match class.superclass {
             Some(super_class) => {

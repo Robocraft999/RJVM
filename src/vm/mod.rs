@@ -23,6 +23,7 @@ use crate::method_info::{MethodDescriptor, MethodInfo};
 use crate::vm::call_frame::CallFrame;
 use crate::vm::class::{Class, ClassAndMethod, ClassId, ClassRef};
 use crate::vm::class_manager::ResolvedClass;
+use crate::vm::debug::DebugHelper;
 use crate::vm::gc::ObjectAllocator;
 use crate::vm::java_error::JavaError;
 use crate::vm::java_native_method_impl::{NativeMethodRegistry, register_all_natives};
@@ -44,6 +45,7 @@ mod r#unsafe;
 pub mod result;
 pub mod bytecode; //TODO move out from vm
 mod executor;
+mod debug;
 
 pub struct VM<'a>{
     pub class_manager: ClassManager<'a>,
@@ -56,7 +58,7 @@ pub struct VM<'a>{
     pub native_method_registry: NativeMethodRegistry<'a>,
     pub currently_open_files: HashMap<String, (Vec<u8>, usize)>,
     pub current_thread: Option<Reference<'a>>,
-    pub init_call_stack: CallStack<'a>,
+    pub debug_helper: DebugHelper,
 }
 
 impl<'a> VM<'a>{
@@ -130,7 +132,7 @@ impl<'a> VM<'a>{
             native_method_registry,
             currently_open_files: HashMap::new(),
             current_thread: None,
-            init_call_stack: CallStack::new(),
+            debug_helper: DebugHelper::new()
         }
     }
 
@@ -207,6 +209,9 @@ impl<'a> VM<'a>{
                             if let Some(handler_pc) = get_or_init!(self.try_resolve_exception_handler(exception_table, current_pc, thrown_class_name.as_str())?){
                                 self.call_stack.set_pc(handler_pc.0);
                                 self.call_stack.push_operand_value(throwable.clone());
+                                if cfg!(feature = "debug") {
+                                    self.debug_helper.exception_helper.push(format!("Handled Exception {} handled by {}\n└-- thrown by {} with message: {}", thrown_class_name, class_and_method.format(), origin, message));
+                                }
                                 debug!("Exception thrown handled by {}", class_and_method.format());
                             } else {
                                 self.call_stack.pop_call_frame();
@@ -214,6 +219,10 @@ impl<'a> VM<'a>{
                                 debug!("Exception handler not in this function {}", class_and_method.format());
                             }
                         } else {
+                            if cfg!(feature = "debug") {
+                                self.debug_helper.exception_helper.push(format!("Could not handle {} thrown by function {} with message: {}", thrown_class_name, origin, message));
+                                self.debug_helper.exception_helper.print();
+                            }
                             panic!("Could not handle {} thrown by function {} with message: {}", thrown_class_name, origin, message)
                         }
                     } else {
@@ -575,6 +584,7 @@ impl<'a> VM<'a>{
             let class_object = get_or_init!(self.new_object("java/lang/Class")?);
             let string_object = get_or_init!(self.new_string_object(class_name)?);
 
+            //name
             class_object.set_field(5, Value::Reference(string_object));
 
             self.class_objects.insert(class_id, class_object);

@@ -464,6 +464,9 @@ pub fn execute_current_block<'a>(vm: &mut VM<'a>) -> Option<VMPartialResult<'a, 
                         let string_value = error.get_field(2);
                         let string = VM::extract_string_from_object(&string_value).unwrap();
                         let exception_name = vm.class_manager.find_class_by_id(error.class_id).unwrap().name.clone();
+                        if cfg!(feature = "debug"){
+                            vm.debug_helper.exception_helper.push(format!("Throw   Exception {}: {}\n└-- thrown by {} at {}", exception_name, string, class_and_method.format(), vm.call_stack.get_pc().0));
+                        }
                         return Some(Ok(VMResultType::ExceptionThrown(VmError::JavaException(JavaError::JavaExceptionThrown(exception_name, string, class_and_method.format())), Value::Reference(error))));
                     }
                     return Some(Err(VmError::JavaException(JavaError::JavaExceptionThrown("JavaException".to_string(), "Unknown".to_string(), class_and_method.format()))));
