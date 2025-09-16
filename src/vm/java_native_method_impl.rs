@@ -764,20 +764,11 @@ fn delegate_allocate_instance<'a>(vm: &mut VM<'a>, _: ClassRef<'a>, _: Option<Re
 }
 
 fn delegate_get_caller_class<'a>(vm: &mut VM<'a>, class : ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
-    if vm.init_call_stack.frames.len() == 0{
-        let frame_index = vm.call_stack.frames.len() - 2;
-        if let Some(frame) = vm.call_stack.frames.get(frame_index){
-            non_failing_some(Value::Reference(get_or_init!(vm.new_class_object_by_name(frame.class_and_method.class.name.clone())?)))
-        } else {
-            Err(VmError::ValidationError("There is no parent Callframe".to_string()))
-        }
+    let frame_index = vm.call_stack.frames.len() - 2 - 1;
+    if let Some(frame) = vm.call_stack.frames.get(frame_index){
+        non_failing_some(Value::Reference(get_or_init!(vm.new_class_object_by_name(frame.class_and_method.class.name.clone())?)))
     } else {
-        //FIXME not sure if this works if the caller class is on the init call stack
-        if let Some(class_and_method) = &vm.call_stack.current_frame{
-            non_failing_some(Value::Reference(get_or_init!(vm.new_class_object_by_name(class_and_method.class.name.clone())?)))
-        } else {
-            Err(VmError::ValidationError("There is no parent Callframe (in clinit)".to_string()))
-        }
+        Err(VmError::ValidationError("There is no parent Callframe".to_string()))
     }
 }
 
