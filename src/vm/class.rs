@@ -206,7 +206,7 @@ impl<'a> ClassAndMethod<'a>{
         if let Some(code) = &self.method.code{
             code.max_locals as usize
         } else {
-            self.method.descriptor.args.len() + if self.method.is_static() {0} else {1}
+            self.method.descriptor.args.iter().map(FieldType::get_locals_length).sum::<usize>() + if self.method.is_static() {0} else {1}
         }
     }
 

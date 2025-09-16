@@ -80,18 +80,33 @@ impl FieldType {
         }
     }
 
+    pub fn get_locals_length(&self) -> usize{
+        match self{
+            FieldType::Object(_) => 1,
+            FieldType::Array(_, _) => 1,
+            FieldType::Primitive(PrimitiveType::Boolean) => 1,
+            FieldType::Primitive(PrimitiveType::Byte) => 1,
+            FieldType::Primitive(PrimitiveType::Char) => 1,
+            FieldType::Primitive(PrimitiveType::Short) => 1,
+            FieldType::Primitive(PrimitiveType::Integer) => 1,
+            FieldType::Primitive(PrimitiveType::Long) => 2,
+            FieldType::Primitive(PrimitiveType::Float) => 1,
+            FieldType::Primitive(PrimitiveType::Double) => 2,
+        }
+    }
+
     pub fn get_default_value<'a>(&self) -> Value<'a> {
         match self {
             FieldType::Primitive(primitive) => {
                 match primitive {
                     PrimitiveType::Boolean => Value::Integer(0),
                     PrimitiveType::Byte => Value::Integer(0),
+                    PrimitiveType::Char => Value::Integer(0),
                     PrimitiveType::Short => Value::Integer(0),
                     PrimitiveType::Integer => Value::Integer(0),
                     PrimitiveType::Long => Value::Long(0),
                     PrimitiveType::Float => Value::Float(0f32),
                     PrimitiveType::Double => Value::Double(0f64),
-                    PrimitiveType::Char => Value::Integer(0),
                 }
             }
             FieldType::Object(_) => Value::Null,
