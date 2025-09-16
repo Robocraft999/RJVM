@@ -60,7 +60,7 @@ impl MethodInfo{
     }
 
     pub fn previous_pc(&self, pc: ProgramCounter) -> u16{
-        self.code_blocks.as_ref().map(|blocks| blocks.range(..pc.0).next_back()).flatten().map(|t|*t.0).unwrap()
+        self.code_blocks.as_ref().map(|blocks| blocks.range(..pc.0).next_back()).flatten().map(|t|*t.0).unwrap_or(0)
     }
 }
 

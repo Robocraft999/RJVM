@@ -21,6 +21,7 @@ use crate::vm::value::{ReferenceType, Value};
 #[derive(Clone)]
 pub struct CallFrame<'a>{
     pub class_and_method: ClassAndMethod<'a>,
+    pub should_push_return: bool,
 }
 
 impl<'a> CallFrame<'a>{

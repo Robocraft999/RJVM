@@ -109,7 +109,7 @@ pub fn get_blocks(bytes: &Vec<u8>) -> BTreeMap<u16, InstructionBlock>{
             instruction => {(1, InstructionBlock::Single(instruction))}
         };
         let end_index = if index_index + offset < num_indices{indices[index_index + offset]} else {indices[num_indices-1]};
-        if labels.iter().any(|&l| l > index && l < end_index){
+        if labels.iter().any(|&l| l > index && l <= end_index){
             blocks.insert(index, InstructionBlock::Single(code_to_instruction_map[&index].clone()));
             index_index += 1;
         } else {

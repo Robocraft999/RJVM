@@ -2,6 +2,7 @@ use std::{cell::RefCell, str::FromStr};
 
 use log::{debug, error, info, trace, warn};
 use crate::{bytecode::Instruction, constants::ConstantPoolEntry, field_info::{FieldType, PrimitiveType}, get_or_init, get_or_init_option, method_info::MethodDescriptor, vm::{bytecode::InstructionBlock, class::{ClassAndMethod, ClassRef}, java_error::JavaError, result::VMResult, value::{ReferenceType, Value}, VmError, VM}};
+use crate::class_file::get_constant_printable;
 use crate::vm::result::{VMResultType, VMPartialResult};
 
 macro_rules! wrap_error {
@@ -51,12 +52,18 @@ pub fn execute_current_block<'a>(vm: &mut VM<'a>) -> Option<VMPartialResult<'a, 
                 Instruction::ACONST_NULL => {
                     vm.call_stack.push_operand_value(Value::Null);
                 }
+                Instruction::ICONSTM1 => x_const(vm, Value::Integer(-1)),
                 Instruction::ICONST0 => x_const(vm, Value::Integer(0)),
                 Instruction::ICONST1 => x_const(vm, Value::Integer(1)),
                 Instruction::ICONST2 => x_const(vm, Value::Integer(2)),
                 Instruction::ICONST3 => x_const(vm, Value::Integer(3)),
                 Instruction::ICONST4 => x_const(vm, Value::Integer(4)),
                 Instruction::ICONST5 => x_const(vm, Value::Integer(5)),
+                Instruction::LCONST0 => x_const(vm, Value::Long(0)),
+                Instruction::LCONST1 => x_const(vm, Value::Long(1)),
+                Instruction::FCONST0 => x_const(vm, Value::Float(0.0)),
+                Instruction::FCONST1 => x_const(vm, Value::Float(1.0)),
+                Instruction::FCONST2 => x_const(vm, Value::Float(2.0)),
                 Instruction::BIPUSH(value) => {
                     debug!("BIPUSH {:?}", value);
                     vm.call_stack.push_operand_value(Value::Integer(*value as i32))
@@ -80,12 +87,32 @@ pub fn execute_current_block<'a>(vm: &mut VM<'a>) -> Option<VMPartialResult<'a, 
                 }
 
                 Instruction::ILOAD(index) => wrap_error!(iload(vm, *index as usize)),
+                Instruction::LLOAD(index) => wrap_error!(lload(vm, *index as usize)),
                 Instruction::ALOAD(index) => wrap_error!(aload(vm, *index as usize)),
+
+                Instruction::ILOAD0 => wrap_error!(iload(vm, 0)),
+                Instruction::ILOAD1 => wrap_error!(iload(vm, 1)),
+                Instruction::ILOAD2 => wrap_error!(iload(vm, 2)),
+                Instruction::ILOAD3 => wrap_error!(iload(vm, 3)),
+
                 Instruction::LLOAD0 => wrap_error!(lload(vm, 0)),
                 Instruction::LLOAD1 => wrap_error!(lload(vm, 1)),
                 Instruction::LLOAD2 => wrap_error!(lload(vm, 2)),
+                Instruction::LLOAD3 => wrap_error!(lload(vm, 3)),
+
+                Instruction::FLOAD0 => wrap_error!(fload(vm, 0)),
+                Instruction::FLOAD1 => wrap_error!(fload(vm, 1)),
+                Instruction::FLOAD2 => wrap_error!(fload(vm, 2)),
+                Instruction::FLOAD3 => wrap_error!(fload(vm, 3)),
+
+                Instruction::DLOAD0 => wrap_error!(dload(vm, 0)),
+
                 Instruction::ALOAD0 => wrap_error!(aload(vm, 0)),
-                Instruction::IALOAD => {
+                Instruction::ALOAD1 => wrap_error!(aload(vm, 1)),
+                Instruction::ALOAD2 => wrap_error!(aload(vm, 2)),
+                Instruction::ALOAD3 => wrap_error!(aload(vm, 3)),
+
+                Instruction::IALOAD | Instruction::AALOAD | Instruction::CALOAD => {
                     let index = vm.call_stack.pop_operand_value().unwrap().expect_int().unwrap();
                     let array = vm.call_stack.pop_operand_value();
                     debug!("XALOAD: {:?}[{}]", array, index);
@@ -96,9 +123,22 @@ pub fn execute_current_block<'a>(vm: &mut VM<'a>) -> Option<VMPartialResult<'a, 
 
                 Instruction::ISTORE(index) => wrap_error!(istore(vm, *index as usize)),
                 Instruction::ASTORE(index) => wrap_error!(astore(vm, *index as usize)),
+
+                Instruction::ISTORE0 => wrap_error!(istore(vm, 0)),
+                Instruction::ISTORE1 => wrap_error!(istore(vm, 1)),
+                Instruction::ISTORE2 => wrap_error!(istore(vm, 2)),
+                Instruction::ISTORE3 => wrap_error!(istore(vm, 3)),
+
                 Instruction::LSTORE0 => lstore(vm, 0),
                 Instruction::LSTORE1 => lstore(vm, 1),
                 Instruction::LSTORE2 => lstore(vm, 2),
+                Instruction::LSTORE3 => lstore(vm, 3),
+
+                Instruction::ASTORE0 => wrap_error!(astore(vm, 0)),
+                Instruction::ASTORE1 => wrap_error!(astore(vm, 1)),
+                Instruction::ASTORE2 => wrap_error!(astore(vm, 2)),
+                Instruction::ASTORE3 => wrap_error!(astore(vm, 3)),
+
                 Instruction::IASTORE | Instruction::AASTORE | Instruction::CASTORE | Instruction::BASTORE | Instruction::SASTORE => {
                     //TODO validate type of value to fit instruction
                     let value = vm.call_stack.pop_operand_value().unwrap();
@@ -110,16 +150,61 @@ pub fn execute_current_block<'a>(vm: &mut VM<'a>) -> Option<VMPartialResult<'a, 
                     }
                 }
 
+                Instruction::POP => {
+                    debug!("POP");
+                    if vm.call_stack.pop_operand_value().is_none(){
+                        return Some(Err(VmError::ValidationError("Expected a value to pop but Stack was empty".to_string())));
+                    }
+                }
                 Instruction::DUP => {
                     let top = vm.call_stack.pop_operand_value().unwrap();
                     vm.call_stack.push_operand_value(top.clone());
                     vm.call_stack.push_operand_value(top);
                 }
+                Instruction::DUPX1 => {
+                    debug!("DUPX1");
+                    let value = vm.call_stack.pop_operand_value().unwrap();
+                    let value2 = vm.call_stack.pop_operand_value().unwrap();
+                    vm.call_stack.push_operand_value(value.clone());
+                    vm.call_stack.push_operand_value(value2);
+                    vm.call_stack.push_operand_value(value);
+                }
+                Instruction::DUP2 => {
+                    debug!("DUP2");
+                    let value1 = vm.call_stack.pop_operand_value().unwrap();
+                    if value1.get_computational_type() == 1{
+                        let value2 = vm.call_stack.pop_operand_value().unwrap();
+                        vm.call_stack.push_operand_value(value2.clone());
+                        vm.call_stack.push_operand_value(value1.clone());
+                        vm.call_stack.push_operand_value(value2);
+                        vm.call_stack.push_operand_value(value1);
+                    } else {
+                        vm.call_stack.push_operand_value(value1.clone());
+                        vm.call_stack.push_operand_value(value1);
+                    }
+                }
 
                 Instruction::IADD => wrap_error!(execute_i_arithmetic(vm, |val1, val2| Ok(val1.wrapping_add(val2)))),
+                Instruction::LADD => wrap_error!(execute_l_arithmetic(vm, |val1, val2| Ok(val1.wrapping_add(val2)))),
+
+                Instruction::ISUB => wrap_error!(execute_i_arithmetic(vm, |val1, val2| Ok(val1.wrapping_sub(val2)))),
+
                 Instruction::IMUL => wrap_error!(execute_i_arithmetic(vm, |val1, val2| Ok(val1.wrapping_mul(val2)))),
+                Instruction::FMUL => wrap_error!(execute_f_arithmetic(vm, |val1, val2| Ok(val1 * val2))),
+
+                Instruction::FDIV => wrap_error!(execute_f_arithmetic(vm, |val1, val2| {
+                    if val2 != 0.0 {
+                        Ok(val1 / val2)
+                    } else {
+                        Err(VmError::JavaException(JavaError::DivisionByZero))
+                    }
+                })),
+
+                Instruction::IREM => wrap_error!(execute_i_arithmetic(vm, |val1, val2| Ok(val1.wrapping_rem(val2)))),
+                Instruction::LREM => wrap_error!(execute_l_arithmetic(vm, |val1, val2| Ok(val1.wrapping_rem(val2)))),
 
                 Instruction::ISHL => wrap_error!(execute_i_arithmetic(vm, |val1, val2| Ok(val1 << (val2 & 0x1f)))),
+                Instruction::ISHR => wrap_error!(execute_i_arithmetic(vm, |val1, val2| Ok(val1 >> (val2 & 0x1f)))),
                 Instruction::IUSHR => wrap_error!(execute_i_arithmetic(vm, |val1, val2| {
                     if val1 > 0{
                         Ok(val1 >> (val2 & 0x1f))
@@ -134,6 +219,9 @@ pub fn execute_current_block<'a>(vm: &mut VM<'a>) -> Option<VMPartialResult<'a, 
                         Ok(((val1 as u64) >> (val2 & 0x1f)) as i64)
                     }
                 })),
+
+                Instruction::IAND =>  wrap_error!(execute_i_arithmetic(vm, |val1, val2| Ok(val1 & val2))),
+                Instruction::LAND =>  wrap_error!(execute_l_arithmetic(vm, |val1, val2| Ok(val1 & val2))),
                 Instruction::IOR  =>  wrap_error!(execute_i_arithmetic(vm, |val1, val2| Ok(val1 | val2))),
                 Instruction::IXOR  => wrap_error!(execute_i_arithmetic(vm, |val1, val2| Ok(val1 ^ val2))),
                 Instruction::IINC(index, amount) => {
@@ -142,24 +230,114 @@ pub fn execute_current_block<'a>(vm: &mut VM<'a>) -> Option<VMPartialResult<'a, 
                     }
                 }
 
+                Instruction::I2L => {
+                    let value = vm.call_stack.pop_operand_value().unwrap();
+                    debug!("I2L");
+                    if let Value::Integer(val) = value {
+                        vm.call_stack.push_operand_value(Value::Long(val as i64));
+                    } else {
+                        warn!("I2L Conversion failed, because {value:?} is not of type Integer")
+                    }
+                }
+                Instruction::I2F => {
+                    let value = vm.call_stack.pop_operand_value().unwrap();
+                    debug!("I2F");
+                    if let Value::Integer(val) = value {
+                        vm.call_stack.push_operand_value(Value::Float(val as f32));
+                    } else {
+                        warn!("I2F Conversion failed, because {value:?} is not of type Integer")
+                    }
+                }
                 Instruction::L2I => {
                     let value = vm.call_stack.pop_operand_value().unwrap();
                     debug!("L2I");
-                    if let Value::Long(long) = value {
-                        vm.call_stack.push_operand_value(Value::Integer(long as i32));
+                    if let Value::Long(val) = value {
+                        vm.call_stack.push_operand_value(Value::Integer(val as i32));
                     } else {
                         warn!("L2I Conversion failed, because {value:?} is not of type Long")
                     }
                 }
-                
-                Instruction::IFNE(target) => { execute_cmp(vm, *target, |value| value != 0) }
+                Instruction::F2I => {
+                    let value = vm.call_stack.pop_operand_value().unwrap();
+                    debug!("F2I");
+                    if let Value::Float(val) = value {
+                        vm.call_stack.push_operand_value(Value::Integer(val as i32));
+                    } else {
+                        warn!("F2I Conversion failed, because {value:?} is not of type Float")
+                    }
+                }
 
-                Instruction::IF_ICMPNE(offset) => execute_i_cmp(vm, *offset, |val1, val2| val1 != val2),
-                Instruction::IF_ICMPGT(offset) => execute_i_cmp(vm, *offset, |val1, val2| val1 >  val2),
-                Instruction::IF_ICMPGE(offset) => execute_i_cmp(vm, *offset, |val1, val2| val1 >= val2),
-                Instruction::IF_ICMPEQ(offset) => execute_i_cmp(vm, *offset, |val1, val2| val1 == val2),
-                Instruction::IF_ICMPLT(offset) => execute_i_cmp(vm, *offset, |val1, val2| val1 <  val2),
-                Instruction::IF_ICMPLE(offset) => execute_i_cmp(vm, *offset, |val1, val2| val1 <= val2),
+                Instruction::LCMP => {
+                    if let (Some(Value::Long(value2)), Some(Value::Long(value1))) = (vm.call_stack.pop_operand_value(), vm.call_stack.pop_operand_value()) {
+                        debug!("LCMP");
+                        if value1 > value2 {
+                            vm.call_stack.push_operand_value(Value::Integer(1))
+                        } else if value1 == value2 {
+                            vm.call_stack.push_operand_value(Value::Integer(0))
+                        } else if value1 < value2 {
+                            vm.call_stack.push_operand_value(Value::Integer(-1))
+                        }
+                    }
+                }
+                Instruction::FCMPG | Instruction::FCMPL => {
+                    if let (Some(Value::Float(value2)), Some(Value::Float(value1))) = (vm.call_stack.pop_operand_value(), vm.call_stack.pop_operand_value()){
+                        debug!("FCMP");
+                        if value1 > value2{
+                            vm.call_stack.push_operand_value(Value::Integer(1))
+                        } else if value1 == value2{
+                            vm.call_stack.push_operand_value(Value::Integer(0))
+                        } else if value1 < value2{
+                            vm.call_stack.push_operand_value(Value::Integer(-1))
+                        } else if value1.is_nan() || value2.is_nan(){
+                            if instruction == &Instruction::FCMPG{
+                                vm.call_stack.push_operand_value(Value::Integer(1))
+                            } else {
+                                vm.call_stack.push_operand_value(Value::Integer(-1))
+                            }
+                        }
+                    }
+                }
+
+                Instruction::IFEQ(target) => { execute_cmp(vm, *target, |value| value == 0) }
+                Instruction::IFNE(target) => { execute_cmp(vm, *target, |value| value != 0) }
+                Instruction::IFLT(target) => { execute_cmp(vm, *target, |value| value <  0) }
+                Instruction::IFGE(target) => { execute_cmp(vm, *target, |value| value >= 0) }
+                Instruction::IFGT(target) => { execute_cmp(vm, *target, |value| value >  0) }
+                Instruction::IFLE(target) => { execute_cmp(vm, *target, |value| value <= 0) }
+
+                Instruction::IF_ICMPNE(target) => execute_i_cmp(vm, *target, |val1, val2| val1 != val2),
+                Instruction::IF_ICMPGT(target) => execute_i_cmp(vm, *target, |val1, val2| val1 >  val2),
+                Instruction::IF_ICMPGE(target) => execute_i_cmp(vm, *target, |val1, val2| val1 >= val2),
+                Instruction::IF_ICMPEQ(target) => execute_i_cmp(vm, *target, |val1, val2| val1 == val2),
+                Instruction::IF_ICMPLT(target) => execute_i_cmp(vm, *target, |val1, val2| val1 <  val2),
+                Instruction::IF_ICMPLE(target) => execute_i_cmp(vm, *target, |val1, val2| val1 <= val2),
+
+                Instruction::IF_ACMPEQ(target) => {
+                    let o1 = vm.call_stack.pop_operand_value().unwrap();
+                    let o2 = vm.call_stack.pop_operand_value().unwrap();
+                    match (o1, o2) {
+                        (Value::Reference(obj1), Value::Reference(obj2)) => {
+                            debug!("IF_ACMPEQ {:?} == {:?}?", obj1.id, obj2.id);
+                            if obj1.id == obj2.id {
+                                vm.call_stack.set_pc(*target);
+                            }
+                        }
+                        _ => {}
+                    };
+                }
+                Instruction::IF_ACMPNE(target) => {
+                    let o1 = vm.call_stack.pop_operand_value().unwrap();
+                    let o2 = vm.call_stack.pop_operand_value().unwrap();
+                    match (o1, o2) {
+                        (Value::Reference(obj1), Value::Reference(obj2)) => {
+                            debug!("IF_ACMPNE {:?} != {:?}?", obj1.id, obj2.id);
+                            if obj1.id != obj2.id {
+                                vm.call_stack.set_pc(*target);
+                            }
+                        }
+                        _ => {}
+                    };
+                }
 
                 Instruction::GOTO(target) => vm.call_stack.set_pc(*target),
 
@@ -168,7 +346,7 @@ pub fn execute_current_block<'a>(vm: &mut VM<'a>) -> Option<VMPartialResult<'a, 
                 Instruction::INVOKESTATIC(index) => { return Some(execute_invoke(vm, *index, InvokeKind::STATIC)) }
                 Instruction::INVOKEINTERFACE(index, _, _) => { return Some(execute_invoke(vm, *index, InvokeKind::INTERFACE)) }
 
-                Instruction::ARETURN | Instruction::IRETURN => {
+                Instruction::IRETURN | Instruction::LRETURN | Instruction::FRETURN | Instruction::ARETURN => {
                     //TODO seperate for validation
                     let value = vm.call_stack.pop_operand_value().unwrap();
                     return Some(Ok(VMResultType::Ok(Some(value))))
@@ -195,6 +373,40 @@ pub fn execute_current_block<'a>(vm: &mut VM<'a>) -> Option<VMPartialResult<'a, 
                     let object = vm.get_static_class_object(class_id).unwrap();
                     debug!("GETSTATIC {} {} {} {:?}", field_name, descriptor, field_index, info);
                     vm.call_stack.push_operand_value(object.get_field(field_index));
+                }
+                Instruction::GETFIELD(index) => {
+                    let (class_name, field_name, descriptor) = class_and_method.get_constant_field_info_descriptor(*index).expect("GIB MICH DIE FELD3");
+                    debug!("GETFIELD {}.{} {}", class_name, field_name, descriptor);
+                    let target_class = if class_name == class_and_method.class.name {
+                        class_and_method.class
+                    } else {
+                        get_or_init_option!(vm.get_or_resolve_class(class_name.as_str()))
+                    };
+                    let (field_index, _) = target_class.find_field(field_name.as_str()).unwrap();
+                    let object = vm.call_stack.pop_operand_value().unwrap();
+                    if let Value::Reference(obj) = object {
+                        vm.call_stack.push_operand_value(obj.get_field(field_index));
+                    } else {
+                        warn!("NAO");
+                    }
+                }
+                Instruction::PUTFIELD(index) => {
+                    let (class_name, field_name, descriptor) = class_and_method.get_constant_field_info_descriptor(*index).expect("GIB MICH DIE FELD");
+                    let target_class = if class_name == class_and_method.class.name {
+                        class_and_method.class
+                    } else {
+                        get_or_init_option!(vm.get_or_resolve_class(class_name.as_str()))
+                    };
+                    let (field_index, info) = target_class.find_field(field_name.as_str()).unwrap();
+                    debug!("PUTFIELD {}.{} {} {} {:?}", class_name, field_name, descriptor, field_index, info);
+                    let value = vm.call_stack.pop_operand_value().unwrap();
+                    let object = vm.call_stack.pop_operand_value().unwrap();
+                    if let Value::Reference(obj) = object {
+                        obj.set_field(field_index, value);
+                        debug!("obj:{:?}", &obj);
+                    } else {
+                        warn!("NAO");
+                    }
                 }
 
                 Instruction::NEW(index) => {
@@ -246,11 +458,77 @@ pub fn execute_current_block<'a>(vm: &mut VM<'a>) -> Option<VMPartialResult<'a, 
                     }
                 }
 
+                Instruction::ATHROW => {
+                    debug!("ATHROW");
+                    if let Some(Value::Reference(error)) = vm.call_stack.pop_operand_value(){
+                        let string_value = error.get_field(2);
+                        let string = VM::extract_string_from_object(&string_value).unwrap();
+                        let exception_name = vm.class_manager.find_class_by_id(error.class_id).unwrap().name.clone();
+                        return Some(Ok(VMResultType::ExceptionThrown(VmError::JavaException(JavaError::JavaExceptionThrown(exception_name, string, class_and_method.format())), Value::Reference(error))));
+                    }
+                    return Some(Err(VmError::JavaException(JavaError::JavaExceptionThrown("JavaException".to_string(), "Unknown".to_string(), class_and_method.format()))));
+                }
+
+                Instruction::CHECKCAST(constant_index) => {
+                    //TODO
+                    debug!("CHECKCAST {}", get_constant_printable(&class_and_method.class.constants, *constant_index));
+                }
+                Instruction::INSTANCEOF(constant_index) => {
+                    let of_class = get_or_init_option!(vm.get_or_resolve_class(get_constant_printable(&class_and_method.class.constants, *constant_index).as_str()));
+
+                    let object = vm.call_stack.pop_operand_value().unwrap();
+                    if object == Value::Null{
+                        vm.call_stack.push_operand_value(Value::from(false));
+                        return None;
+                    }
+                    let object = object.expect_reference().unwrap();
+                    let object_class = vm.find_class_by_id(object.class_id).unwrap();
+                    let mut instance_of = false;
+                    let mut to_check = vec![object_class];
+                    while let Some(next_class) = to_check.pop() {
+                        if next_class.id == of_class.id{
+                            instance_of = true;
+                            break;
+                        }
+                        if let Some(super_class) = next_class.superclass{
+                            to_check.push(super_class);
+                        }
+                        next_class.interfaces.iter().for_each(|class| to_check.push(class));
+                    }
+
+                    debug!("INSTANCEOF {} = {}", get_constant_printable(&class_and_method.class.constants, *constant_index), instance_of);
+
+                    vm.call_stack.push_operand_value(Value::from(instance_of));
+                }
+
+                Instruction::MONITORENTER => {
+                    if let Some(Value::Reference(_)) = vm.call_stack.pop_operand_value(){
+                        debug!("MONITORENTER")
+                    } else {
+                        warn!("No object to lock")
+                    }
+                }
+                Instruction::MONITOREXIT => {
+                    if let Some(Value::Reference(_)) = vm.call_stack.pop_operand_value(){
+                        debug!("MONITOREXIT")
+                    } else {
+                        warn!("No object to lock")
+                    }
+                }
+
+                Instruction::IFNULL(target) => {
+                    let reference = vm.call_stack.pop_operand_value().unwrap();
+                    match reference {
+                        Value::Null => {debug!("+IFNULL is NULL"); vm.call_stack.set_pc(*target);}
+                        Value::Reference(_) => {debug!("-IFNULL is reference");}
+                        _ => {warn!("?IFNULL {:?} is this valid?", reference.clone())}
+                    }
+                }
                 Instruction::IFNONNULL(target) => {
                     let reference = vm.call_stack.pop_operand_value().unwrap();
                     match reference {
-                        Value::Null => {debug!("+IFNONNULL is NULL");}
-                        Value::Reference(_) => {debug!("-IFNONNULL is reference"); vm.call_stack.set_pc(*target);}
+                        Value::Null => {debug!("-IFNONNULL is NULL");}
+                        Value::Reference(_) => {debug!("+IFNONNULL is reference"); vm.call_stack.set_pc(*target);}
                         _ => {warn!("?IFNONNULL {:?} is this valid?", reference.clone())}
                     }
                 }
@@ -262,6 +540,9 @@ pub fn execute_current_block<'a>(vm: &mut VM<'a>) -> Option<VMPartialResult<'a, 
         InstructionBlock::AStoreWithoutPop(index) => {
             let top = vm.call_stack.operand_stacks.last().unwrap().last().unwrap().clone();
             vm.call_stack.store_local(top, *index);
+        }
+        InstructionBlock::IConstReturn(val) => {
+            return Some(Ok(VMResultType::Ok(Some(Value::Integer(*val)))))
         }
         other => {
             return Some(Err(VmError::Unspecified(format!("Block of type {:?} not executable", other))))
@@ -275,7 +556,7 @@ fn x_const<'a>(vm: &mut VM<'a>, value: Value<'a>){
     vm.call_stack.push_operand_value(value);
 }
 
-fn istore<'a>(vm: &mut VM<'a>, index: usize) -> VMResult<()>{
+fn istore(vm: &mut VM, index: usize) -> VMResult<()> {
     let value = vm.call_stack.pop_operand_value().unwrap();
     debug!("ISTORE{} {:?}", index, value);
     vm.call_stack.store_local(value, index);
@@ -283,21 +564,21 @@ fn istore<'a>(vm: &mut VM<'a>, index: usize) -> VMResult<()>{
 }
 
 //TODO validation
-fn lstore<'a>(vm: &mut VM<'a>, index: usize){
+fn lstore(vm: &mut VM, index: usize){
     let value = vm.call_stack.pop_operand_value().unwrap();
     debug!("LSTORE{} {:?}", index, value);
     vm.call_stack.store_local(value, index);
     vm.call_stack.store_local(Value::Dummy, index+1);
 }
 
-fn astore<'a>(vm: &mut VM<'a>, index: usize) -> VMResult<()>{
+fn astore(vm: &mut VM, index: usize) -> VMResult<()> {
     let value = vm.call_stack.pop_operand_value().unwrap();
     debug!("ASTORE{} {:?}", index, value);
     vm.call_stack.store_local(value, index);
     Ok(())
 }
 
-fn iload<'a>(vm: &mut VM<'a>, index: usize) -> VMResult<()>{
+fn iload(vm: &mut VM, index: usize) -> VMResult<()> {
     let popped = vm.call_stack.load_local(index).unwrap();
     match popped {
         Value::Integer(i) => {
@@ -307,6 +588,43 @@ fn iload<'a>(vm: &mut VM<'a>, index: usize) -> VMResult<()>{
     }
     vm.call_stack.push_operand_value(popped);
     Ok(())
+}
+
+fn lload(vm: &mut VM, index: usize) -> VMResult<()> {
+    let local = vm.call_stack.load_local(index);
+    let dummy = vm.call_stack.load_local(index + 1);
+    if dummy.as_ref().unwrap() != &Value::Dummy{
+        return Err(VmError::ValidationError(format!("Expected a Dummy value at {} but got {:?}",index+1, dummy.unwrap())));
+    }
+    if let Some(Value::Long(value)) = local{
+        vm.call_stack.push_operand_value(Value::Long(value));
+        debug!("LLOAD{} {:?}", index, value);
+        Ok(())
+    } else {
+        Err(VmError::ValidationError(format!("LLOAD{} failed, because locals[{}] was {:?} and not Long", index, index, local)))
+    }
+}
+
+fn fload(vm: &mut VM, index: usize) -> VMResult<()> {
+    let local = vm.call_stack.load_local(index);
+    if let Some(Value::Float(value)) = local{
+        vm.call_stack.push_operand_value(Value::Float(value));
+        debug!("FLOAD{} {:?}", index, value);
+        Ok(())
+    } else {
+        Err(VmError::ValidationError(format!("FLOAD{} failed, because locals[{}] was {:?} and not Float", index, index, local)))
+    }
+}
+
+fn dload(vm: &mut VM, index: usize) -> VMResult<()> {
+    let local = vm.call_stack.load_local(index);
+    if let Some(Value::Double(value)) = local{
+        vm.call_stack.push_operand_value(Value::Double(value));
+        debug!("DLOAD{} {:?}", index, value);
+        Ok(())
+    } else {
+        Err(VmError::ValidationError(format!("DLOAD{} failed, because locals[{}] was {:?} and not Double", index, index, local)))
+    }
 }
 
 fn aload<'a>(vm: &mut VM<'a>, index: usize) -> VMResult<()>{
@@ -324,29 +642,14 @@ fn aload<'a>(vm: &mut VM<'a>, index: usize) -> VMResult<()>{
     Ok(())
 }
 
-fn lload<'a>(vm: &mut VM<'a>, index: usize) -> VMResult<()>{
-    let local = vm.call_stack.load_local(index);
-    let dummy = vm.call_stack.load_local(index + 1);
-    if dummy.as_ref().unwrap() != &Value::Dummy{
-        return Err(VmError::ValidationError(format!("Expected a Dummy value at {} but got {:?}",index+1, dummy.unwrap())));
-    }
-    if let Some(Value::Long(value)) = local{
-        vm.call_stack.push_operand_value(Value::Long(value));
-        debug!("LLOAD{} {:?}", index, value);
-        Ok(())
-    } else {
-        Err(VmError::ValidationError(format!("LLOAD{} failed, because locals[{}] was {:?} and not Long", index, index, local)))
-    }
-}
-
-fn execute_cmp<'a, F: FnOnce(i32) -> bool>(vm: &mut VM<'a>, target: u16, cmp: F){
+fn execute_cmp<F: FnOnce(i32) -> bool>(vm: &mut VM, target: u16, cmp: F){
     let value = vm.call_stack.pop_operand_value().unwrap().expect_int().unwrap();
     if cmp(value){
         vm.call_stack.set_pc(target);
     }
 }
 
-fn execute_i_cmp<'a, F: FnOnce(i32, i32) -> bool>(vm: &mut VM<'a>, offset: u16, f: F){
+fn execute_i_cmp<F: FnOnce(i32, i32) -> bool>(vm: &mut VM, offset: u16, f: F){
     let val2 = vm.call_stack.pop_operand_value().unwrap().expect_int().unwrap();
     let val1 = vm.call_stack.pop_operand_value().unwrap().expect_int().unwrap();
     let jump = f(val1, val2);
@@ -356,7 +659,7 @@ fn execute_i_cmp<'a, F: FnOnce(i32, i32) -> bool>(vm: &mut VM<'a>, offset: u16, 
     }
 }
 
-fn execute_i_arithmetic<'a, F: FnOnce(i32, i32) -> VMResult<i32>>(vm: &mut VM<'a>, f: F) -> VMResult<()>{
+fn execute_i_arithmetic<F: FnOnce(i32, i32) -> VMResult<i32>>(vm: &mut VM, f: F) -> VMResult<()> {
     let value2 = vm.call_stack.pop_operand_value();
     let value1 = vm.call_stack.pop_operand_value();
     if let (Some(Value::Integer(val1)), Some(Value::Integer(val2))) = (value1, value2){
@@ -370,7 +673,35 @@ fn execute_i_arithmetic<'a, F: FnOnce(i32, i32) -> VMResult<i32>>(vm: &mut VM<'a
     }
 }
 
-fn execute_ji_arithmetic<'a, F: FnOnce(i64, i32) -> Result<i64, VmError>>(vm: &mut VM<'a>, f: F) -> VMResult<()>{
+fn execute_l_arithmetic<F: FnOnce(i64, i64) -> VMResult<i64>>(vm: &mut VM, f: F) -> VMResult<()> {
+    let value2 = vm.call_stack.pop_operand_value();
+    let value1 = vm.call_stack.pop_operand_value();
+    if let (Some(Value::Long(val1)), Some(Value::Long(val2))) = (value1, value2){
+        let res = f(val1, val2)?;
+        debug!("Long ARITHMETIC {}&{}={}", val1, val2, res);
+        vm.call_stack.push_operand_value(Value::Long(res));
+        Ok(())
+    } else {
+        warn!("dat sin nich zwee longs to keck");
+        Err(VmError::ValidationError("Expected two longs".to_string()))
+    }
+}
+
+fn execute_f_arithmetic<F: FnOnce(f32, f32) -> VMResult<f32>>(vm: &mut VM, f: F) -> VMResult<()> {
+    let value2 = vm.call_stack.pop_operand_value();
+    let value1 = vm.call_stack.pop_operand_value();
+    if let (Some(Value::Float(val1)), Some(Value::Float(val2))) = (value1, value2){
+        let res = f(val1, val2)?;
+        debug!("Float ARITHMETIC {}&{}={}", val1, val2, res);
+        vm.call_stack.push_operand_value(Value::Float(res));
+        Ok(())
+    } else {
+        warn!("dat sin nich zwee floats to keck");
+        Err(VmError::ValidationError("Expected two floats".to_string()))
+    }
+}
+
+fn execute_ji_arithmetic<F: FnOnce(i64, i32) -> Result<i64, VmError>>(vm: &mut VM, f: F) -> VMResult<()> {
     let value2 = vm.call_stack.pop_operand_value();
     let value1 = vm.call_stack.pop_operand_value();
     if let (Some(Value::Long(val1)), Some(Value::Integer(val2))) = (value1, value2){
@@ -391,6 +722,7 @@ fn execute_invoke<'a>(vm: &mut VM<'a>, index: u16, kind: InvokeKind) -> VMPartia
     let class = get_or_init!(vm.get_or_resolve_class(class_name.as_str())?);
     trace!("finished loading class to execute on: '{}'", class_name.as_str());
     let args_count = MethodDescriptor::new(descriptor.clone()).args.len();
+    trace!("args_count: {}", args_count);
     let mut args = Vec::new();
     for _ in 0..args_count{
         let popped = vm.call_stack.pop_operand_value().unwrap();
@@ -450,7 +782,7 @@ fn execute_invoke<'a>(vm: &mut VM<'a>, index: u16, kind: InvokeKind) -> VMPartia
         trace!("    [{}] {:?}", index, value);
     }
     debug!("INVOKE{:?}: {}{} on {:?}", kind, method_name, descriptor, receiver);
-    let call_frame = vm.call_stack.create_and_push_call_frame(class_and_method, receiver, args);
+    let call_frame = vm.call_stack.create_and_push_call_frame(class_and_method, receiver, args, true);
     Ok(VMResultType::CallPaused(call_frame))
     //Ok(VMResultType::Ok(Some(Value::Null)))
     /*let res = vm.invoke(class_and_method, receiver, args)?.to_option();

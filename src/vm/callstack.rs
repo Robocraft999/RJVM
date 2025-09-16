@@ -68,105 +68,25 @@ impl<'a> CallStack<'a> {
         }
     }*/
 
-    /*pub fn create_call_frame_old<'frame>(class_and_method: ClassAndMethod<'frame>, object: Option<Reference<'frame>>, args: Vec<Value<'frame>>) -> CallFrame<'frame> {
-        let mut offset = 0;
-        for (i, arg) in class_and_method.method.descriptor.args.iter().enumerate() {
-            let mut arg1 = args.get(i + offset).unwrap();
-            if arg1 == &Value::Dummy {
-                offset += 1;
-                arg1 = args.get(i + offset).unwrap();
-            }
-            if let FieldType::Object(class_name) = arg{
-                if arg1 == &Value::Null{
-                    continue
-                }
-                if let Value::Reference(reference) = arg1{
-                    /*if &reference.class_name != class_name{
-                        panic!("Wrong class name!: {}, expected: {}", reference.class_name, class_name);
-                    }*/
-                } else {
-                    panic!("Wrong argument type for {} [{}, off({})]!: {:?}, expected: {}\nfull args: {:?}", class_and_method.format(), i, offset, arg1, class_name, args);
-                }
-            }
-        }
-        let locals = if !class_and_method.method.is_native(){
-            let mut empty_locals = vec![Value::Uninitialized; class_and_method.get_max_locals()];
-            for i in 0..args.len(){
-                empty_locals[i] = args.get(i).unwrap().clone();
-            }
-            if !class_and_method.method.is_static(){
-                if let Some(obj) = object {
-                    empty_locals.insert(0, Value::Reference(obj));
-                    empty_locals.pop();
-                }
-            }
-            assert_eq!(empty_locals.len(), class_and_method.get_max_locals(), "Locals has not the correct length (was {}, expected {})", empty_locals.len(), class_and_method.get_max_locals());
-            empty_locals
-        } else {
-            let mut native_locals = Vec::new();
-            if !class_and_method.method.is_static() {
-                if let Some(obj) = object {
-                    native_locals.push(Value::Reference(obj));
-                }
-            }
-            for i in 0..args.len(){
-                native_locals.push(args.get(i).unwrap().clone());
-            }
-            native_locals
-        };
-
-        let args_amount = args.iter().filter(|v| **v != Value::Dummy).count();
-        assert_eq!(args_amount, class_and_method.method.get_args_count(), "Args has not the correct length (was {}, expected {})", args_amount, class_and_method.method.get_args_count());
-        info!("NEW CALL FRAME with {:?} locals, \nobject=({:?}), \nargs=({:?}), \nmax_locals=[{}]", locals, object, args, class_and_method.get_max_locals());
-
-        CallFrame{
-            class_and_method,
-            locals,
-            pc: ProgramCounter(0),
-            last_pc: ProgramCounter(0),
-            stack: Vec::new()
-        }
-    }*/
-
-    pub fn create_and_push_call_frame(&mut self, class_and_method: ClassAndMethod<'a>, object: Option<Reference<'a>>, args: Vec<Value<'a>>){
-        let mut locals = vec![Value::Uninitialized; class_and_method.get_max_locals()];
+    pub fn create_and_push_call_frame(&mut self, class_and_method: ClassAndMethod<'a>, object: Option<Reference<'a>>, args: Vec<Value<'a>>, should_push_return: bool){
+        let mut locals = vec![Value::Uninitialized; class_and_method.get_max_locals() + if class_and_method.method.is_static() {1} else {0}];
         let mut offset = 0;
         if !class_and_method.method.is_static(){
             locals[0] = Value::Reference(object.unwrap());
             offset = 1;
         }
-        for (dest, src) in locals[offset..].iter_mut().zip(args){
+        for (dest, src) in locals[offset..].iter_mut().zip(args) {
             *dest = src;
         }
         self.locals_stack.push(locals);
         self.operand_stacks.push(Vec::with_capacity(class_and_method.get_max_stack_size()));
         self.pcs.push(ProgramCounter(0));
         let frame = CallFrame{
-            class_and_method
+            class_and_method,
+            should_push_return,
         };
         self.frames.push(frame);
     }
-
-    /*pub fn push_call_frame(&mut self, call_frame: CallFrame<'a>){
-        //self.call_stack.push(call_frame);
-        //self.call_stack.push_call_frame(call_frame);
-        /*let frame_ref = unsafe {
-            let frame_ptr: *const CallFrame = &mut call_frame;
-            &*frame_ptr
-        };*/
-        //self.frames.push(frame_ref);
-        //Ok(call_frame)
-        //let last_frame = self.frames.last().unwrap();
-        self.frames.push(call_frame);
-        info!("PUSH {:?}", self.frames.last().unwrap());
-        if self.frames.len() > 200{
-            for (index, call_frame_info) in self.frames.iter().enumerate(){
-                //error!("[{}]: {:?}, stack={}, locals={}", index, call_frame.pc, call_frame.stack, call_frame.locals);
-                println!("[{}]: {:?}", index, call_frame_info);
-            }
-            panic!("Stack overflow");
-        }
-    }*/
 
     pub fn pop_call_frame(&mut self) -> CallFrame<'a>{
         self.locals_stack.pop();
@@ -175,15 +95,16 @@ impl<'a> CallStack<'a> {
         self.frames.pop().unwrap()
     }
 
-    /*pub fn pop_call_frame_old(&mut self) -> CallFrame<'a>{
-        //self.frames.pop();
-        info!("POP  {:?}", self.frames.last().unwrap());
-        self.frames.pop().unwrap()
-    }*/
-    
-    /*pub fn add_to_top_stack(&mut self, value: Option<Value<'a>>){
-        self.frames.last_mut().unwrap().prepare_reentry(value);
-    }*/
+    pub fn pop_call_frame_at(&mut self, index: usize) -> CallFrame<'a>{
+        if index == self.frames.len() - 1{
+            self.pop_call_frame()
+        } else {
+            self.locals_stack.remove(index);
+            self.operand_stacks.remove(index);
+            self.pcs.remove(index);
+            self.frames.remove(index)
+        }
+    }
 
     pub fn push_operand_value(&mut self, val: Value<'a>){
         if self.operand_stacks.last().unwrap().len() == self.operand_stacks.last().unwrap().capacity(){

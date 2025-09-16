@@ -158,7 +158,7 @@ pub fn parse_instruction(code_bytes: &Vec<u8>, mut pc: usize) -> Result<(Instruc
             DUP | DUPX1 | DUP2 | DUP2X1 | LCMP | ATHROW |
             IADD | LADD | DADD | FADD | ISUB | LSUB | FSUB | DSUB | IMUL | LMUL | FMUL | DMUL | IDIV | LDIV | FDIV | DDIV |
             ARRAYLENGTH | POP | NOP | POP2 |
-            LUSHR | LSHR | LSHL | ISHL | ISHR | IUSHR | IOR | LOR | IXOR | LXOR | IAND | LAND | INEG | LNEG | FNEG | IREM |
+            LUSHR | LSHR | LSHL | ISHL | ISHR | IUSHR | IOR | LOR | IXOR | LXOR | IAND | LAND | INEG | LNEG | FNEG | IREM | LREM |
             MONITORENTER | MONITOREXIT |
             I2L | I2F | I2D | I2B | I2C | I2S | L2I | L2F | L2D | F2I | F2L | F2D | D2I | D2L | D2F |
             FCMPG | FCMPL | DCMPL | DCMPG => instruction,
