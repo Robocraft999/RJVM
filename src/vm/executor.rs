@@ -88,6 +88,8 @@ pub fn execute_current_block<'a>(vm: &mut VM<'a>) -> Option<VMPartialResult<'a, 
 
                 Instruction::ILOAD(index) => wrap_error!(iload(vm, *index as usize)),
                 Instruction::LLOAD(index) => wrap_error!(lload(vm, *index as usize)),
+                Instruction::FLOAD(index) => wrap_error!(fload(vm, *index as usize)),
+                Instruction::DLOAD(index) => wrap_error!(dload(vm, *index as usize)),
                 Instruction::ALOAD(index) => wrap_error!(aload(vm, *index as usize)),
 
                 Instruction::ILOAD0 => wrap_error!(iload(vm, 0)),
@@ -106,6 +108,9 @@ pub fn execute_current_block<'a>(vm: &mut VM<'a>) -> Option<VMPartialResult<'a, 
                 Instruction::FLOAD3 => wrap_error!(fload(vm, 3)),
 
                 Instruction::DLOAD0 => wrap_error!(dload(vm, 0)),
+                Instruction::DLOAD1 => wrap_error!(dload(vm, 1)),
+                Instruction::DLOAD2 => wrap_error!(dload(vm, 2)),
+                Instruction::DLOAD3 => wrap_error!(dload(vm, 3)),
 
                 Instruction::ALOAD0 => wrap_error!(aload(vm, 0)),
                 Instruction::ALOAD1 => wrap_error!(aload(vm, 1)),
@@ -123,6 +128,7 @@ pub fn execute_current_block<'a>(vm: &mut VM<'a>) -> Option<VMPartialResult<'a, 
 
                 Instruction::ISTORE(index) => wrap_error!(istore(vm, *index as usize)),
                 Instruction::LSTORE(index) => wrap_error!(lstore(vm, *index as usize)),
+                Instruction::FSTORE(index) => wrap_error!(fstore(vm, *index as usize)),
                 Instruction::ASTORE(index) => wrap_error!(astore(vm, *index as usize)),
 
                 Instruction::ISTORE0 => wrap_error!(istore(vm, 0)),
@@ -134,6 +140,11 @@ pub fn execute_current_block<'a>(vm: &mut VM<'a>) -> Option<VMPartialResult<'a, 
                 Instruction::LSTORE1 => wrap_error!(lstore(vm, 1)),
                 Instruction::LSTORE2 => wrap_error!(lstore(vm, 2)),
                 Instruction::LSTORE3 => wrap_error!(lstore(vm, 3)),
+
+                Instruction::FSTORE0 => wrap_error!(fstore(vm, 0)),
+                Instruction::FSTORE1 => wrap_error!(fstore(vm, 1)),
+                Instruction::FSTORE2 => wrap_error!(fstore(vm, 2)),
+                Instruction::FSTORE3 => wrap_error!(fstore(vm, 3)),
 
                 Instruction::ASTORE0 => wrap_error!(astore(vm, 0)),
                 Instruction::ASTORE1 => wrap_error!(astore(vm, 1)),
@@ -213,6 +224,7 @@ pub fn execute_current_block<'a>(vm: &mut VM<'a>) -> Option<VMPartialResult<'a, 
                 Instruction::LREM => wrap_error!(execute_l_arithmetic(vm, |val1, val2| Ok(val1.wrapping_rem(val2)))),
 
                 Instruction::ISHL => wrap_error!(execute_i_arithmetic(vm, |val1, val2| Ok(val1 << (val2 & 0x1f)))),
+                Instruction::LSHL => wrap_error!(execute_l_arithmetic(vm, |val1, val2| Ok(val1 << (val2 & 0x3f)))),
                 Instruction::ISHR => wrap_error!(execute_i_arithmetic(vm, |val1, val2| Ok(val1 >> (val2 & 0x1f)))),
                 Instruction::IUSHR => wrap_error!(execute_i_arithmetic(vm, |val1, val2| {
                     if val1 > 0{
@@ -620,6 +632,13 @@ fn lstore(vm: &mut VM, index: usize) -> VMResult<()> {
     debug!("LSTORE{} {:?}", index, value);
     vm.call_stack.store_local(value, index);
     vm.call_stack.store_local(Value::Dummy, index+1);
+    Ok(())
+}
+
+fn fstore(vm: &mut VM, index: usize) -> VMResult<()> {
+    let value = vm.call_stack.pop_operand_value().unwrap();
+    debug!("FSTORE{} {:?}", index, value);
+    vm.call_stack.store_local(value, index);
     Ok(())
 }
 
