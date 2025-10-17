@@ -77,7 +77,7 @@ pub struct ExceptionTableEntry{
     pub catch_type: Option<String>,
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub struct ProgramCounter(pub u16);
 #[derive(Debug, PartialEq, Clone)]
 pub struct LineNumber(pub u16);

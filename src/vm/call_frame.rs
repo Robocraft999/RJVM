@@ -12,7 +12,7 @@ use crate::field_info::{extract_component_type_from_array_class, FieldType, Prim
 use crate::get_or_init;
 use crate::method_info::MethodDescriptor;
 use crate::vm::java_error::JavaError;
-use crate::vm::{VM, VmError};
+use crate::vm::{bytecode, VmError, VM};
 use crate::vm::callstack::CallStack;
 use crate::vm::class::{ClassAndMethod, ClassRef};
 use crate::vm::result::{VMPartialResult, VMResultType};
@@ -21,19 +21,17 @@ use crate::vm::value::{ReferenceType, Value};
 #[derive(Clone)]
 pub struct CallFrame<'a>{
     pub class_and_method: ClassAndMethod<'a>,
-    pub locals: Vec<Value<'a>>,
-    pub pc: ProgramCounter,
-    pub last_pc: ProgramCounter,
-    pub stack: Vec<Value<'a>>,
+    pub should_push_return: bool,
 }
 
 impl<'a> CallFrame<'a>{
-    pub fn execute(&mut self, vm: &mut VM<'a>) -> VMPartialResult<'a, Option<Value<'a>>>{
+    /*pub fn execute(&mut self, vm: &mut VM<'a>) -> VMPartialResult<'a, Option<Value<'a>>>{
         if let Some(code) = &self.class_and_method.method.code{
             let constants = &self.class_and_method.class.constants;
             for class in vm.class_manager.classes.iter_mut(){
                 //println!("{class:?}");
             }
+            bytecode::get_blocks(&code.code);
             info!("");
             info!("METHOD_NAME: {}.{}{}", self.class_and_method.class.name, self.class_and_method.method.name, self.class_and_method.method.descriptor.as_str());
             info!("{:?}", printable_instructions(&code.code));
@@ -1190,10 +1188,10 @@ impl<'a> CallFrame<'a>{
         } else {
             None
         }
-    }
+    }*/
 }
 
-impl Debug for CallFrame<'_>{
+/*impl Debug for CallFrame<'_>{
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let instruction = self.get_instruction_at(self.pc.clone());
         let mut line_number = -1;
@@ -1209,7 +1207,8 @@ impl Debug for CallFrame<'_>{
         };
         write!(f, "Method: {}:{} at {:?} ({:?})", self.class_and_method.format(), line_number, self.pc, instruction)
     }
-}
+}*/
+
 
 #[derive(Debug, PartialEq)]
 enum InvokeKind{

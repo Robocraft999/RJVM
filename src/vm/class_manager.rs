@@ -1,17 +1,16 @@
 use std::collections::HashMap;
 use std::str::FromStr;
 use log::info;
-use regex::Regex;
 use typed_arena::Arena;
 use crate::attribute::ElementValue;
 use crate::class_file::{parse_class_file, ClassFile};
 use crate::error::ClassParseError;
 use crate::field_info::{extract_component_type_from_array_class, FieldType};
+use crate::method_info::MethodInfo;
 use crate::vm::class::{ArrayInfo, Class, ClassId, ClassRef};
 use crate::vm::class_path::ClassPath;
-use crate::vm::class_path_entry::ClassLoadingError;
 use crate::vm::result::VMResult;
-use crate::vm::VmError;
+use crate::vm::{bytecode, VmError};
 
 #[derive(Debug, Clone)]
 pub(crate) enum ResolvedClass<'a> {
@@ -91,6 +90,12 @@ impl<'a> ClassManager<'a>{
             None => 0,
         };
         let fields_count = parsed_class.fields.len();
+        let methods: Vec<MethodInfo> = parsed_class.methods.into_iter().map(|mut t|{
+            if let Some(code) = &t.code{
+                t.code_blocks = Some(bytecode::get_blocks(&code.code))
+            }
+            t
+        }).collect();
 
         let class = Class {
             id: ClassId(next_id),
@@ -101,7 +106,7 @@ impl<'a> ClassManager<'a>{
             superclass: super_class,
             interfaces,
             fields: parsed_class.fields,
-            methods: parsed_class.methods,
+            methods,
             annotations: parsed_class.runtime_visible_annotations,
             bootstrap_methods: parsed_class.bootstrap_methods,
             transitive_field_count: superclass_field_count + fields_count,

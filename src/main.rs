@@ -49,6 +49,21 @@ macro_rules! get_or_init {
 }
 
 #[macro_export]
+macro_rules! get_or_init_option {
+    ($x:expr) => {
+        {
+            let res = $x;
+            match res{
+                Ok(VMResultType::Ok(value)) => value,
+                Ok(VMResultType::NeedsClassInit(classes, reenter)) => {return Some(Ok(VMResultType::NeedsClassInit(classes, reenter)))}
+                Err(e) => {return Some(Err(e))}
+                Ok(_) => unreachable!("[get_after_init] got unexpected result {:?}", res)
+            }
+        }
+    };
+}
+
+#[macro_export]
 macro_rules! get_or_init_special {
     ($x:expr, $wrapper:expr) => {
         {
@@ -65,7 +80,7 @@ macro_rules! get_or_init_special {
 fn init_vm(vm: &mut VM) -> Result<(), VmError>{
     if let VMResultType::NeedsClassInit(classes, _) = vm.get_or_resolve_class("sun/misc/VM")?{
         for frame in classes{
-            vm.invoke_frame(frame)?;
+            vm.invoke_current_frame()?;
         }
     }
 
@@ -75,7 +90,7 @@ fn init_vm(vm: &mut VM) -> Result<(), VmError>{
 fn init_system(vm: &mut VM) -> Result<(), VmError>{
     if let VMResultType::NeedsClassInit(classes, _) = vm.get_or_resolve_class("java/lang/System")?{
         for frame in classes{
-            vm.invoke_frame(frame)?;
+            vm.invoke_current_frame()?;
         }
     }
     let init = vm.try_resolve_class_method("java/lang/System", "initializeSystemClass", "()V")?;
@@ -86,7 +101,7 @@ fn init_system(vm: &mut VM) -> Result<(), VmError>{
 fn run_and_catch_method<'a>(vm: &'a mut VM<'a>, class_name: &str, method_name: &str, method_descriptor: &str, args: Vec<Value<'a>>){
     if let VMResultType::NeedsClassInit(classes, _) = vm.get_or_resolve_class(class_name).unwrap().clone(){
         for frame in classes{
-            vm.invoke_frame(frame).unwrap();
+            vm.invoke_current_frame().unwrap();
         }
     }
     let main_method = vm.try_resolve_class_method(class_name, method_name, method_descriptor).unwrap();
@@ -102,10 +117,11 @@ fn run_and_catch_method<'a>(vm: &'a mut VM<'a>, class_name: &str, method_name: &
             error!("Error: {}", error);
             //vm.call_stack.print_call_stack();
             println!("Frames:");
-            for (index, call_frame_info) in vm.call_stack.frames.iter().enumerate(){
+            vm.call_stack.print_call_stack();
+            /*for (index, call_frame_info) in vm.call_stack.frames.iter().enumerate(){
                 //error!("[{}]: {:?}, stack={}, locals={}", index, call_frame.pc, call_frame.stack, call_frame.locals);
                 println!("[{}]: {:?}", index, call_frame_info);
-            }
+            }*/
         }
     }
 }
@@ -114,11 +130,12 @@ fn main() {
     let mut class_path = ClassPath::default();
     class_path.push("resources;resources/rt.jar;resources/LogicSim.jar;resources/k7bot-v1.24.0.jar;resources/lib/unix;resources/lib").expect("TODO: panic message");
 
+    println!("Booting up VM");
     let mut vm = VM::new(class_path);
     
-    /*simple_logger::SimpleLogger::new().with_level(LevelFilter::Warn).without_timestamps().init().unwrap();
-    run_and_catch_method(&mut vm, "Test", "main", "([Ljava/lang/String;)V");
-    return;*/
+    //simple_logger::SimpleLogger::new().with_level(LevelFilter::Trace).without_timestamps().init().unwrap();
+    //run_and_catch_method(&mut vm, "Test", "main", "([Ljava/lang/String;)V");
+    //return
 
     match init_vm(&mut vm) {
         Ok(_) => {}
@@ -134,8 +151,17 @@ fn main() {
         Err(error) => {
             println!("'{}'", error);
             error!("Init System: {}", error);
+            #[cfg(feature = "debug")]
+            {
+                vm.debug_helper.exception_helper.print();
+            }
             panic!();
         }
+    }
+
+    #[cfg(feature = "debug")]
+    {
+        vm.debug_helper.exception_helper.print();
     }
 
     simple_logger::SimpleLogger::new().with_level(LevelFilter::Warn).without_timestamps().init().unwrap();
@@ -143,11 +169,13 @@ fn main() {
 
     //vm.class_manager.get_or_resolve_class("Empty").expect("TODO: panic message");
     //run_and_catch_method(&mut vm, "Test", "main", "([Ljava/lang/String;)V");
-    //run_and_catch_method(&mut vm, "logicsim/App", "main", "([Ljava/lang/String;)V");
+
     let args = env::args().skip(1).map(|s| Value::Reference(vm.try_new_string_object(s).unwrap())).collect();
     let args_array = vm.try_new_array(1, FieldType::Object("java/lang/String".to_string()).to_array_field_type(1), RefCell::new(args)).unwrap();
     let p_args = vec![Value::Reference(args_array)];
-    run_and_catch_method(&mut vm, "de/klassenserver7b/k7bot/Main", "main", "([Ljava/lang/String;)V", p_args);
+    //run_and_catch_method(&mut vm, "de/klassenserver7b/k7bot/Main", "main", "([Ljava/lang/String;)V", p_args);
+    //run_and_catch_method(&mut vm, "Hello", "main", "([Ljava/lang/String;)V", p_args);
+    run_and_catch_method(&mut vm, "logicsim/App", "main", "([Ljava/lang/String;)V", p_args);
 
     //parse_class_file(&class_path, "java/lang/Exception");
 
