@@ -46,6 +46,7 @@ pub mod result;
 pub mod bytecode; //TODO move out from vm
 mod executor;
 mod debug;
+pub mod jni;
 
 pub struct VM<'a>{
     pub class_manager: ClassManager<'a>,
@@ -447,7 +448,6 @@ impl<'a> VM<'a>{
 
     pub fn get_or_resolve_class(&mut self, class_name: &str) -> VMPartialResult<'a, ClassRef<'a>>{
         let resolved = self.class_manager.get_or_resolve_class(class_name)?;
-        //FIXME maybe make this global
         if let ResolvedClass::NewClass(to_init) = &resolved{
             Ok(VMResultType::NeedsClassInit(
                 to_init.to_initialize
@@ -682,6 +682,8 @@ impl<'a> VM<'a>{
         self.class_manager.find_class_by_name(name.as_str())
     }
 }
+
+//impl !Unpin for VM<'_>{}
 
 #[derive(Error, Debug, Clone)]
 pub enum VmError{

@@ -3,7 +3,9 @@
 #![allow(dead_code)]
 #![allow(unused_parens)]
 #![allow(unused_variables)]
-use std::ffi::{c_char, c_double, c_float, c_int, c_long, c_schar, c_short, c_uchar, c_ushort, c_void};
+use std::ffi::{c_char, c_double, c_float, c_int, c_long, c_schar, c_short, c_uchar, c_ushort, c_void, CStr};
+use log::error;
+use crate::vm::{jni::{env_function_table::JNINativeInterface, vm_function_table::JNIInvokeInterface}, VM};
 
 //Platform dependent
 pub type jint = c_int;
@@ -98,108 +100,115 @@ pub struct JNINativeMethod{
 /*
  * JNI Native Method Interface.
  */
-
-pub struct JNIEnv{
-    methods: *const JNINativeInterface_,
-    
+#[repr(C)]
+pub struct JNIEnv<'a>{
+    pub(crate) methods: *const JNINativeInterface,
+    pub vm: *mut VM<'a>,
 }
 
 /*
  * JNI Invocation Interface.
  */
 
-pub type JavaVM = *mut JNIInvokeInterface_;
-
-pub struct JNINativeInterface_{
-    reserved0: *const c_void,
-    reserved1: *const c_void,
-    reserved2: *const c_void,
-    reserved3: *const c_void,
+#[repr(C)]
+pub struct JavaVM<'a>{
+    pub methods: *const JNIInvokeInterface,
+    pub env: JNIEnv<'a>,
 }
 
+#[repr(C)]
+pub struct JNINativeInterface_{}
+
 impl JNINativeInterface_ {
-    pub fn GetVersion(&mut self) -> jint{
+    pub fn GetVersion(env: *mut JNIEnv) -> jint{
         unimplemented!()
     }
 
-    pub fn DefineClass(&mut self, name: *const c_char, loader: jobject, buf: *const jbyte, len: jsize) -> jclass {
+    pub fn DefineClass(env: *mut JNIEnv, name: *const c_char, loader: jobject, buf: *const jbyte, len: jsize) -> jclass {
         unimplemented!()
     }
-    pub fn FindClass(&mut self, name: *const c_char) -> jclass {
+    pub fn FindClass(env: *mut JNIEnv, name: *const c_char) -> jclass {
+        let name = unsafe{CStr::from_ptr(name)};
+        println!("{:?}", name);
+        if name.to_string_lossy() == ""{
+            0 as jclass
+        } else {
+            unimplemented!()
+        }
+    }
+
+    pub fn FromReflectedMethod(env: *mut JNIEnv, method: jobject) -> jmethodID {
+        unimplemented!()
+    }
+    pub fn FromReflectedField(env: *mut JNIEnv, field: jobject) -> jfieldID {
         unimplemented!()
     }
 
-    pub fn FromReflectedMethod(&mut self, method: jobject) -> jmethodID {
-        unimplemented!()
-    }
-    pub fn FromReflectedField(&mut self, field: jobject) -> jfieldID {
+    pub fn ToReflectedMethod(env: *mut JNIEnv, cls: jclass, method: jmethodID, isStatic: jboolean) -> jobject {
         unimplemented!()
     }
 
-    pub fn ToReflectedMethod(&mut self, cls: jclass, method: jmethodID, isStatic: jboolean) -> jobject {
+    pub fn GetSuperclass(env: *mut JNIEnv, sub: jclass) -> jclass{
+        unimplemented!()
+    }
+    pub fn IsAssignableFrom(env: *mut JNIEnv, sub: jclass, sup: jclass) -> jboolean {
         unimplemented!()
     }
 
-    pub fn GetSuperclass(&mut self, sub: jclass) -> jclass{
-        unimplemented!()
-    }
-    pub fn IsAssignableFrom(&mut self, sub: jclass, sup: jclass) -> jboolean {
+    pub fn ToReflectedField(env: *mut JNIEnv, cls: jclass, field: jfieldID, isStatic: jboolean) -> jobject {
         unimplemented!()
     }
 
-    pub fn ToReflectedField(&mut self, cls: jclass, field: jfieldID, isStatic: jboolean) -> jobject {
+    pub fn Throw(env: *mut JNIEnv, obj: jthrowable) -> jint{
+        unimplemented!()
+    }
+    pub fn ThrowNew(env: *mut JNIEnv, clazz: jclass, msg: *const c_char) -> jint{
+        unimplemented!()
+    }
+    pub fn ExceptionOccurred(env: *mut JNIEnv) -> jthrowable{
+        unimplemented!()
+    }
+    pub fn ExceptionDescribe(env: *mut JNIEnv){
+        unimplemented!()
+    }
+    pub fn ExceptionClear(env: *mut JNIEnv){
+        unimplemented!()
+    }
+    pub fn FatalError(env: *mut JNIEnv, msg: *const c_char){
+        error!("Fatal Error: '{:?}'", unsafe {CStr::from_ptr(msg)});
+        panic!()
+    }
+
+    pub fn PushLocalFrame(env: *mut JNIEnv, capacity: jint) -> jint{
+        unimplemented!()
+    }
+    pub fn PopLocalFrame(env: *mut JNIEnv, result: jobject) -> jint{
         unimplemented!()
     }
 
-    pub fn Throw(&mut self, obj: jthrowable) -> jint{
+    pub fn NewGlobalRef(env: *mut JNIEnv, lobj: jobject) -> jobject{
         unimplemented!()
     }
-    pub fn ThrowNew(&mut self, clazz: jclass, msg: *const c_char) -> jint{
+    pub fn DeleteGlobalRef(env: *mut JNIEnv, gref: jobject){
         unimplemented!()
     }
-    pub fn ExceptionOccurred(&mut self) -> jthrowable{
+    pub fn DeleteLocalRef(env: *mut JNIEnv, obj: jobject){
         unimplemented!()
     }
-    pub fn ExceptionDescribe(&mut self){
+    pub fn IsSameObject(env: *mut JNIEnv, obj1: jobject, obj2: jobject) -> jboolean{
         unimplemented!()
     }
-    pub fn ExceptionClear(&mut self){
+    pub fn NewLocalRef(env: *mut JNIEnv, r#ref: jobject) -> jobject{
         unimplemented!()
     }
-    pub fn FatalError(&mut self, msg: *const c_char){
-        unimplemented!()
-    }
-
-    pub fn PushLocalFrame(&mut self, capacity: jint) -> jint{
-        unimplemented!()
-    }
-    pub fn PopLocalFrame(&mut self, result: jobject) -> jint{
+    pub fn EnsureLocalCapacity(env: *mut JNIEnv, capacity: jint) -> jint{
         unimplemented!()
     }
 
-    pub fn NewGlobalRef(&mut self, lobj: jobject) -> jobject{
+    pub fn AllocObject(env: *mut JNIEnv, clazz: jclass) -> jobject{
         unimplemented!()
     }
-    pub fn DeleteGlobalRef(&mut self, gref: jobject){
-        unimplemented!()
-    }
-    pub fn DeleteLocalRef(&mut self, obj: jobject){
-        unimplemented!()
-    }
-    pub fn IsSameObject(&mut self, obj1: jobject, obj2: jobject) -> jboolean{
-        unimplemented!()
-    }
-    pub fn NewLocalRef(&mut self, r#ref: jobject) -> jobject{
-        unimplemented!()
-    }
-    pub fn EnsureLocalCapacity(&mut self, capacity: jint) -> jint{
-        unimplemented!()
-    }
-
-    pub fn AllocObject(&mut self, clazz: jclass) -> jobject{
-        unimplemented!()
-    }
-    pub fn NewObjectA(&mut self, methodID: jmethodID, args: *const jvalue) -> jobject{
+    pub fn NewObjectA(env: *mut JNIEnv, methodID: jmethodID, args: *const jvalue) -> jobject{
         unimplemented!()
     }
 
@@ -468,31 +477,23 @@ struct JavaVMAttachArgs{
 }
 
 #[repr(C)]
-pub struct JNIInvokeInterface_{
-    pub reserved0: *const c_void,
-    pub reserved1: *const c_void,
-    pub reserved2: *const c_void,
-    pub a: *const c_void,
-    pub b: *const c_void,
-    pub c: *const c_void,
-    pub d: *const c_void,
-    pub e: *const c_void,
-}
+pub struct JNIInvokeInterface_{}
 
 impl JNIInvokeInterface_ {
-    pub fn DestroyJavaVM(&mut self) -> jint{
+    pub fn DestroyJavaVM(vm: *mut JavaVM) -> jint{
         unimplemented!()
     }
-    pub fn AttachCurrentThread(&mut self, penv: *const *const c_void, args: *const c_void) -> jint{
+    pub fn AttachCurrentThread(vm: *mut JavaVM, penv: *const *const c_void, args: *const c_void) -> jint{
         unimplemented!()
     }
-    pub fn DetachCurrentThread(&mut self) -> jint{
+    pub fn DetachCurrentThread(vm: *mut JavaVM) -> jint{
         unimplemented!()
     }
-    pub fn GetEnv(&mut self, penv: *const *const c_void, version: jint) -> jint{
-        unimplemented!()
+    pub unsafe extern "system" fn GetEnv(vm: *mut JavaVM, penv: *mut *const c_void, version: jint) -> jint{
+        (*penv) = &(*vm).env as *const JNIEnv as _;
+        JNI_OK
     }
-    pub fn AttachCurrentThreadAsDaemon(&mut self, penv: *const *const c_void, args: *const c_void) -> jint{
+    pub fn AttachCurrentThreadAsDaemon(vm: *mut JavaVM, penv: *const *const c_void, args: *const c_void) -> jint{
         unimplemented!()
     }
 }

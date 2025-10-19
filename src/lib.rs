@@ -17,6 +17,8 @@ use crate::constants::*;
 use crate::error::ClassParseError;
 use crate::field_info::{FieldInfo, FieldType};
 use crate::method_info::{MethodDescriptor, MethodInfo};
+use crate::vm::jni::types::{JNIEnv, JavaVM};
+use crate::vm::jni::{self};
 use crate::vm::{VM, VmError};
 use crate::vm::class::{ClassAndMethod, ClassRef};
 use crate::vm::result::VMResultType;
@@ -126,12 +128,38 @@ fn run_and_catch_method<'a>(vm: &'a mut VM<'a>, class_name: &str, method_name: &
     }
 }
 
-fn main() {
+pub fn run() {
     let mut class_path = ClassPath::default();
-    class_path.push("resources;resources/rt.jar;resources/LogicSim.jar;resources/k7bot-v1.24.0.jar;resources/lib/unix;resources/lib").expect("TODO: panic message");
+    class_path.push("../resources/rt.jar;../resources/LogicSim.jar;../resources/lib/unix;../resources/lib").expect("TODO: panic message");
 
     println!("Booting up VM");
     let mut vm = VM::new(class_path);
+
+    simple_logger::SimpleLogger::new().with_level(LevelFilter::Error).without_timestamps().init().unwrap();
+    unsafe {
+        use libffi::middle::{Closure, Cif, Type, Arg};
+        use std::{ffi::c_void, ptr};
+
+
+        let lib = libloading::Library::new("/home/admin/.jdks/temurin-1.8.0_462/jre/lib/amd64/libjava.so").unwrap();
+        let sym: libloading::Symbol<*const ()> = lib.get(b"JNI_OnLoad").unwrap();
+
+        let func_ptr = *sym as * const c_void;
+
+        let env = JNIEnv{
+            methods: jni::env_function_table::METHODS,
+            vm: &mut vm,
+        };
+        let javavm = JavaVM{
+            methods: jni::vm_function_table::METHODS,
+            env
+        };
+        let vm_ptr = ptr::from_ref(&javavm) as *const c_void;
+        let reserved = std::ptr::null() as *const c_void;
+        let cif = Cif::new(vec![Type::pointer(), Type::pointer()], Type::i32()); //JNI_OnLoad
+        let res: i32 = cif.call(libffi::low::CodePtr::from_ptr(func_ptr), &[Arg::new(&vm_ptr), Arg::new(&reserved)]);
+        
+    }
     
     //simple_logger::SimpleLogger::new().with_level(LevelFilter::Trace).without_timestamps().init().unwrap();
     //run_and_catch_method(&mut vm, "Test", "main", "([Ljava/lang/String;)V");
@@ -164,8 +192,8 @@ fn main() {
         vm.debug_helper.exception_helper.print();
     }
 
-    simple_logger::SimpleLogger::new().with_level(LevelFilter::Warn).without_timestamps().init().unwrap();
     println!("Init complete. Starting Main Program");
+    todo!("Init complete");
 
     //vm.class_manager.get_or_resolve_class("Empty").expect("TODO: panic message");
     //run_and_catch_method(&mut vm, "Test", "main", "([Ljava/lang/String;)V");

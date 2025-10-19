@@ -1,7 +1,10 @@
 [package]
-name = "rjvm"
+name = "jvm"
 version = "0.1.0"
 edition = "2024"
+
+[lib]
+crate-type = ["dylib"]
 
 [dependencies]
 strum_macros = "0.26.4"
@@ -14,6 +17,7 @@ regex = "1.10.6"
 lazy-regex = "3.4.1"
 cesu8 = "1.1.0"
 libloading = "0.8"
+libffi = "5.0.0"
 
 [features]
 debug = []

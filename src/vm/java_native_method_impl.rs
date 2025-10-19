@@ -227,7 +227,8 @@ fn delegate_init_system_props<'a>(vm: &mut VM<'a>, _ : ClassRef<'a>, _: Option<R
     let mut props = vec![
         ("file.encoding", "UTF-8".to_string()),
         ("line.separator", "\n".to_string()),
-        ("sun.boot.library.path", "/home/admin/.jdks/temurin-22.0.1/lib".to_string()),
+        //("sun.boot.library.path", "/home/admin/.jdks/temurin-22.0.1/lib".to_string()),
+        ("sun.boot.library.path", "/home/admin/.jdks/temurin-1.8.0_462/jre/lib/amd64/".to_string()),
         ("user.dir", env::current_dir().unwrap().to_string_lossy().to_string()),
         ("user.home", env::home_dir().unwrap().to_string_lossy().to_string()),
         ("os.name", "Linux".to_string()),
