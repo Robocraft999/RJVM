@@ -103,7 +103,7 @@ pub struct JNINativeMethod{
 #[repr(C)]
 pub struct JNIEnv<'a>{
     pub(crate) methods: *const JNINativeInterface,
-    pub vm: *mut VM<'a>,
+    pub vm: *const VM<'a>,
 }
 
 /*

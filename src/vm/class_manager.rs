@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::str::FromStr;
 use log::info;
@@ -36,24 +37,24 @@ pub(crate) struct ClassesToInitialize<'a> {
 
 pub struct ClassManager<'a>{
     pub class_path: ClassPath,
-    pub classes_by_name: HashMap<String, ClassRef<'a>>,
-    pub classes_by_id: HashMap<ClassId, ClassRef<'a>>,
+    pub classes_by_name: RefCell<HashMap<String, ClassRef<'a>>>,
+    pub classes_by_id: RefCell<HashMap<ClassId, ClassRef<'a>>>,
     pub classes: Arena<Class<'a>>,
-    next_id: u32,
+    next_id: RefCell<u32>,
 }
 
 impl<'a> ClassManager<'a>{
     pub fn new (class_path: ClassPath) -> Self{
         Self{
             class_path,
-            classes_by_name: HashMap::new(),
-            classes_by_id: HashMap::new(),
+            classes_by_name: RefCell::new(HashMap::new()),
+            classes_by_id: RefCell::new(HashMap::new()),
             classes: Arena::with_capacity(100),
-            next_id: 1,
+            next_id: RefCell::new(1),
         }
     }
 
-    pub fn get_or_resolve_class(&mut self, class_name: &str) -> Result<ResolvedClass<'a>, VmError>{
+    pub fn get_or_resolve_class(&self, class_name: &str) -> Result<ResolvedClass<'a>, VmError>{
         if let Some(loaded_class) = self.find_class_by_name(class_name){
             Ok(ResolvedClass::AlreadyLoaded(loaded_class))
         } else {
@@ -61,16 +62,16 @@ impl<'a> ClassManager<'a>{
         }
     }
 
-    pub fn resolve_class(&mut self, class_name: &str) -> Result<ClassesToInitialize<'a>, VmError>{
+    pub fn resolve_class(&self, class_name: &str) -> Result<ClassesToInitialize<'a>, VmError>{
         let (class_to_load_name, array_info) = self.try_create_array_class(class_name)?;
         let bytes = self.class_path.resolve(class_to_load_name.as_str()).map_err(|e| VmError::ParseError(ClassParseError::from(e)))?.ok_or(ClassParseError::ResolveError(class_name.to_string()))?;
         self.parse_and_load_class(class_name, class_to_load_name.as_str(), array_info, bytes)
     }
 
-    pub fn parse_and_load_class(&mut self, class_name: &str, class_to_load_name: &str, array_info: Option<ArrayInfo>, bytes: Vec<u8>) -> VMResult<ClassesToInitialize<'a>>{
+    pub fn parse_and_load_class(&self, class_name: &str, class_to_load_name: &str, array_info: Option<ArrayInfo>, bytes: Vec<u8>) -> VMResult<ClassesToInitialize<'a>>{
         let parsed_class = parse_class_file(bytes, class_to_load_name)?;
-        let next_id = self.next_id;
-        self.next_id += 1;
+        let next_id = *self.next_id.borrow();
+        *self.next_id.borrow_mut() += 1;
 
         let mut resolved_classes = self.resolve_super_and_interfaces_and_annotations(&parsed_class)?;
         let mut super_class = parsed_class.super_class.map(|name| resolved_classes.get(&name).unwrap().get_class());
@@ -140,15 +141,15 @@ impl<'a> ClassManager<'a>{
 
         classes_to_init.push(class_ref);
 
-        self.classes_by_name.insert(class_name.to_string(), class_ref);
-        self.classes_by_id.insert(class_ref.id, class_ref);
+        self.classes_by_name.borrow_mut().insert(class_name.to_string(), class_ref);
+        self.classes_by_id.borrow_mut().insert(class_ref.id, class_ref);
         Ok(ClassesToInitialize{
             resolved_class: class_ref,
             to_initialize: classes_to_init,
         })
     }
 
-    fn resolve_super_and_interfaces_and_annotations(&mut self, class_file: &ClassFile) -> VMResult<HashMap<String, ResolvedClass<'a>>>{
+    fn resolve_super_and_interfaces_and_annotations(&self, class_file: &ClassFile) -> VMResult<HashMap<String, ResolvedClass<'a>>>{
         let mut resolved_classes = HashMap::new();
         if let Some(super_class_name) = &class_file.super_class{
             let resolved_class = self.get_or_resolve_class(super_class_name)?;
@@ -182,10 +183,10 @@ impl<'a> ClassManager<'a>{
 
     pub fn find_class_by_name(&self, class_name: &str) -> Option<ClassRef<'a>>{
         //self.classes.iter().find(|c| c.name == class_name)
-        self.classes_by_name.get(class_name).cloned()
+        self.classes_by_name.borrow().get(class_name).cloned()
     }
 
     pub fn find_class_by_id(&self, class_id: ClassId) -> Option<ClassRef<'a>>{
-        self.classes_by_id.get(&class_id).cloned()
+        self.classes_by_id.borrow().get(&class_id).cloned()
     }
 }

@@ -53,12 +53,12 @@ pub struct VM<'a>{
     pub call_stack: CallStack<'a>,
     pub object_allocator: ObjectAllocator<'a>,
     pub unsafe_allocator: Unsafe,
-    pub static_class_objects: HashMap<ClassId, Reference<'a>>,
-    pub string_objects: HashMap<String, Reference<'a>>,
-    pub class_objects: HashMap<ClassId, Reference<'a>>,
+    pub static_class_objects: RefCell<HashMap<ClassId, Reference<'a>>>,
+    pub string_objects: RefCell<HashMap<String, Reference<'a>>>,
+    pub class_objects: RefCell<HashMap<ClassId, Reference<'a>>>,
     pub native_method_registry: NativeMethodRegistry<'a>,
-    pub currently_open_files: HashMap<String, (Vec<u8>, usize)>,
-    pub current_thread: Option<Reference<'a>>,
+    pub currently_open_files: RefCell<HashMap<String, (Vec<u8>, usize)>>,
+    pub current_thread: RefCell<Option<Reference<'a>>>,
     pub debug_helper: DebugHelper,
 }
 
@@ -68,71 +68,17 @@ impl<'a> VM<'a>{
         let mut native_method_registry = NativeMethodRegistry::new();
         register_all_natives(&mut native_method_registry);
         let unsafe_allocator = Unsafe::new();
-        let dummy_class = class_manager.classes.alloc(Class {
-            id: ClassId(0),
-            name: "internal/Returner".to_string(),
-            source_file: None,
-            constants: ConstantPool(vec![]),
-            flags: vec![],
-            superclass: None,
-            interfaces: vec![],
-            fields: vec![],
-            methods: vec![MethodInfo {
-                flags: vec![],
-                name: "dummyReturn".to_string(),
-                descriptor: MethodDescriptor::new("()Ljava/lang/Object;".to_string()),
-                deprecated: false,
-                code: Some(Code {
-                    max_stack: 1,
-                    max_locals: 1,
-                    code: vec![0xb0], //ARETURN
-                    attributes: vec![],
-                    line_number_table: None,
-                    exception_table: ExceptionTable(vec![]),
-                }),
-                code_blocks: None,
-                attributes: vec![],
-                exceptions: None,
-            },
-            MethodInfo{
-                flags: vec![],
-                name: "dummyThrow".to_string(),
-                descriptor: MethodDescriptor::new("()V".to_string()),
-                deprecated: false,
-                code: Some(Code{
-                    max_stack: 1,
-                    max_locals: 1,
-                    code: vec![0xbf], //ATHROW
-                    attributes: vec![],
-                    line_number_table: None,
-                    exception_table: ExceptionTable(vec![]),
-                }),
-                code_blocks: None,
-                attributes: vec![],
-                exceptions: None,
-            }],
-            annotations: VisibleRuntimeAnnotations(vec![]),
-            bootstrap_methods: BootstrapMethods(Vec::new()),
-            transitive_field_count: 0,
-            first_field_index: 0,
-            array_info: None,
-        });
-        let class_ref = unsafe {
-            let class_ptr: *const Class<'a> = dummy_class;
-            &*class_ptr
-        };
-        class_manager.classes_by_id.insert(class_ref.id, class_ref);
         Self{
             class_manager,
             object_allocator: ObjectAllocator::new(),
             unsafe_allocator,
             call_stack: CallStack::new(),
-            static_class_objects: HashMap::new(),
-            string_objects: HashMap::new(),
-            class_objects: HashMap::new(),
+            static_class_objects: RefCell::new(HashMap::new()),
+            string_objects: RefCell::new(HashMap::new()),
+            class_objects: RefCell::new(HashMap::new()),
             native_method_registry,
-            currently_open_files: HashMap::new(),
-            current_thread: None,
+            currently_open_files: RefCell::new(HashMap::new()),
+            current_thread: RefCell::new(None),
             debug_helper: DebugHelper::new()
         }
     }
@@ -143,21 +89,21 @@ impl<'a> VM<'a>{
         Ok(())
     }
 
-    pub fn invoke_new_frame(&mut self, class_and_method: ClassAndMethod<'a>, object: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
+    pub fn invoke_new_frame(&self, class_and_method: ClassAndMethod<'a>, object: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
         self.call_stack.create_and_push_call_frame(class_and_method, object, args, false);
         self.invoke_current_frame()
     }
 
-    pub fn invoke_current_frame(&mut self) -> VMPartialResult<'a, Option<Value<'a>>> {
+    pub fn invoke_current_frame(&self) -> VMPartialResult<'a, Option<Value<'a>>> {
         let mut last_result: Option<VMResultType<Option<Value>>> = None;
         loop {
-            let frame_amount = self.call_stack.frames.len();
+            let frame_amount = self.call_stack.len();
             let frame_index = if frame_amount > 0 {frame_amount - 1} else {frame_amount};
             //let frame_index = self.call_stack.frames.len() - 1;
             let current_result = if let Some(VMResultType::ExceptionThrown(error, ref throwable)) = last_result{
                 VMResultType::ExceptionThrown(error, throwable.clone())
             } else {
-                let class_and_method = self.call_stack.frames.last().unwrap().class_and_method.clone();
+                let class_and_method = self.call_stack.get_class_and_method_cloned();
                 if class_and_method.method.is_native(){
                     self.execute_native(class_and_method)?
                 } else {
@@ -168,7 +114,7 @@ impl<'a> VM<'a>{
             match current_result{
                 VMResultType::Ok(result) => {
                     let frame = self.call_stack.pop_call_frame();
-                    if self.call_stack.frames.is_empty(){
+                    if self.call_stack.is_empty(){
                         return Ok(VMResultType::Ok(result));
                     }
                     if let Some(value) = result{
@@ -178,14 +124,14 @@ impl<'a> VM<'a>{
                     }
                 }
                 VMResultType::NativeOk(result) => {
-                    if self.call_stack.frames.is_empty(){
+                    if self.call_stack.is_empty(){
                         return Ok(VMResultType::Ok(result));
                     }
                     let frame = self.call_stack.pop_call_frame_at(frame_index);
                     if let Some(value) = result{
                         //self.call_stack.push_operand_value(value);
                         if frame.should_push_return {
-                            self.call_stack.operand_stacks[frame_index - 1].push(value);
+                            self.call_stack.operand_stacks.borrow_mut()[frame_index - 1].push(value);
                         }
                     }
                 }
@@ -193,15 +139,14 @@ impl<'a> VM<'a>{
                     if let VmError::JavaException(JavaError::JavaExceptionThrown(thrown_class_name, message, origin)) = error {
                         let _frame = self.call_stack.pop_call_frame_at(frame_index);
                         let calling_frame_index = frame_index - 1;
-                        let calling_frame = self.call_stack.frames.get(calling_frame_index).unwrap();
+                        let class_and_method = self.call_stack.frames.borrow().get(calling_frame_index).unwrap().class_and_method.clone();
 
-                        let class_and_method = calling_frame.class_and_method.clone();
                         let exception_table = class_and_method.method.get_exception_handlers();
-                        let current_pc = &self.call_stack.pcs.get(calling_frame_index).unwrap();
+                        let current_pc = &self.call_stack.pcs.borrow()[calling_frame_index];
                         //[unchecked] class already loaded by native
                         if let Some(handler_pc) = self.unchecked_resolve_exception_handler(exception_table, current_pc, thrown_class_name.as_str())? {
-                            self.call_stack.pcs[calling_frame_index] = handler_pc;
-                            self.call_stack.operand_stacks[calling_frame_index].push(throwable);
+                            self.call_stack.pcs.borrow_mut()[calling_frame_index] = handler_pc;
+                            self.call_stack.operand_stacks.borrow_mut()[calling_frame_index].push(throwable);
                             #[cfg(feature = "debug")]
                             {
                                 self.debug_helper.exception_helper.push(format!("Handled Native {} by {}\n└-- thrown by {} with message: {}", thrown_class_name, class_and_method.format(), origin, message));
@@ -223,14 +168,14 @@ impl<'a> VM<'a>{
                     /*for new_frame in classes {
                         self.call_stack.push_call_frame(new_frame);
                     }*/
-                    let last_frame_index = self.call_stack.pcs.len() - classes.len() - 1;
-                    let current_pc = self.call_stack.pcs[last_frame_index];
-                    let previous_pc = self.call_stack.frames[last_frame_index].class_and_method.method.previous_pc(current_pc);
-                    *self.call_stack.pcs.get_mut(last_frame_index).unwrap() = ProgramCounter(previous_pc)
+                    let last_frame_index = self.call_stack.pcs.borrow().len() - classes.len() - 1;
+                    let current_pc = self.call_stack.pcs.borrow()[last_frame_index];
+                    let previous_pc = self.call_stack.frames.borrow()[last_frame_index].class_and_method.method.previous_pc(current_pc);
+                    *self.call_stack.pcs.borrow_mut().get_mut(last_frame_index).unwrap() = ProgramCounter(previous_pc)
                 }
                 VMResultType::ExceptionThrown(error, throwable) => {
                     if let VmError::JavaException(JavaError::JavaExceptionThrown(thrown_class_name, message, origin)) = error {
-                        if let Some(error_frame) = self.call_stack.frames.last(){
+                        if let Some(error_frame) = self.call_stack.frames.borrow().last(){
                             let class_and_method = error_frame.class_and_method.clone();
                             let exception_table = class_and_method.method.get_exception_handlers();
                             let current_pc = &self.call_stack.get_pc();
@@ -390,7 +335,7 @@ impl<'a> VM<'a>{
         }
     }*/
 
-    fn execute_native(&mut self, class_and_method: ClassAndMethod<'a>) -> VMPartialResult<'a, Option<Value<'a>>> {
+    fn execute_native(&self, class_and_method: ClassAndMethod<'a>) -> VMPartialResult<'a, Option<Value<'a>>> {
         //let call_frame = self.call_stack.pop_call_frame();
         
         let object = if class_and_method.method.is_static() {
@@ -403,7 +348,7 @@ impl<'a> VM<'a>{
                 None => None
             }
         };
-        let args = self.call_stack.locals_stack.last().unwrap()
+        let args = self.call_stack.locals_stack.borrow().last().unwrap()
             .iter()
             .cloned()
             .skip(if object.is_none() {0} else {1})
@@ -423,7 +368,7 @@ impl<'a> VM<'a>{
         }
     }
 
-    fn resolve_exception_handler(&mut self, exception_table: &ExceptionTable, pc: &ProgramCounter, thrown_class_name: &str) -> VMPartialResult<'a, Option<ProgramCounter>>{
+    fn resolve_exception_handler(&self, exception_table: &ExceptionTable, pc: &ProgramCounter, thrown_class_name: &str) -> VMPartialResult<'a, Option<ProgramCounter>>{
         let _ = self.get_or_resolve_class(thrown_class_name)?;
         self.unchecked_resolve_exception_handler(exception_table, pc, thrown_class_name).map(VMResultType::Ok)
     }
@@ -446,7 +391,7 @@ impl<'a> VM<'a>{
         Ok(None)
     }
 
-    pub fn get_or_resolve_class(&mut self, class_name: &str) -> VMPartialResult<'a, ClassRef<'a>>{
+    pub fn get_or_resolve_class(&self, class_name: &str) -> VMPartialResult<'a, ClassRef<'a>>{
         let resolved = self.class_manager.get_or_resolve_class(class_name)?;
         if let ResolvedClass::NewClass(to_init) = &resolved{
             Ok(VMResultType::NeedsClassInit(
@@ -472,7 +417,7 @@ impl<'a> VM<'a>{
         self.find_class_by_name(class_name.to_owned()).ok_or(VmError::ClassNotLoadedError(format!("[try_get_class]: Class not loaded: {}", class_name)))
     }
 
-    pub fn define_class(&mut self, class_name: &str, bytes: Vec<u8>) -> VMPartialResult<'a, Reference<'a>>{
+    pub fn define_class(&self, class_name: &str, bytes: Vec<u8>) -> VMPartialResult<'a, Reference<'a>>{
         let resolved = self.find_class_by_name(class_name.to_string());
         if resolved.is_none() {
             let to_init = self.class_manager.parse_and_load_class(class_name, class_name, None, bytes)?;
@@ -490,10 +435,10 @@ impl<'a> VM<'a>{
         self.new_class_object_by_class(resolved)
     }
 
-    fn init_class(&mut self, class: ClassRef<'a>) -> Option<()>{
+    fn init_class(&self, class: ClassRef<'a>) -> Option<()>{
         if class.transitive_field_count > 0 && !class.is_array(){
             let static_object = self.new_object_from_class(class);
-            self.static_class_objects.insert(class.id, static_object);
+            self.static_class_objects.borrow_mut().insert(class.id, static_object);
             if let Some(clinit_method) = class.find_method("<clinit>", "()V"){
                 let class_and_method = ClassAndMethod{
                     class,
@@ -507,7 +452,7 @@ impl<'a> VM<'a>{
         None
     }
 
-    pub fn resolve_class_method(&mut self, class_name: &str, method_name: &str, descriptor: &str) -> VMPartialResult<'a, ClassAndMethod<'a>>{
+    pub fn resolve_class_method(&self, class_name: &str, method_name: &str, descriptor: &str) -> VMPartialResult<'a, ClassAndMethod<'a>>{
         let result = self.get_or_resolve_class(class_name);
         result.and_then(|class| {
             let class = get_or_init!(class);
@@ -522,7 +467,7 @@ impl<'a> VM<'a>{
             .ok_or(VmError::JavaException(JavaError::MethodNotFoundException(method_name.to_string())))
     }
 
-    pub fn try_resolve_class_method(&mut self, class_name: &str, method_name: &str, descriptor: &str) -> VMResult<ClassAndMethod<'a>>{
+    pub fn try_resolve_class_method(&self, class_name: &str, method_name: &str, descriptor: &str) -> VMResult<ClassAndMethod<'a>>{
         if let VMResultType::Ok(method) = self.resolve_class_method(class_name, method_name, descriptor)? {
             Ok(method)
         } else {
@@ -530,11 +475,11 @@ impl<'a> VM<'a>{
         }
     }
 
-    pub fn new_object(&mut self, class_name: &str) -> VMPartialResult<'a, Reference<'a>>{
+    pub fn new_object(&self, class_name: &str) -> VMPartialResult<'a, Reference<'a>>{
         get_or_init_special!(self.get_or_resolve_class(class_name)?, |class| Ok(VMResultType::Ok(self.new_object_from_class(class))))
     }
 
-    pub fn try_new_object(&mut self, class_name: &str) -> VMResult<Reference<'a>>{
+    pub fn try_new_object(&self, class_name: &str) -> VMResult<Reference<'a>>{
         let result = self.new_object(class_name)?;
         if let VMResultType::Ok(object) = result {
             Ok(object)
@@ -549,10 +494,10 @@ impl<'a> VM<'a>{
     }
 
     pub fn get_static_class_object(&self, id: ClassId) -> Option<Reference<'a>>{
-        self.static_class_objects.get(&id).cloned()
+        self.static_class_objects.borrow().get(&id).cloned()
     }
 
-    pub fn new_array(&mut self, dims: usize, array_field_type: FieldType, content: RefCell<Vec<Value<'a>>>) -> VMPartialResult<'a, Reference<'a>>{
+    pub fn new_array(&self, dims: usize, array_field_type: FieldType, content: RefCell<Vec<Value<'a>>>) -> VMPartialResult<'a, Reference<'a>>{
         let (class_name, component_type) = if let FieldType::Array(class_name, component_type) = array_field_type {
             (class_name, component_type)
         } else {
@@ -561,7 +506,7 @@ impl<'a> VM<'a>{
         get_or_init_special!(self.get_or_resolve_class(class_name.as_str())?, |class| Ok(VMResultType::Ok(self.object_allocator.allocate_array(class, dims, *component_type, content))))
     }
 
-    pub fn try_new_array(&mut self, dims: usize, array_field_type: FieldType, content: RefCell<Vec<Value<'a>>>) -> VMResult<Reference<'a>>{
+    pub fn try_new_array(&self, dims: usize, array_field_type: FieldType, content: RefCell<Vec<Value<'a>>>) -> VMResult<Reference<'a>>{
         let result = self.new_array(dims, array_field_type, content)?;
         if let VMResultType::Ok(object) = result {
             Ok(object)
@@ -570,7 +515,7 @@ impl<'a> VM<'a>{
         }
     }
 
-    pub fn try_new_string_object(&mut self, string: String) -> VMResult<Reference<'a>>{
+    pub fn try_new_string_object(&self, string: String) -> VMResult<Reference<'a>>{
         let result = self.new_string_object(string)?;
         if let VMResultType::Ok(object) = result {
             Ok(object)
@@ -579,9 +524,9 @@ impl<'a> VM<'a>{
         }
     }
     
-    pub fn new_string_object(&mut self, string: String) -> VMPartialResult<'a, Reference<'a>>{
-        if self.string_objects.contains_key(&string){
-            return Ok(VMResultType::Ok(self.string_objects[&string]))
+    pub fn new_string_object(&self, string: String) -> VMPartialResult<'a, Reference<'a>>{
+        if self.string_objects.borrow().contains_key(&string){
+            return Ok(VMResultType::Ok(self.string_objects.borrow()[&string]))
         }
         
         let char_array: Vec<Value<'a>> = string.chars().map(|c| Value::Integer(c as i32)).collect();
@@ -595,7 +540,7 @@ impl<'a> VM<'a>{
         string_object.set_field(1, Value::Integer(0));
         string_object.set_field(6, Value::Integer(0));
 
-        self.string_objects.insert(string, string_object);
+        self.string_objects.borrow_mut().insert(string, string_object);
         Ok(VMResultType::Ok(string_object))
     }
 
@@ -618,33 +563,33 @@ impl<'a> VM<'a>{
         Err(VmError::ValidationError(format!( "Expected CharArray but found: {:?}", chars)))
     }
 
-    pub fn new_class_object(&mut self, class_name: String, class_id: ClassId) -> VMPartialResult<'a, Reference<'a>>{
-        if !self.class_objects.contains_key(&class_id){
+    pub fn new_class_object(&self, class_name: String, class_id: ClassId) -> VMPartialResult<'a, Reference<'a>>{
+        if !self.class_objects.borrow().contains_key(&class_id){
             let class_object = get_or_init!(self.new_object("java/lang/Class")?);
             let string_object = get_or_init!(self.new_string_object(class_name.replace("/", "."))?);
 
             //name
             class_object.set_field(5, Value::Reference(string_object));
 
-            self.class_objects.insert(class_id, class_object);
+            self.class_objects.borrow_mut().insert(class_id, class_object);
             Ok(VMResultType::Ok(class_object))
         } else {
-            Ok(VMResultType::Ok(self.class_objects[&class_id]))
+            Ok(VMResultType::Ok(self.class_objects.borrow()[&class_id]))
         }
     }
 
-    pub fn new_class_object_by_class(&mut self, class: ClassRef<'a>) -> VMPartialResult<'a, Reference<'a>>{
+    pub fn new_class_object_by_class(&self, class: ClassRef<'a>) -> VMPartialResult<'a, Reference<'a>>{
         let class_id = class.id;
         let class_name = class.name.clone();
         self.new_class_object(class_name, class_id)
     }
 
-    pub fn new_class_object_by_name(&mut self, class_name: String) -> VMPartialResult<'a, Reference<'a>> {
+    pub fn new_class_object_by_name(&self, class_name: String) -> VMPartialResult<'a, Reference<'a>> {
         let class_id = get_or_init_special!(self.get_or_resolve_class(class_name.as_str())?, |v: ClassRef| v.id);
         self.new_class_object(class_name, class_id)
     }
 
-    pub fn extract_class_from_class_object(&mut self, object: Reference<'a>) -> VMPartialResult<'a, ClassRef<'a>>{
+    pub fn extract_class_from_class_object(&self, object: Reference<'a>) -> VMPartialResult<'a, ClassRef<'a>>{
         let name_object = object.get_field(5);
         let name = VM::extract_string_from_object(&name_object)?;
         let name = name.replace(".", "/");

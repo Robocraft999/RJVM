@@ -1,22 +1,23 @@
+use std::cell::RefCell;
 use log::error;
 
 pub struct ExceptionHelper{
-    history: Vec<String>
+    history: RefCell<Vec<String>>
 }
 
 impl ExceptionHelper{
     pub fn new() -> Self{
         Self{
-            history: Vec::new()
+            history: RefCell::new(Vec::new())
         }
     }
     
-    pub fn push(&mut self, line: String){
-        self.history.push(line);
+    pub fn push(&self, line: String){
+        self.history.borrow_mut().push(line);
     }
     
     pub fn print(&self){
-        for line in self.history.iter(){
+        for line in self.history.borrow().iter(){
             error!("{}", line);
         }
     }

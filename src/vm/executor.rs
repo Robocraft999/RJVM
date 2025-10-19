@@ -14,8 +14,8 @@ macro_rules! wrap_error {
     };
 }
 
-pub fn execute<'a>(vm: &mut VM<'a>) -> VMPartialResult<'a, Option<Value<'a>>>{
-    let class_and_method = &vm.call_stack.frames.last().unwrap().class_and_method;
+pub fn execute<'a>(vm: &VM<'a>) -> VMPartialResult<'a, Option<Value<'a>>>{
+    let class_and_method = &vm.call_stack.frames.borrow().last().unwrap().class_and_method.clone();
     info!("");
     info!("METHOD_NAME: {} at {}", class_and_method.format(), vm.call_stack.get_pc().0);
     debug!("{:?}", class_and_method.method.code_blocks);
@@ -29,17 +29,17 @@ pub fn execute<'a>(vm: &mut VM<'a>) -> VMPartialResult<'a, Option<Value<'a>>>{
     Err(VmError::MethodCallError(format!("Method: {} is not executeable, because it has no code", class_and_method.format())))
 }
 
-pub fn execute_current_block<'a>(vm: &mut VM<'a>) -> Option<VMPartialResult<'a, Option<Value<'a>>>>{
-    let class_and_method = &vm.call_stack.frames.last().unwrap().class_and_method.clone();
+pub fn execute_current_block<'a>(vm: &VM<'a>) -> Option<VMPartialResult<'a, Option<Value<'a>>>>{
+    let class_and_method = &vm.call_stack.frames.borrow().last().unwrap().class_and_method.clone();
     let block = class_and_method.method.get_code_block_at(vm.call_stack.get_pc());
     let current_pc = vm.call_stack.get_pc();
     trace!(">{:03} {:?}", current_pc.0, block);
     trace!("stack[{}]=", class_and_method.get_max_stack_size());
-    for (index, value) in vm.call_stack.operand_stacks.last().unwrap().iter().enumerate(){
+    for (index, value) in vm.call_stack.operand_stacks.borrow().last().unwrap().iter().enumerate(){
         trace!("    [{}] {:?}", index, value);
     }
     trace!("locals[{}]=", class_and_method.get_max_locals());
-    for (index, value) in vm.call_stack.locals_stack.last().unwrap().iter().enumerate(){
+    for (index, value) in vm.call_stack.locals_stack.borrow().last().unwrap().iter().enumerate(){
         trace!("    [{}] {:?}", index, value);
     }
     if let Some(next_pc) = class_and_method.method.next_pc(current_pc){
@@ -601,7 +601,7 @@ pub fn execute_current_block<'a>(vm: &mut VM<'a>) -> Option<VMPartialResult<'a, 
             }
         }
         InstructionBlock::AStoreWithoutPop(index) => {
-            let top = vm.call_stack.operand_stacks.last().unwrap().last().unwrap().clone();
+            let top = vm.call_stack.operand_stacks.borrow().last().unwrap().last().unwrap().clone();
             vm.call_stack.store_local(top, *index);
         }
         InstructionBlock::IConstReturn(val) => {
@@ -615,11 +615,11 @@ pub fn execute_current_block<'a>(vm: &mut VM<'a>) -> Option<VMPartialResult<'a, 
     None
 }
 
-fn x_const<'a>(vm: &mut VM<'a>, value: Value<'a>){
+fn x_const<'a>(vm: &VM<'a>, value: Value<'a>){
     vm.call_stack.push_operand_value(value);
 }
 
-fn istore(vm: &mut VM, index: usize) -> VMResult<()> {
+fn istore(vm: &VM, index: usize) -> VMResult<()> {
     let value = vm.call_stack.pop_operand_value().unwrap();
     debug!("ISTORE{} {:?}", index, value);
     vm.call_stack.store_local(value, index);
@@ -627,7 +627,7 @@ fn istore(vm: &mut VM, index: usize) -> VMResult<()> {
 }
 
 //TODO validation
-fn lstore(vm: &mut VM, index: usize) -> VMResult<()> {
+fn lstore(vm: &VM, index: usize) -> VMResult<()> {
     let value = vm.call_stack.pop_operand_value().unwrap();
     debug!("LSTORE{} {:?}", index, value);
     vm.call_stack.store_local(value, index);
@@ -635,21 +635,21 @@ fn lstore(vm: &mut VM, index: usize) -> VMResult<()> {
     Ok(())
 }
 
-fn fstore(vm: &mut VM, index: usize) -> VMResult<()> {
+fn fstore(vm: &VM, index: usize) -> VMResult<()> {
     let value = vm.call_stack.pop_operand_value().unwrap();
     debug!("FSTORE{} {:?}", index, value);
     vm.call_stack.store_local(value, index);
     Ok(())
 }
 
-fn astore(vm: &mut VM, index: usize) -> VMResult<()> {
+fn astore(vm: &VM, index: usize) -> VMResult<()> {
     let value = vm.call_stack.pop_operand_value().unwrap();
     debug!("ASTORE{} {:?}", index, value);
     vm.call_stack.store_local(value, index);
     Ok(())
 }
 
-fn iload(vm: &mut VM, index: usize) -> VMResult<()> {
+fn iload(vm: &VM, index: usize) -> VMResult<()> {
     let popped = vm.call_stack.load_local(index).unwrap();
     match popped {
         Value::Integer(i) => {
@@ -661,7 +661,7 @@ fn iload(vm: &mut VM, index: usize) -> VMResult<()> {
     Ok(())
 }
 
-fn lload(vm: &mut VM, index: usize) -> VMResult<()> {
+fn lload(vm: &VM, index: usize) -> VMResult<()> {
     let local = vm.call_stack.load_local(index);
     let dummy = vm.call_stack.load_local(index + 1);
     if dummy.as_ref().unwrap() != &Value::Dummy{
@@ -676,7 +676,7 @@ fn lload(vm: &mut VM, index: usize) -> VMResult<()> {
     }
 }
 
-fn fload(vm: &mut VM, index: usize) -> VMResult<()> {
+fn fload(vm: &VM, index: usize) -> VMResult<()> {
     let local = vm.call_stack.load_local(index);
     if let Some(Value::Float(value)) = local{
         vm.call_stack.push_operand_value(Value::Float(value));
@@ -687,7 +687,7 @@ fn fload(vm: &mut VM, index: usize) -> VMResult<()> {
     }
 }
 
-fn dload(vm: &mut VM, index: usize) -> VMResult<()> {
+fn dload(vm: &VM, index: usize) -> VMResult<()> {
     let local = vm.call_stack.load_local(index);
     if let Some(Value::Double(value)) = local{
         vm.call_stack.push_operand_value(Value::Double(value));
@@ -698,7 +698,7 @@ fn dload(vm: &mut VM, index: usize) -> VMResult<()> {
     }
 }
 
-fn aload<'a>(vm: &mut VM<'a>, index: usize) -> VMResult<()>{
+fn aload<'a>(vm: &VM<'a>, index: usize) -> VMResult<()>{
     let popped = vm.call_stack.load_local(index).unwrap();
     match popped {
         Value::Reference(reference) => {
@@ -713,14 +713,14 @@ fn aload<'a>(vm: &mut VM<'a>, index: usize) -> VMResult<()>{
     Ok(())
 }
 
-fn execute_cmp<F: FnOnce(i32) -> bool>(vm: &mut VM, target: u16, cmp: F){
+fn execute_cmp<F: FnOnce(i32) -> bool>(vm: &VM, target: u16, cmp: F){
     let value = vm.call_stack.pop_operand_value().unwrap().expect_int().unwrap();
     if cmp(value){
         vm.call_stack.set_pc(target);
     }
 }
 
-fn execute_i_cmp<F: FnOnce(i32, i32) -> bool>(vm: &mut VM, offset: u16, f: F){
+fn execute_i_cmp<F: FnOnce(i32, i32) -> bool>(vm: &VM, offset: u16, f: F){
     let val2 = vm.call_stack.pop_operand_value().unwrap().expect_int().unwrap();
     let val1 = vm.call_stack.pop_operand_value().unwrap().expect_int().unwrap();
     let jump = f(val1, val2);
@@ -730,7 +730,7 @@ fn execute_i_cmp<F: FnOnce(i32, i32) -> bool>(vm: &mut VM, offset: u16, f: F){
     }
 }
 
-fn execute_i_arithmetic<F: FnOnce(i32, i32) -> VMResult<i32>>(vm: &mut VM, f: F) -> VMResult<()> {
+fn execute_i_arithmetic<F: FnOnce(i32, i32) -> VMResult<i32>>(vm: &VM, f: F) -> VMResult<()> {
     let value2 = vm.call_stack.pop_operand_value();
     let value1 = vm.call_stack.pop_operand_value();
     if let (Some(Value::Integer(val1)), Some(Value::Integer(val2))) = (value1, value2){
@@ -744,7 +744,7 @@ fn execute_i_arithmetic<F: FnOnce(i32, i32) -> VMResult<i32>>(vm: &mut VM, f: F)
     }
 }
 
-fn execute_l_arithmetic<F: FnOnce(i64, i64) -> VMResult<i64>>(vm: &mut VM, f: F) -> VMResult<()> {
+fn execute_l_arithmetic<F: FnOnce(i64, i64) -> VMResult<i64>>(vm: &VM, f: F) -> VMResult<()> {
     let value2 = vm.call_stack.pop_operand_value();
     let value1 = vm.call_stack.pop_operand_value();
     if let (Some(Value::Long(val1)), Some(Value::Long(val2))) = (value1, value2){
@@ -758,7 +758,7 @@ fn execute_l_arithmetic<F: FnOnce(i64, i64) -> VMResult<i64>>(vm: &mut VM, f: F)
     }
 }
 
-fn execute_f_arithmetic<F: FnOnce(f32, f32) -> VMResult<f32>>(vm: &mut VM, f: F) -> VMResult<()> {
+fn execute_f_arithmetic<F: FnOnce(f32, f32) -> VMResult<f32>>(vm: &VM, f: F) -> VMResult<()> {
     let value2 = vm.call_stack.pop_operand_value();
     let value1 = vm.call_stack.pop_operand_value();
     if let (Some(Value::Float(val1)), Some(Value::Float(val2))) = (value1, value2){
@@ -772,7 +772,7 @@ fn execute_f_arithmetic<F: FnOnce(f32, f32) -> VMResult<f32>>(vm: &mut VM, f: F)
     }
 }
 
-fn execute_ji_arithmetic<F: FnOnce(i64, i32) -> Result<i64, VmError>>(vm: &mut VM, f: F) -> VMResult<()> {
+fn execute_ji_arithmetic<F: FnOnce(i64, i32) -> Result<i64, VmError>>(vm: &VM, f: F) -> VMResult<()> {
     let value2 = vm.call_stack.pop_operand_value();
     let value1 = vm.call_stack.pop_operand_value();
     if let (Some(Value::Long(val1)), Some(Value::Integer(val2))) = (value1, value2){
@@ -786,8 +786,8 @@ fn execute_ji_arithmetic<F: FnOnce(i64, i32) -> Result<i64, VmError>>(vm: &mut V
     }
 }
 
-fn execute_invoke<'a>(vm: &mut VM<'a>, index: u16, kind: InvokeKind) -> VMPartialResult<'a, Option<Value<'a>>> {
-    let class_and_method = &vm.call_stack.frames.last().unwrap().class_and_method.clone();
+fn execute_invoke<'a>(vm: &VM<'a>, index: u16, kind: InvokeKind) -> VMPartialResult<'a, Option<Value<'a>>> {
+    let class_and_method = &vm.call_stack.frames.borrow().last().unwrap().class_and_method.clone();
     let (class_name, method_name, descriptor) = class_and_method.get_constant_method_info_descriptor(index).expect("GIB MICH DIE METHODE");
     trace!("loading class to execute on: '{}'", class_name.as_str());
     let class = get_or_init!(vm.get_or_resolve_class(class_name.as_str())?);
@@ -845,11 +845,11 @@ fn execute_invoke<'a>(vm: &mut VM<'a>, index: u16, kind: InvokeKind) -> VMPartia
 
     trace!("STATUS of '{}' before invoke: ", class_and_method.method.name);
     trace!("stack=");
-    for (index, value) in vm.call_stack.operand_stacks.last().unwrap().iter().enumerate(){
+    for (index, value) in vm.call_stack.operand_stacks.borrow().last().unwrap().iter().enumerate(){
         trace!("    [{}] {:?}", index, value);
     }
     trace!("locals=");
-    for (index, value) in vm.call_stack.locals_stack.last().unwrap().iter().enumerate(){
+    for (index, value) in vm.call_stack.locals_stack.borrow().last().unwrap().iter().enumerate(){
         trace!("    [{}] {:?}", index, value);
     }
     debug!("INVOKE{:?}: {}{} on {:?}", kind, method_name, descriptor, receiver);
@@ -918,8 +918,8 @@ fn get_method_interface_virtual<'a>(class: ClassRef<'a>, method_name: &str, desc
     }
 }
 
-fn get_constant_as_value<'a>(vm: &mut VM<'a>, index: u16) -> VMPartialResult<'a, Value<'a>>{
-    let class_and_method = &vm.call_stack.frames.last().unwrap().class_and_method.clone();
+fn get_constant_as_value<'a>(vm: &VM<'a>, index: u16) -> VMPartialResult<'a, Value<'a>>{
+    let class_and_method = &vm.call_stack.frames.borrow().last().unwrap().class_and_method.clone();
     let constant_value = class_and_method.class.get_constant(index).unwrap();
     let value = match constant_value {
         ConstantPoolEntry::Integer(value) => Value::Integer(value),
@@ -958,7 +958,7 @@ fn get_constant_as_value<'a>(vm: &mut VM<'a>, index: u16) -> VMPartialResult<'a,
     Ok(VMResultType::Ok(value))
 }
 
-fn execute_create_array<'a>(vm: &mut VM<'a>, array_field_type: FieldType, dims: usize) -> VMPartialResult<'a, Value<'a>>{
+fn execute_create_array<'a>(vm: &VM<'a>, array_field_type: FieldType, dims: usize) -> VMPartialResult<'a, Value<'a>>{
     if let FieldType::Array(_, component_type) = array_field_type{
         //ensure that the array class get loaded before popping the count(s)
         for i in 0..dims{

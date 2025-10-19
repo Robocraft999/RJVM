@@ -1,44 +1,45 @@
+use std::cell::RefCell;
 use crate::vm::r#unsafe::memory_chunk::MemoryChunk;
 
 mod memory_chunk;
 
 pub struct Unsafe {
-    pub memory: MemoryChunk
+    memory: RefCell<MemoryChunk>
 }
 
 impl Unsafe {
     pub fn new() -> Self {
         Self{
-            memory: MemoryChunk::new(1024 * 1024)
+            memory: RefCell::new(MemoryChunk::new(1024 * 1024))
         }
     }
 
-    pub fn allocate_memory(&mut self, amount: usize) -> i64 {
-        self.memory.alloc(amount).map(|entry| entry.ptr as i64).unwrap_or(-1)
+    pub fn allocate_memory(&self, amount: usize) -> i64 {
+        self.memory.borrow_mut().alloc(amount).map(|entry| entry.ptr as i64).unwrap_or(-1)
     }
 
-    pub fn free_memory(&mut self, ptr: i64) {
+    pub fn free_memory(&self, ptr: i64) {
         //TODO
     }
 
-    pub fn put_long(&mut self, ptr: i64, value: i64) {
-        self.memory.put(ptr as usize, 8, &value.to_be_bytes())
+    pub fn put_long(&self, ptr: i64, value: i64) {
+        self.memory.borrow_mut().put(ptr as usize, 8, &value.to_be_bytes())
     }
 
     pub fn get_long(&self, ptr: i64) -> Option<i64> {
         let mut value: i64 = 0;
-        for (index, element) in self.memory.get(ptr as usize, 8).iter().enumerate(){
+        for (index, element) in self.memory.borrow().get(ptr as usize, 8).iter().enumerate(){
             value |= (*element as i64) << (8 * (7-index));
         }
         Some(value)
     }
 
-    pub fn put_byte(&mut self, ptr: i64, value: u8) {
-        self.memory.put(ptr as usize, 1, &[value])
+    pub fn put_byte(&self, ptr: i64, value: u8) {
+        self.memory.borrow_mut().put(ptr as usize, 1, &[value])
     }
 
     pub fn get_byte(&self, ptr: i64) -> Option<u8> {
-        Some(self.memory.get(ptr as usize, 1)[0])
+        Some(self.memory.borrow_mut().get(ptr as usize, 1)[0])
     }
 }
 

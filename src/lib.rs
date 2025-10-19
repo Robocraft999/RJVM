@@ -79,7 +79,7 @@ macro_rules! get_or_init_special {
     };
 }
 
-fn init_vm(vm: &mut VM) -> Result<(), VmError>{
+fn init_vm(vm: &VM) -> Result<(), VmError>{
     if let VMResultType::NeedsClassInit(classes, _) = vm.get_or_resolve_class("sun/misc/VM")?{
         for frame in classes{
             vm.invoke_current_frame()?;
@@ -89,7 +89,7 @@ fn init_vm(vm: &mut VM) -> Result<(), VmError>{
     Ok(())
 }
 
-fn init_system(vm: &mut VM) -> Result<(), VmError>{
+fn init_system(vm: &VM) -> Result<(), VmError>{
     if let VMResultType::NeedsClassInit(classes, _) = vm.get_or_resolve_class("java/lang/System")?{
         for frame in classes{
             vm.invoke_current_frame()?;
@@ -100,7 +100,7 @@ fn init_system(vm: &mut VM) -> Result<(), VmError>{
     Ok(())
 }
 
-fn run_and_catch_method<'a>(vm: &'a mut VM<'a>, class_name: &str, method_name: &str, method_descriptor: &str, args: Vec<Value<'a>>){
+fn run_and_catch_method<'a>(vm: &'a VM<'a>, class_name: &str, method_name: &str, method_descriptor: &str, args: Vec<Value<'a>>){
     if let VMResultType::NeedsClassInit(classes, _) = vm.get_or_resolve_class(class_name).unwrap().clone(){
         for frame in classes{
             vm.invoke_current_frame().unwrap();
@@ -111,7 +111,7 @@ fn run_and_catch_method<'a>(vm: &'a mut VM<'a>, class_name: &str, method_name: &
     match result {
         Ok(res) => {
             println!("result: {res:?}");
-            for (id, static_object) in vm.static_class_objects.iter(){
+            for (id, static_object) in vm.static_class_objects.borrow().iter(){
                 //println!("[{}] {:?}", vm.find_class_by_id(id.clone()).unwrap().name, static_object);
             }
         }
@@ -136,24 +136,23 @@ pub fn run() {
     let mut vm = VM::new(class_path);
 
     simple_logger::SimpleLogger::new().with_level(LevelFilter::Error).without_timestamps().init().unwrap();
+    let env = JNIEnv{
+        methods: jni::env_function_table::METHODS,
+        vm: &vm,
+    };
+    let javavm = JavaVM{
+        methods: jni::vm_function_table::METHODS,
+        env
+    };
     unsafe {
         use libffi::middle::{Closure, Cif, Type, Arg};
         use std::{ffi::c_void, ptr};
-
-
         let lib = libloading::Library::new("/home/admin/.jdks/temurin-1.8.0_462/jre/lib/amd64/libjava.so").unwrap();
         let sym: libloading::Symbol<*const ()> = lib.get(b"JNI_OnLoad").unwrap();
 
         let func_ptr = *sym as * const c_void;
 
-        let env = JNIEnv{
-            methods: jni::env_function_table::METHODS,
-            vm: &mut vm,
-        };
-        let javavm = JavaVM{
-            methods: jni::vm_function_table::METHODS,
-            env
-        };
+
         let vm_ptr = ptr::from_ref(&javavm) as *const c_void;
         let reserved = std::ptr::null() as *const c_void;
         let cif = Cif::new(vec![Type::pointer(), Type::pointer()], Type::i32()); //JNI_OnLoad
@@ -165,7 +164,7 @@ pub fn run() {
     //run_and_catch_method(&mut vm, "Test", "main", "([Ljava/lang/String;)V");
     //return
 
-    match init_vm(&mut vm) {
+    match init_vm(&vm) {
         Ok(_) => {}
         Err(error) => {
             error!("Init VM: {}", error);
@@ -174,7 +173,7 @@ pub fn run() {
     };
     //simple_logger::SimpleLogger::new().with_level(LevelFilter::Trace).without_timestamps().init().unwrap();
     //vm.get_or_resolve_class("java/lang/CharacterData").expect("msg");
-    match init_system(&mut vm){
+    match init_system(&vm){
         Ok(_) => {}
         Err(error) => {
             println!("'{}'", error);
