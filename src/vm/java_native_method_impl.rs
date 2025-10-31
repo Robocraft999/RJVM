@@ -227,6 +227,7 @@ fn delegate_init_system_props<'a>(vm: &VM<'a>, _ : ClassRef<'a>, _: Option<Refer
     let mut props = vec![
         ("file.encoding", "UTF-8".to_string()),
         ("line.separator", "\n".to_string()),
+        ("java.lang.Integer.IntegerCache.high", "127".to_string()),
         //("sun.boot.library.path", "/home/admin/.jdks/temurin-22.0.1/lib".to_string()),
         ("sun.boot.library.path", "/home/admin/.jdks/temurin-1.8.0_462/jre/lib/amd64/".to_string()),
         ("user.dir", env::current_dir().unwrap().to_string_lossy().to_string()),
@@ -237,6 +238,7 @@ fn delegate_init_system_props<'a>(vm: &VM<'a>, _ : ClassRef<'a>, _: Option<Refer
         props = vec![
             ("file.encoding", "UTF-8".to_string()),
             ("line.separator", "\r\n".to_string()),
+            ("java.lang.Integer.IntegerCache.high", "127".to_string()),
             ("sun.boot.library.path", "C:\\Users\\Admin\\.jdks\\azul-22.0.1\\bin".to_string()),
             ("user.dir", env::current_dir().unwrap().to_string_lossy().to_string()),
             ("user.home", env::home_dir().unwrap().to_string_lossy().to_string()),
@@ -1107,7 +1109,7 @@ fn delegate_getcwd<'a>(vm: &VM<'a>, _: ClassRef<'a>, _: Option<Reference<'a>>, _
 
 fn delegate_init_vm<'a>(vm: &VM<'a>, _: ClassRef<'a>, object: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
     let vm_class_id = vm.find_class_by_name("sun/misc/VM".to_owned()).unwrap().id;
-    let arg1 = get_or_init!(vm.new_string_object("java.lang.Integer.IntegerCache.high".to_string())?);
+    /*let arg1 = get_or_init!(vm.new_string_object("java.lang.Integer.IntegerCache.high".to_string())?);
     let arg2 = get_or_init!(vm.new_string_object("127".to_string())?);
     let static_vm_object = vm.get_static_class_object(vm_class_id).unwrap();
     let properties_object = static_vm_object.get_field(11).expect_reference()?;
@@ -1115,7 +1117,7 @@ fn delegate_init_vm<'a>(vm: &VM<'a>, _: ClassRef<'a>, object: Option<Reference<'
     let save_properties_method = vm.try_resolve_class_method("sun/misc/VM", "saveAndRemoveProperties", "(Ljava/util/Properties;)V")?;
     let frame2 = vm.call_stack.create_and_push_call_frame(save_properties_method, None, vec![Value::Reference(properties_object)], false);
     let properties_set_method = vm.try_resolve_class_method("java/util/Properties", "setProperty", "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/Object;")?;
-    let frame1 = vm.call_stack.create_and_push_call_frame(properties_set_method, Some(properties_object), vec![Value::Reference(arg1), Value::Reference(arg2)], false);
+    let frame1 = vm.call_stack.create_and_push_call_frame(properties_set_method, Some(properties_object), vec![Value::Reference(arg1), Value::Reference(arg2)], false);*/
     //Ok(VMResultType::NeedsClassInit(vec![(), ()], false))
     non_failing_none()
 }
