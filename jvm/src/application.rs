@@ -1,8 +1,8 @@
-use log::error;
 use crate::vm::jni::types::JavaVM;
-use crate::vm::{VmError, VM};
 use crate::vm::result::VMResultType;
 use crate::vm::value::Value;
+use crate::vm::{VmError, VM};
+use log::error;
 
 pub struct Application<'a>{
     java_vm: JavaVM<'a>,

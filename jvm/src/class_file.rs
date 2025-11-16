@@ -1,7 +1,3 @@
-use std::fmt::{Debug, Formatter};
-use std::str::FromStr;
-use cesu8::from_java_cesu8;
-use log::info;
 use crate::access_flags::{parse_class_flags, parse_field_flags, parse_method_flags, ClassFlags};
 use crate::attribute::{Annotation, Attribute, BootstrapMethod, BootstrapMethods, Code, ConstantValue, ExceptionTable, ExceptionTableEntry, Exceptions, LineNumber, LineNumberTable, LineNumberTableEntry, ProgramCounter, VisibleRuntimeAnnotations};
 use crate::bytes::{parse_u1, parse_u2, parse_u4, parse_u8};
@@ -13,6 +9,10 @@ use crate::method_info::{MethodDescriptor, MethodInfo};
 use crate::vm::class_path::ClassPath;
 use crate::vm::class_path_entry::ClassLoadingError;
 use crate::vm::result::VMResult;
+use cesu8::from_java_cesu8;
+use log::info;
+use std::fmt::{Debug, Formatter};
+use std::str::FromStr;
 
 pub struct ClassFile{
     pub magic: u32,

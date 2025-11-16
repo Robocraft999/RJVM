@@ -1,4 +1,3 @@
-use crate::vm::call_frame::CallFrame;
 use crate::vm::value::Value;
 use crate::vm::VmError;
 

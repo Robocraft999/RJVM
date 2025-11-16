@@ -3,7 +3,7 @@ use std::fmt::{Debug, Formatter};
 use crate::access_flags::{ClassFlag, ClassFlags};
 use crate::attribute::{BootstrapMethods, VisibleRuntimeAnnotations};
 use crate::constants::{ConstantPool, ConstantPoolEntry};
-use crate::field_info::{FieldInfo, FieldType, PrimitiveType};
+use crate::field_info::{FieldInfo, FieldType};
 use crate::method_info::MethodInfo;
 use crate::vm::value::Value;
 

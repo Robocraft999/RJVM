@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, HashMap};
 
-use crate::{bytecode::{parse_instruction, Instruction}, vm::{bytecode::InstructionBlock, value::Value}};
+use crate::{bytecode::{parse_instruction, Instruction}, vm::bytecode::InstructionBlock};
 
 macro_rules! const_ret {
     ($ret_type:pat, $val:expr, $next:expr, $default:expr) => {

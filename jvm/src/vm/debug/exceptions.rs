@@ -1,5 +1,5 @@
-use std::cell::RefCell;
 use log::error;
+use std::cell::RefCell;
 
 pub struct ExceptionHelper{
     history: RefCell<Vec<String>>

@@ -1,7 +1,7 @@
-use strum_macros::FromRepr;
 use crate::bytecode::Instruction::*;
 use crate::error::ClassParseError;
 use crate::vm::VmError;
+use strum_macros::FromRepr;
 
 pub fn printable_instructions(code_bytes: &Vec<u8>) -> Vec<Instruction>{
     let mut instructions = Vec::new();

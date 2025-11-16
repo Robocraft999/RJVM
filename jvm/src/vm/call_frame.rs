@@ -1,22 +1,5 @@
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::fmt::{Debug, Formatter};
-use std::rc::Rc;
-use std::str::FromStr;
-use log::{debug, error, info, trace, warn};
-use crate::attribute::ProgramCounter;
-use crate::bytecode::{Instruction, parse_instruction, printable_instructions};
-use crate::class_file::get_constant_printable;
-use crate::constants::ConstantPoolEntry;
-use crate::field_info::{extract_component_type_from_array_class, FieldType, PrimitiveType};
-use crate::get_or_init;
-use crate::method_info::MethodDescriptor;
-use crate::vm::java_error::JavaError;
-use crate::vm::{bytecode, VmError, VM};
-use crate::vm::callstack::CallStack;
-use crate::vm::class::{ClassAndMethod, ClassRef};
-use crate::vm::result::{VMPartialResult, VMResultType};
-use crate::vm::value::{ReferenceType, Value};
+use crate::vm::class::ClassAndMethod;
+use std::fmt::Debug;
 
 #[derive(Clone)]
 pub struct CallFrame<'a>{

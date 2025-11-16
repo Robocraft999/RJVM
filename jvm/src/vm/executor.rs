@@ -1,9 +1,9 @@
 use std::{cell::RefCell, str::FromStr};
 
-use log::{debug, error, info, trace, warn};
-use crate::{bytecode::Instruction, constants::ConstantPoolEntry, field_info::{FieldType, PrimitiveType}, get_or_init, get_or_init_option, method_info::MethodDescriptor, vm::{bytecode::InstructionBlock, class::{ClassAndMethod, ClassRef}, java_error::JavaError, result::VMResult, value::{ReferenceType, Value}, VmError, VM}};
 use crate::class_file::get_constant_printable;
-use crate::vm::result::{VMResultType, VMPartialResult};
+use crate::vm::result::{VMPartialResult, VMResultType};
+use crate::{bytecode::Instruction, constants::ConstantPoolEntry, field_info::{FieldType, PrimitiveType}, get_or_init, get_or_init_option, method_info::MethodDescriptor, vm::{bytecode::InstructionBlock, class::{ClassAndMethod, ClassRef}, java_error::JavaError, result::VMResult, value::{ReferenceType, Value}, VmError, VM}};
+use log::{debug, error, info, trace, warn};
 
 macro_rules! wrap_error {
     ($res:expr) => {

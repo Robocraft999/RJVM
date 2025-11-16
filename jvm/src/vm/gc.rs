@@ -1,9 +1,8 @@
-use std::cell::RefCell;
-use std::ops::Add;
-use typed_arena::Arena;
 use crate::field_info::FieldType;
 use crate::vm::class::ClassRef;
 use crate::vm::value::{Reference, ReferenceType, ReferenceValue, Value};
+use std::cell::RefCell;
+use typed_arena::Arena;
 
 pub struct ObjectAllocator<'a>{
     arena: Arena<ReferenceValue<'a>>,

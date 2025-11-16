@@ -1,8 +1,8 @@
-use std::cell::{Ref, RefCell};
-use std::fmt::{format, Debug, Display, Formatter, Pointer};
 use crate::field_info::{FieldType, PrimitiveType};
 use crate::vm::class::ClassId;
 use crate::vm::{VmError, VM};
+use std::cell::RefCell;
+use std::fmt::{Debug, Display, Formatter, Pointer};
 
 #[derive(PartialEq, Default, Clone)]
 pub enum Value<'a>{

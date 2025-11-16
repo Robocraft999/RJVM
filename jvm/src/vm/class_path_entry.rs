@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::error::Error;
 use std::fmt;
-use std::fmt::{Display, Formatter};
+use std::fmt::Display;
 use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};

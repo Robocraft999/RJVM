@@ -3,9 +3,9 @@
 #![allow(dead_code)]
 #![allow(unused_parens)]
 #![allow(unused_variables)]
-use std::ffi::{c_char, c_double, c_float, c_int, c_long, c_schar, c_short, c_uchar, c_ushort, c_void, CStr};
-use log::error;
 use crate::vm::{jni::{env_function_table::JNINativeInterface, vm_function_table::JNIInvokeInterface}, VM};
+use log::error;
+use std::ffi::{c_char, c_double, c_float, c_int, c_long, c_schar, c_short, c_uchar, c_ushort, c_void, CStr};
 
 //Platform dependent
 pub type jint = c_int;

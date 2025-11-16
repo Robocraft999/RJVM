@@ -1,21 +1,21 @@
-use std::cell::RefCell;
-use log::{trace, warn};
+use super::call_frame::CallFrame;
 use crate::attribute::{Code, ExceptionTable, VisibleRuntimeAnnotations};
 use crate::bytecode::Instruction;
 use crate::constants::ConstantPool;
-use super::call_frame::CallFrame;
-use crate::VM;
-use crate::Value;
-use crate::VmError;
-use crate::vm::ClassAndMethod;
-use crate::vm::info;
 use crate::error;
 use crate::field_info::FieldType;
 use crate::method_info::{MethodDescriptor, MethodInfo};
-use crate::ProgramCounter;
 use crate::vm::class::{Class, ClassId, ClassRef};
+use crate::vm::info;
 use crate::vm::result::{VMPartialResult, VMResult, VMResultType};
 use crate::vm::value::Reference;
+use crate::vm::ClassAndMethod;
+use crate::ProgramCounter;
+use crate::Value;
+use crate::VmError;
+use crate::VM;
+use log::{trace, warn};
+use std::cell::RefCell;
 
 pub struct CallStack<'a>{
     pub frames: RefCell<Vec<CallFrame<'a>>>,

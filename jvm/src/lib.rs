@@ -1,19 +1,18 @@
+use log::{error, LevelFilter};
 use std::cell::RefCell;
 use std::env;
-use std::fmt::{Debug, Formatter};
+use std::fmt::Debug;
 use std::io::Read;
 use std::str::FromStr;
-use cesu8::from_java_cesu8;
-use log::{error, info, warn, LevelFilter};
 use vm::class_path::ClassPath;
 
 use crate::application::Application;
-use crate::attribute::{ProgramCounter};
-use crate::field_info::{FieldInfo, FieldType};
+use crate::attribute::ProgramCounter;
+use crate::field_info::FieldType;
 use crate::vm::jni::types::{JNIEnv, JavaVM};
 use crate::vm::jni::{self};
-use crate::vm::{VmError, VM};
 use crate::vm::value::Value;
+use crate::vm::{VmError, VM};
 
 mod application;
 mod constants;

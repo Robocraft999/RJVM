@@ -1,24 +1,19 @@
-use std::cell::RefCell;
-use std::env;
-use std::fs::File;
-use std::path::{Path, PathBuf};
-use std::str::FromStr;
-use std::time::{SystemTime, UNIX_EPOCH};
-use libloading::{library_filename, Library, Symbol};
-use log::{debug, trace, warn};
 use crate::error::ClassParseError;
 use crate::field_info::{get_class_descriptor, FieldType, PrimitiveType};
 use crate::get_or_init;
 use crate::method_info::MethodDescriptor;
-use crate::vm::class::{ClassAndMethod, ClassId, ClassRef};
-use crate::vm::java_error::JavaError;
-use crate::vm::value::{Reference, ReferenceType, Value};
-use crate::vm::{VM, VmError};
-use crate::vm::call_frame::CallFrame;
-use crate::vm::callstack::CallStack;
+use crate::vm::class::{ClassAndMethod, ClassRef};
 use crate::vm::java_error::JavaError::JavaExceptionThrown;
-use crate::vm::jni::types::{jint, JavaVM};
+use crate::vm::jni::types::JavaVM;
 use crate::vm::result::{VMPartialResult, VMResultType};
+use crate::vm::value::{Reference, ReferenceType, Value};
+use crate::vm::{VmError, VM};
+use libloading::{Library, Symbol};
+use log::{debug, trace, warn};
+use std::cell::RefCell;
+use std::env;
+use std::path::Path;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub struct NativeMethodRegistry<'a>{
     methods: Vec<NativeMethod<'a>>
@@ -540,7 +535,7 @@ fn delegate_native_lib_load<'a>(vm: &VM<'a>, java_vm: &JavaVM,  _: ClassRef<'a>,
         println!("name: {name}");
 
         unsafe {
-            use libffi::middle::{Closure, Cif, Type, Arg};
+            use libffi::middle::{Arg, Cif, Type};
             use std::{ffi::c_void, ptr};
             //let lib = Library::new("/home/admin/.jdks/temurin-1.8.0_462/jre/lib/amd64/libjava.so").unwrap();
             let lib = Library::new(name).unwrap();
@@ -555,16 +550,6 @@ fn delegate_native_lib_load<'a>(vm: &VM<'a>, java_vm: &JavaVM,  _: ClassRef<'a>,
             let res: i32 = cif.call(libffi::low::CodePtr::from_ptr(func_ptr), &[Arg::new(&vm_ptr), Arg::new(&reserved)]);
             println!("res: {}", res);
         }
-
-        /*unsafe {
-            let lib_name = name;
-            //let lib_name = library_filename(name);
-            println!("name: {lib_name:?}");
-            let lib = Library::new(lib_name).unwrap(); // Load the "hello_world" library
-            let func: Symbol<fn()> = lib.get(b"JNI_OnLoad").unwrap(); // Get the function pointer
-
-            func() // Call the function
-        }*/
 
         non_failing_none()
     } else {

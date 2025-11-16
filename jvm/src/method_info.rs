@@ -4,9 +4,9 @@ use lazy_regex::{lazy_regex, Lazy};
 use regex::Regex;
 
 use crate::access_flags::{MethodFlag, MethodFlags};
-use crate::attribute::{Attribute, Code, ExceptionTable, ExceptionTableEntry, Exceptions, ProgramCounter};
-use crate::field_info::{FieldType, PrimitiveType};
-use crate::vm::bytecode::{self, InstructionBlock};
+use crate::attribute::{Attribute, Code, ExceptionTable, Exceptions, ProgramCounter};
+use crate::field_info::FieldType;
+use crate::vm::bytecode::InstructionBlock;
 
 #[derive(Debug)]
 pub struct MethodInfo{

@@ -1,8 +1,8 @@
 #![allow(unused_variables)]
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
-use std::ffi::{c_void, c_char, c_uchar, c_int, c_long, c_ushort};
 use crate::vm::jni::types::*;
+use std::ffi::{c_char, c_int, c_long, c_uchar, c_ushort, c_void};
 
 pub const JVM_INTERFACE_VERSION: jint = 4;
 

@@ -1,5 +1,5 @@
-use std::cell::RefCell;
 use crate::vm::r#unsafe::memory_chunk::MemoryChunk;
+use std::cell::RefCell;
 
 mod memory_chunk;
 

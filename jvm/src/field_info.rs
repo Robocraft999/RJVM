@@ -1,11 +1,11 @@
-use std::str::FromStr;
-use lazy_regex::{lazy_regex, regex, Lazy};
-use regex::Regex;
 use crate::access_flags::FieldFlags;
 use crate::attribute::{Attribute, ConstantValue};
 use crate::vm::result::VMResult;
 use crate::vm::value::Value;
 use crate::vm::VmError;
+use lazy_regex::{lazy_regex, regex, Lazy};
+use regex::Regex;
+use std::str::FromStr;
 
 #[derive(Debug)]
 pub struct FieldInfo{

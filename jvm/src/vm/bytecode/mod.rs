@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::{bytecode::Instruction, vm::value::Value};
+use crate::bytecode::Instruction;
 
 mod il;
 mod raw;
@@ -33,7 +33,7 @@ pub fn get_blocks(bytes: &Vec<u8>) -> BTreeMap<u16, InstructionBlock>{
 
 #[cfg(test)]
 mod tests{
-    use crate::{bytecode::Instruction, vm::{bytecode::{il, raw, InstructionBlock}, class_manager::ClassManager, class_path::ClassPath, value::Value}};
+    use crate::{bytecode::Instruction, vm::{bytecode::{il, raw, InstructionBlock}, class_manager::ClassManager, class_path::ClassPath}};
 
     #[test]
     fn test_raw(){

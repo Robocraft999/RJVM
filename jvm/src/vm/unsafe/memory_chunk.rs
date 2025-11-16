@@ -1,7 +1,7 @@
+use log::debug;
 use std::alloc::Layout;
 use std::fmt;
 use std::fmt::Formatter;
-use log::debug;
 
 pub struct MemoryChunk {
     memory: *mut u8,

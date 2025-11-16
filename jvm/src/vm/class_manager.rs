@@ -1,8 +1,3 @@
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::str::FromStr;
-use log::info;
-use typed_arena::Arena;
 use crate::attribute::ElementValue;
 use crate::class_file::{parse_class_file, ClassFile};
 use crate::error::ClassParseError;
@@ -12,6 +7,11 @@ use crate::vm::class::{ArrayInfo, Class, ClassId, ClassRef};
 use crate::vm::class_path::ClassPath;
 use crate::vm::result::VMResult;
 use crate::vm::{bytecode, VmError};
+use log::info;
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::str::FromStr;
+use typed_arena::Arena;
 
 #[derive(Debug, Clone)]
 pub(crate) enum ResolvedClass<'a> {
