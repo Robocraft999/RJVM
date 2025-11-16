@@ -17,7 +17,7 @@ use crate::vm::{VM, VmError};
 use crate::vm::call_frame::CallFrame;
 use crate::vm::callstack::CallStack;
 use crate::vm::java_error::JavaError::JavaExceptionThrown;
-use crate::vm::jni::types::JavaVM;
+use crate::vm::jni::types::{jint, JavaVM};
 use crate::vm::result::{VMPartialResult, VMResultType};
 
 pub struct NativeMethodRegistry<'a>{
@@ -530,7 +530,7 @@ fn delegate_find_bootstrap_class<'a>(vm: &VM<'a>, _: &JavaVM,  _: ClassRef<'a>, 
     }
 }
 
-fn delegate_native_lib_load<'a>(vm: &VM<'a>, _: &JavaVM,  _: ClassRef<'a>, object: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
+fn delegate_native_lib_load<'a>(vm: &VM<'a>, java_vm: &JavaVM,  _: ClassRef<'a>, object: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
     debug!("nativeLib::load {:?}", object);
     if let Some(obj) = object {
         //handle
@@ -538,6 +538,23 @@ fn delegate_native_lib_load<'a>(vm: &VM<'a>, _: &JavaVM,  _: ClassRef<'a>, objec
         let name_field = obj.get_field(3);//args.get(0).unwrap();
         let name = VM::extract_string_from_object(&name_field)?;
         println!("name: {name}");
+
+        unsafe {
+            use libffi::middle::{Closure, Cif, Type, Arg};
+            use std::{ffi::c_void, ptr};
+            //let lib = Library::new("/home/admin/.jdks/temurin-1.8.0_462/jre/lib/amd64/libjava.so").unwrap();
+            let lib = Library::new(name).unwrap();
+            let sym: Symbol<*const ()> = lib.get(b"JNI_OnLoad").unwrap();
+
+            let func_ptr = *sym as * const c_void;
+
+
+            let vm_ptr = ptr::from_ref(java_vm) as *const c_void;
+            let reserved = std::ptr::null() as *const c_void;
+            let cif = Cif::new(vec![Type::pointer(), Type::pointer()], Type::i32()); //JNI_OnLoad
+            let res: i32 = cif.call(libffi::low::CodePtr::from_ptr(func_ptr), &[Arg::new(&vm_ptr), Arg::new(&reserved)]);
+            println!("res: {}", res);
+        }
 
         /*unsafe {
             let lib_name = name;

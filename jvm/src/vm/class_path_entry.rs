@@ -30,7 +30,8 @@ impl FileSystemClassPathEntry{
         let mut dir = PathBuf::new();
         dir.push(path);
         if !dir.exists() || !dir.is_dir(){
-            Err(InvalidDirectoryError{path: dir.to_string_lossy().to_string()})
+            let path = std::path::absolute(&dir).map(|p| p.to_string_lossy().to_string()).unwrap_or(dir.to_string_lossy().to_string());
+            Err(InvalidDirectoryError{path})
         } else {
             Ok(Self{file_dir: dir})
         }

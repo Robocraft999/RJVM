@@ -73,7 +73,7 @@ macro_rules! get_or_init_special {
 
 pub fn run() {
     let mut class_path = ClassPath::default();
-    class_path.push("../resources/rt.jar;../resources/LogicSim.jar;../resources/lib/unix;../resources/lib").expect("TODO: panic message");
+    class_path.push("resources/rt.jar;resources/LogicSim.jar;resources/lib/unix;resources/lib").expect("TODO: panic message");
 
     println!("Booting up VM");
     let vm = VM::new(class_path);
@@ -87,7 +87,7 @@ pub fn run() {
         methods: jni::vm_function_table::METHODS,
         env
     };
-    unsafe {
+    /*unsafe {
         use libffi::middle::{Closure, Cif, Type, Arg};
         use std::{ffi::c_void, ptr};
         let lib = libloading::Library::new("/home/admin/.jdks/temurin-1.8.0_462/jre/lib/amd64/libjava.so").unwrap();
@@ -101,7 +101,7 @@ pub fn run() {
         let cif = Cif::new(vec![Type::pointer(), Type::pointer()], Type::i32()); //JNI_OnLoad
         let res: i32 = cif.call(libffi::low::CodePtr::from_ptr(func_ptr), &[Arg::new(&vm_ptr), Arg::new(&reserved)]);
         
-    }
+    }*/
     let mut app = Application::new(javavm, vm);
     app.startup();
     todo!("Init complete");

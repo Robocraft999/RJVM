@@ -30,7 +30,7 @@ impl ClassPath{
     }
 
     fn try_parse_entry_as_dir(&self, string: &str) -> Result<Box<dyn ClassPathEntry>, ClassPathParseError>{
-        let entry = FileSystemClassPathEntry::new(string).map_err(|_| ClassPathParseError::InvalidEntry(string.to_string()))?;
+        let entry = FileSystemClassPathEntry::new(string).map_err(|err| ClassPathParseError::InvalidEntry(err.path))?;
         Ok(Box::new(entry))
     }
 
