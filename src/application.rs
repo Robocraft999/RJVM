@@ -17,7 +17,7 @@ impl <'a> Application<'a>{
     fn init_vm(&self) -> Result<(), VmError>{
         if let VMResultType::NeedsClassInit(classes, _) = self.vm.get_or_resolve_class("sun/misc/VM")?{
             for frame in classes{
-                self.vm.invoke_current_frame()?;
+                self.vm.invoke_current_frame(&self.java_vm)?;
             }
         }
 
@@ -27,22 +27,22 @@ impl <'a> Application<'a>{
     fn init_system(&self) -> Result<(), VmError>{
         if let VMResultType::NeedsClassInit(classes, _) = self.vm.get_or_resolve_class("java/lang/System")?{
             for frame in classes{
-                self.vm.invoke_current_frame()?;
+                self.vm.invoke_current_frame(&self.java_vm)?;
             }
         }
         let init = self.vm.try_resolve_class_method("java/lang/System", "initializeSystemClass", "()V")?;
-        self.vm.invoke_new_frame(init, None, vec![])?;
+        self.vm.invoke_new_frame(&self.java_vm, init, None, vec![])?;
         Ok(())
     }
 
     pub fn run_and_catch_method(&self, class_name: &str, method_name: &str, method_descriptor: &str, args: Vec<Value<'a>>){
         if let VMResultType::NeedsClassInit(classes, _) = self.vm.get_or_resolve_class(class_name).unwrap().clone(){
             for frame in classes{
-                self.vm.invoke_current_frame().unwrap();
+                self.vm.invoke_current_frame(&self.java_vm).unwrap();
             }
         }
         let main_method = self.vm.try_resolve_class_method(class_name, method_name, method_descriptor).unwrap();
-        let result = self.vm.invoke_new_frame(main_method, None, args);
+        let result = self.vm.invoke_new_frame(&self.java_vm, main_method, None, args);
         match result {
             Ok(res) => {
                 println!("result: {res:?}");

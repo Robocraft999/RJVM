@@ -27,6 +27,7 @@ use crate::vm::debug::DebugHelper;
 use crate::vm::gc::ObjectAllocator;
 use crate::vm::java_error::JavaError;
 use crate::vm::java_native_method_impl::{NativeMethodRegistry, register_all_natives};
+use crate::vm::jni::types::JavaVM;
 use crate::vm::r#unsafe::Unsafe;
 use crate::vm::result::{VMPartialResult, VMResult, VMResultType};
 use crate::vm::value::{Reference, ReferenceType};
@@ -89,12 +90,12 @@ impl<'a> VM<'a>{
         Ok(())
     }
 
-    pub fn invoke_new_frame(&self, class_and_method: ClassAndMethod<'a>, object: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
+    pub fn invoke_new_frame(&self, java_vm: &JavaVM, class_and_method: ClassAndMethod<'a>, object: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
         self.call_stack.create_and_push_call_frame(class_and_method, object, args, false);
-        self.invoke_current_frame()
+        self.invoke_current_frame(java_vm)
     }
 
-    pub fn invoke_current_frame(&self) -> VMPartialResult<'a, Option<Value<'a>>> {
+    pub fn invoke_current_frame(&self, java_vm: &JavaVM) -> VMPartialResult<'a, Option<Value<'a>>> {
         let mut last_result: Option<VMResultType<Option<Value>>> = None;
         loop {
             let frame_amount = self.call_stack.len();
@@ -105,7 +106,7 @@ impl<'a> VM<'a>{
             } else {
                 let class_and_method = self.call_stack.get_class_and_method_cloned();
                 if class_and_method.method.is_native(){
-                    self.execute_native(class_and_method)?
+                    self.execute_native(java_vm, class_and_method)?
                 } else {
                     executor::execute(self)?
                 }
@@ -335,7 +336,7 @@ impl<'a> VM<'a>{
         }
     }*/
 
-    fn execute_native(&self, class_and_method: ClassAndMethod<'a>) -> VMPartialResult<'a, Option<Value<'a>>> {
+    fn execute_native(&self, java_vm: &JavaVM, class_and_method: ClassAndMethod<'a>) -> VMPartialResult<'a, Option<Value<'a>>> {
         //let call_frame = self.call_stack.pop_call_frame();
         
         let object = if class_and_method.method.is_static() {
@@ -354,7 +355,7 @@ impl<'a> VM<'a>{
             .skip(if object.is_none() {0} else {1})
             .take_while(|value| value != &Value::Uninitialized)
             .collect::<Vec<_>>();
-        let try_native = NativeMethodRegistry::invoke(self, &class_and_method, object, args);
+        let try_native = NativeMethodRegistry::invoke(self, java_vm, &class_and_method, object, args);
         debug!("TTT {:?}", try_native);
         if let Some(native) = try_native {
             native
