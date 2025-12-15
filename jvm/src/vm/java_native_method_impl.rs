@@ -548,7 +548,7 @@ fn delegate_native_lib_load<'a>(vm: &VM<'a>, java_vm: &JavaVM,  _: ClassRef<'a>,
             let reserved = std::ptr::null() as *const c_void;
             let cif = Cif::new(vec![Type::pointer(), Type::pointer()], Type::i32()); //JNI_OnLoad
             let res: i32 = cif.call(libffi::low::CodePtr::from_ptr(func_ptr), &[Arg::new(&vm_ptr), Arg::new(&reserved)]);
-            println!("res: {}", res);
+            println!("res: {:x}", res);
         }
 
         non_failing_none()
@@ -967,7 +967,8 @@ fn delegate_read_bytes<'a>(vm: &VM<'a>, _: &JavaVM, _: ClassRef<'a>, obj: Option
                 }
             }
 
-            if let Some((content, index)) = vm.currently_open_files.borrow_mut().remove(&path) {
+            let existing_file = vm.currently_open_files.borrow_mut().remove(&path);
+            if let Some((content, index)) = existing_file {
                 //file: len 20, i 5
                 //buffer: blen 30, o 10, length 20
                 //start = 10, end = 25 = 10 + min(30 - 10, 20 - 5)

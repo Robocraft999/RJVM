@@ -176,8 +176,8 @@ impl<'a> VM<'a>{
                 }
                 VMResultType::ExceptionThrown(error, throwable) => {
                     if let VmError::JavaException(JavaError::JavaExceptionThrown(thrown_class_name, message, origin)) = error {
-                        if let Some(error_frame) = self.call_stack.frames.borrow().last(){
-                            let class_and_method = error_frame.class_and_method.clone();
+                        let last_frame_method_option = self.call_stack.frames.borrow().last().map(|e| e.class_and_method.clone());
+                        if let Some(class_and_method) = last_frame_method_option {
                             let exception_table = class_and_method.method.get_exception_handlers();
                             let current_pc = &self.call_stack.get_pc();
                             //[unchecked] class already loaded by method

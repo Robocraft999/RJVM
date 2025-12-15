@@ -183,6 +183,8 @@ impl<'a> ReferenceValue<'a>{
                 if let FieldType::Primitive(PrimitiveType::Char) = field_type {
                     let chars: Vec<char> = content.borrow().iter().map(|e| if let Value::Integer(val) = e {char::from_u32(*val as u32).unwrap()} else {'?'}).collect();
                     vec![chars.iter().collect::<String>()]
+                } else if let FieldType::Primitive(PrimitiveType::Byte) = field_type {
+                    content.borrow().iter().map(|e| if let Value::Integer(val) = e {format!("{:02x}", val)} else {format!("{e:?}")}).collect()
                 } else {
                     let mut vec = Vec::new();
                     let mut null_counter = 0;

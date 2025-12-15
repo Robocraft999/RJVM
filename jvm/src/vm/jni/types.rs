@@ -440,16 +440,19 @@ impl JNINativeInterface_ {
         unimplemented!()
     }
 
-    pub fn NewString(unicode: *const c_char, len: jsize) -> jstring{
+    pub fn NewString(env: *mut JNIEnv, unicode: *const c_char, len: jsize) -> jstring{
         unimplemented!()
     }
-    pub fn GetStringLength(str: jstring) -> jsize{
+    pub fn GetStringLength(env: *mut JNIEnv, str: jstring) -> jsize{
         unimplemented!()
     }
-    pub fn GetStringChars(str: jstring, isCopy: *mut jboolean) -> *const jchar{
+    pub fn GetStringChars(env: *mut JNIEnv, str: jstring, isCopy: *mut jboolean) -> *const jchar{
         unimplemented!()
     }
-    pub fn ReleaseStringChars(str: jstring, chars: *const jchar){
+    pub fn ReleaseStringChars(env: *mut JNIEnv, str: jstring, chars: *const jchar){
+        unimplemented!()
+    }
+    pub fn NewStringUTF(env: *mut JNIEnv, utf: *const c_char) -> jstring{
         unimplemented!()
     }
 }

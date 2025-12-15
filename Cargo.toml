@@ -3,3 +3,4 @@ members = [
     "jvm",
     "rjvm-driver",
 ]
+resolver = "3"

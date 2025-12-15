@@ -106,6 +106,10 @@ impl MethodDescriptor{
     pub fn as_str(&self) -> &str{
         self.raw.as_str()
     }
+
+    pub fn as_native_descriptor(&self) -> &str{
+        ""
+    }
 }
 
 impl PartialEq for MethodDescriptor{

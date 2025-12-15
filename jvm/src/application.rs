@@ -6,7 +6,7 @@ use log::error;
 
 pub struct Application<'a>{
     java_vm: JavaVM<'a>,
-    vm: VM<'a>,
+    pub(crate) vm: VM<'a>,
 }
 
 impl <'a> Application<'a>{

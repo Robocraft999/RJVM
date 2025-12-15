@@ -168,6 +168,19 @@ pub fn execute_current_block<'a>(vm: &VM<'a>) -> Option<VMPartialResult<'a, Opti
                         return Some(Err(VmError::ValidationError("Expected a value to pop but Stack was empty".to_string())));
                     }
                 }
+                Instruction::POP2 => {
+                    debug!("POP2");
+                    let popped1 = vm.call_stack.pop_operand_value();
+                    if let Some(val) = popped1{
+                        if val.get_computational_type() == 1{
+                            if vm.call_stack.pop_operand_value().is_none(){
+                                return Some(Err(VmError::ValidationError("Expected a second value to pop but Stack was empty".to_string())));
+                            }
+                        }
+                    } else {
+                        return Some(Err(VmError::ValidationError("Expected a value to pop but Stack was empty".to_string())));
+                    }
+                }
                 Instruction::DUP => {
                     let top = vm.call_stack.pop_operand_value().unwrap();
                     vm.call_stack.push_operand_value(top.clone());
@@ -195,6 +208,24 @@ pub fn execute_current_block<'a>(vm: &VM<'a>) -> Option<VMPartialResult<'a, Opti
                         vm.call_stack.push_operand_value(value1);
                     }
                 }
+                Instruction::DUP2X1 => {
+                    debug!("DUP2X1");
+                    let value1 = vm.call_stack.pop_operand_value().unwrap();
+                    if value1.get_computational_type() == 1{
+                        let value2 = vm.call_stack.pop_operand_value().unwrap();
+                        let value3 = vm.call_stack.pop_operand_value().unwrap();
+                        vm.call_stack.push_operand_value(value2.clone());
+                        vm.call_stack.push_operand_value(value1.clone());
+                        vm.call_stack.push_operand_value(value3);
+                        vm.call_stack.push_operand_value(value2);
+                        vm.call_stack.push_operand_value(value1);
+                    } else {
+                        let value2 = vm.call_stack.pop_operand_value().unwrap();
+                        vm.call_stack.push_operand_value(value1.clone());
+                        vm.call_stack.push_operand_value(value2);
+                        vm.call_stack.push_operand_value(value1);
+                    }
+                }
 
                 Instruction::IADD => wrap_error!(execute_i_arithmetic(vm, |val1, val2| Ok(val1.wrapping_add(val2)))),
                 Instruction::LADD => wrap_error!(execute_l_arithmetic(vm, |val1, val2| Ok(val1.wrapping_add(val2)))),
@@ -203,6 +234,7 @@ pub fn execute_current_block<'a>(vm: &VM<'a>) -> Option<VMPartialResult<'a, Opti
                 Instruction::LSUB => wrap_error!(execute_l_arithmetic(vm, |val1, val2| Ok(val1.wrapping_sub(val2)))),
 
                 Instruction::IMUL => wrap_error!(execute_i_arithmetic(vm, |val1, val2| Ok(val1.wrapping_mul(val2)))),
+                Instruction::LMUL => wrap_error!(execute_l_arithmetic(vm, |val1, val2| Ok(val1.wrapping_mul(val2)))),
                 Instruction::FMUL => wrap_error!(execute_f_arithmetic(vm, |val1, val2| Ok(val1 * val2))),
 
                 Instruction::IDIV => wrap_error!(execute_i_arithmetic(vm, |val1, val2| {
@@ -224,7 +256,7 @@ pub fn execute_current_block<'a>(vm: &VM<'a>) -> Option<VMPartialResult<'a, Opti
                 Instruction::LREM => wrap_error!(execute_l_arithmetic(vm, |val1, val2| Ok(val1.wrapping_rem(val2)))),
 
                 Instruction::ISHL => wrap_error!(execute_i_arithmetic(vm, |val1, val2| Ok(val1 << (val2 & 0x1f)))),
-                Instruction::LSHL => wrap_error!(execute_l_arithmetic(vm, |val1, val2| Ok(val1 << (val2 & 0x3f)))),
+                Instruction::LSHL => wrap_error!(execute_ji_arithmetic(vm, |val1, val2| Ok(val1 << (val2 & 0x3f)))),
                 Instruction::ISHR => wrap_error!(execute_i_arithmetic(vm, |val1, val2| Ok(val1 >> (val2 & 0x1f)))),
                 Instruction::IUSHR => wrap_error!(execute_i_arithmetic(vm, |val1, val2| {
                     if val1 > 0{
@@ -241,10 +273,11 @@ pub fn execute_current_block<'a>(vm: &VM<'a>) -> Option<VMPartialResult<'a, Opti
                     }
                 })),
 
-                Instruction::IAND =>  wrap_error!(execute_i_arithmetic(vm, |val1, val2| Ok(val1 & val2))),
-                Instruction::LAND =>  wrap_error!(execute_l_arithmetic(vm, |val1, val2| Ok(val1 & val2))),
-                Instruction::IOR  =>  wrap_error!(execute_i_arithmetic(vm, |val1, val2| Ok(val1 | val2))),
-                Instruction::IXOR  => wrap_error!(execute_i_arithmetic(vm, |val1, val2| Ok(val1 ^ val2))),
+                Instruction::IAND => wrap_error!(execute_i_arithmetic(vm, |val1, val2| Ok(val1 & val2))),
+                Instruction::LAND => wrap_error!(execute_l_arithmetic(vm, |val1, val2| Ok(val1 & val2))),
+                Instruction::IOR  => wrap_error!(execute_i_arithmetic(vm, |val1, val2| Ok(val1 | val2))),
+                Instruction::IXOR => wrap_error!(execute_i_arithmetic(vm, |val1, val2| Ok(val1 ^ val2))),
+                Instruction::LXOR => wrap_error!(execute_l_arithmetic(vm, |val1, val2| Ok(val1 ^ val2))),
                 Instruction::IINC(index, amount) => {
                     if let Some(Value::Integer(value)) = vm.call_stack.load_local(*index as usize){
                         vm.call_stack.store_local(Value::Integer(value + *amount as i32), *index as usize);
