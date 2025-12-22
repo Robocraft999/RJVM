@@ -54,6 +54,7 @@ pub struct VM<'a>{
     pub call_stack: CallStack<'a>,
     pub object_allocator: ObjectAllocator<'a>,
     pub unsafe_allocator: Unsafe,
+    pub objects_by_id: RefCell<HashMap<u32, Reference<'a>>>,
     pub static_class_objects: RefCell<HashMap<ClassId, Reference<'a>>>,
     pub string_objects: RefCell<HashMap<String, Reference<'a>>>,
     pub class_objects: RefCell<HashMap<ClassId, Reference<'a>>>,
@@ -74,6 +75,7 @@ impl<'a> VM<'a>{
             object_allocator: ObjectAllocator::new(),
             unsafe_allocator,
             call_stack: CallStack::new(),
+            objects_by_id: RefCell::new(HashMap::new()),
             static_class_objects: RefCell::new(HashMap::new()),
             string_objects: RefCell::new(HashMap::new()),
             class_objects: RefCell::new(HashMap::new()),
@@ -415,11 +417,11 @@ impl<'a> VM<'a>{
     }
 
     pub fn try_get_class(&self, class_name: &str) -> VMResult<ClassRef<'a>>{
-        self.find_class_by_name(class_name.to_owned()).ok_or(VmError::ClassNotLoadedError(format!("[try_get_class]: Class not loaded: {}", class_name)))
+        self.find_class_by_name(class_name).ok_or(VmError::ClassNotLoadedError(format!("[try_get_class]: Class not loaded: {}", class_name)))
     }
 
     pub fn define_class(&self, class_name: &str, bytes: Vec<u8>) -> VMPartialResult<'a, Reference<'a>>{
-        let resolved = self.find_class_by_name(class_name.to_string());
+        let resolved = self.find_class_by_name(class_name);
         if resolved.is_none() {
             let to_init = self.class_manager.parse_and_load_class(class_name, class_name, None, bytes)?;
             return Ok(VMResultType::NeedsClassInit(
@@ -491,7 +493,9 @@ impl<'a> VM<'a>{
 
     pub fn new_object_from_class(&self, class: ClassRef<'a>) -> Reference<'a>{
         info!("CC[{:?}] = {}", class.id, class.name);
-        self.object_allocator.allocate_object(class)
+        let obj = self.object_allocator.allocate_object(class);
+        self.objects_by_id.borrow_mut().insert(obj.id, obj);
+        obj
     }
 
     pub fn get_static_class_object(&self, id: ClassId) -> Option<Reference<'a>>{
@@ -504,7 +508,13 @@ impl<'a> VM<'a>{
         } else {
             unreachable!("The field type for creating an array has to be an array field type")
         };
-        get_or_init_special!(self.get_or_resolve_class(class_name.as_str())?, |class| Ok(VMResultType::Ok(self.object_allocator.allocate_array(class, dims, *component_type, content))))
+        get_or_init_special!(self.get_or_resolve_class(class_name.as_str())?,
+            |class| {
+                let obj = self.object_allocator.allocate_array(class, dims, *component_type, content);
+                self.objects_by_id.borrow_mut().insert(obj.id, obj);
+                Ok(VMResultType::Ok(obj))
+            }
+        )
     }
 
     pub fn try_new_array(&self, dims: usize, array_field_type: FieldType, content: RefCell<Vec<Value<'a>>>) -> VMResult<Reference<'a>>{
@@ -624,8 +634,8 @@ impl<'a> VM<'a>{
         self.class_manager.find_class_by_id(class_id)
     }
 
-    pub fn find_class_by_name(&self, name: String) -> Option<ClassRef<'a>>{
-        self.class_manager.find_class_by_name(name.as_str())
+    pub fn find_class_by_name(&self, name: &str) -> Option<ClassRef<'a>>{
+        self.class_manager.find_class_by_name(name)
     }
 }
 
@@ -659,4 +669,7 @@ pub enum VmError{
 
     #[error("{0}")]
     Unspecified(String),
+
+    #[error("Error caught in native function: {0}")]
+    Native(String)
 }

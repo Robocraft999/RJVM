@@ -1114,7 +1114,7 @@ fn delegate_getcwd<'a>(vm: &VM<'a>, _: &JavaVM, _: ClassRef<'a>, _: Option<Refer
 }
 
 fn delegate_init_vm<'a>(vm: &VM<'a>, _: &JavaVM, _: ClassRef<'a>, object: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
-    let vm_class_id = vm.find_class_by_name("sun/misc/VM".to_owned()).unwrap().id;
+    let vm_class_id = vm.find_class_by_name("sun/misc/VM").unwrap().id;
     /*let arg1 = get_or_init!(vm.new_string_object("java.lang.Integer.IntegerCache.high".to_string())?);
     let arg2 = get_or_init!(vm.new_string_object("127".to_string())?);
     let static_vm_object = vm.get_static_class_object(vm_class_id).unwrap();
