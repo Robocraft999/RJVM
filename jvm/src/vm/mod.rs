@@ -629,7 +629,13 @@ impl<'a> VM<'a>{
     }
 }
 
-//impl !Unpin for VM<'_>{}
+impl !Unpin for VM<'_>{}
+
+impl Drop for VM<'_>{
+    fn drop(&mut self) {
+        error!("VM drop: {:p}", self);
+    }
+}
 
 #[derive(Error, Debug, Clone)]
 pub enum VmError{

@@ -533,6 +533,7 @@ fn delegate_native_lib_load<'a>(vm: &VM<'a>, java_vm: &JavaVM,  _: ClassRef<'a>,
         let name_field = obj.get_field(3);//args.get(0).unwrap();
         let name = VM::extract_string_from_object(&name_field)?;
         println!("name: {name}");
+        println!("javavm: {:p}", java_vm);
 
         unsafe {
             use libffi::middle::{Arg, Cif, Type};
@@ -545,6 +546,7 @@ fn delegate_native_lib_load<'a>(vm: &VM<'a>, java_vm: &JavaVM,  _: ClassRef<'a>,
 
 
             let vm_ptr = ptr::from_ref(java_vm) as *const c_void;
+            println!("javavmp: {:p}", vm_ptr);
             let reserved = std::ptr::null() as *const c_void;
             let cif = Cif::new(vec![Type::pointer(), Type::pointer()], Type::i32()); //JNI_OnLoad
             let res: i32 = cif.call(libffi::low::CodePtr::from_ptr(func_ptr), &[Arg::new(&vm_ptr), Arg::new(&reserved)]);

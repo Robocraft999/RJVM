@@ -1,9 +1,9 @@
+#![feature(negative_impls)]
+#![feature(c_variadic)]
+
 use log::{error, LevelFilter};
 use std::cell::RefCell;
 use std::env;
-use std::fmt::Debug;
-use std::io::Read;
-use std::str::FromStr;
 use vm::class_path::ClassPath;
 
 use crate::application::Application;
@@ -75,17 +75,10 @@ pub fn run() {
     class_path.push("resources/rt.jar;resources/LogicSim.jar;resources/lib/unix;resources/lib").expect("TODO: panic message");
 
     println!("Booting up VM");
-    let vm = VM::new(class_path);
+    let vm = Box::pin(VM::new(class_path));
 
     //simple_logger::SimpleLogger::new().with_level(LevelFilter::Error).without_timestamps().init().unwrap();
-    let env = JNIEnv{
-        methods: jni::env_function_table::METHODS,
-        vm: &vm,
-    };
-    let javavm = JavaVM{
-        methods: jni::vm_function_table::METHODS,
-        env
-    };
+
     /*unsafe {
         use libffi::middle::{Closure, Cif, Type, Arg};
         use std::{ffi::c_void, ptr};
@@ -101,14 +94,14 @@ pub fn run() {
         let res: i32 = cif.call(libffi::low::CodePtr::from_ptr(func_ptr), &[Arg::new(&vm_ptr), Arg::new(&reserved)]);
         
     }*/
-    let mut app = Application::new(javavm, vm);
+    let app = Application::new(vm);
     app.startup();
     //todo!("Init complete");
 
     //vm.class_manager.get_or_resolve_class("Empty").expect("TODO: panic message");
     //run_and_catch_method(&mut vm, "Test", "main", "([Ljava/lang/String;)V");
 
-    simple_logger::SimpleLogger::new().with_level(LevelFilter::Info).without_timestamps().init().unwrap();
+    simple_logger::SimpleLogger::new().with_level(LevelFilter::Error).without_timestamps().init().unwrap();
 
     let args = env::args().skip(1).map(|s| Value::Reference(app.vm.try_new_string_object(s).unwrap())).collect();
     let args_array = app.vm.try_new_array(1, FieldType::Object("java/lang/String".to_string()).to_array_field_type(1), RefCell::new(args)).unwrap();

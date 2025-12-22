@@ -1,17 +1,27 @@
-use crate::vm::jni::types::JavaVM;
+use std::pin::Pin;
+use crate::vm::jni::types::{JNIEnv, JavaVM};
 use crate::vm::result::VMResultType;
 use crate::vm::value::Value;
-use crate::vm::{VmError, VM};
+use crate::vm::{jni, VmError, VM};
 use log::error;
 
 pub struct Application<'a>{
-    java_vm: JavaVM<'a>,
-    pub(crate) vm: VM<'a>,
+    java_vm: Pin<Box<JavaVM<'a>>>,
+    pub(crate) vm: Pin<Box<VM<'a>>>,
 }
 
 impl <'a> Application<'a>{
-    pub fn new(java_vm: JavaVM<'a>, vm: VM<'a>) -> Self{
-        Self { java_vm, vm }
+    pub fn new(vm: Pin<Box<VM<'a>>>) -> Self{
+        let env = JNIEnv{
+            methods: jni::env_function_table::METHODS,
+            vm: vm.as_ref().get_ref(),
+        };
+        let javavm = Box::pin(JavaVM{
+            methods: jni::vm_function_table::METHODS,
+            env
+        });
+        println!("javavm: {:p}", javavm);
+        Self { java_vm: javavm, vm }
     }
 
     fn init_vm(&self) -> Result<(), VmError>{

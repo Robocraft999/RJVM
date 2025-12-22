@@ -3,9 +3,10 @@
 #![allow(dead_code)]
 #![allow(unused_parens)]
 #![allow(unused_variables)]
-use crate::vm::{jni::{env_function_table::JNINativeInterface, vm_function_table::JNIInvokeInterface}, VM};
-use log::error;
-use std::ffi::{c_char, c_double, c_float, c_int, c_long, c_schar, c_short, c_uchar, c_ushort, c_void, CStr};
+use crate::vm::{jni::{env_function_table::JNINativeInterface, vm_function_table::JNIInvokeInterface}, VmError, VM};
+use log::{debug, error};
+use std::ffi::{c_char, c_double, c_float, c_int, c_long, c_schar, c_short, c_uchar, c_ushort, c_void, CStr, CString, VaList};
+use crate::vm::class::ClassId;
 
 //Platform dependent
 pub type jint = c_int;
@@ -23,7 +24,7 @@ pub type jsize = jint;
 //Object related
 #[repr(C)]
 pub struct _jobject;
-pub type jobject = *mut _jobject;
+pub type jobject = u32;
 pub type jclass = jobject;
 pub type jthrowable = jobject;
 pub type jstring = jobject;
@@ -56,10 +57,10 @@ pub union jvalue{
 
 #[repr(C)]
 pub struct _jfieldID;
-pub type jfieldID = *mut _jfieldID;
+pub type jfieldID = usize;
 #[repr(C)]
 pub struct _jmethodID;
-pub type jmethodID = *mut _jmethodID;
+pub type jmethodID = usize;
 
 /*
  * jboolean constants
@@ -116,6 +117,8 @@ pub struct JavaVM<'a>{
     pub env: JNIEnv<'a>,
 }
 
+impl !Unpin for JavaVM<'_>{}
+
 #[repr(C)]
 pub struct JNINativeInterface_{}
 
@@ -127,13 +130,17 @@ impl JNINativeInterface_ {
     pub fn DefineClass(env: *mut JNIEnv, name: *const c_char, loader: jobject, buf: *const jbyte, len: jsize) -> jclass {
         unimplemented!()
     }
-    pub fn FindClass(env: *mut JNIEnv, name: *const c_char) -> jclass {
-        let name = unsafe{CStr::from_ptr(name)};
-        println!("{:?}", name);
-        if name.to_string_lossy() == ""{
+    pub unsafe extern "system-unwind" fn FindClass(env: *mut JNIEnv, name: *const c_char) -> jclass {
+        let name = unsafe{CStr::from_ptr(name)}.to_str().map_err(|e| VmError::Native(e.to_string())).unwrap();
+        println!("NATIVE: FindClass: '{}'", name);
+        if name == ""{
             0 as jclass
         } else {
-            unimplemented!()
+            let vm = unsafe{&*(*env).vm};
+            if let Some(class) = vm.find_class_by_name(name){
+                return class.id.0 as jclass;
+            }
+            todo!();
         }
     }
 
@@ -202,7 +209,9 @@ impl JNINativeInterface_ {
         unimplemented!()
     }
     pub fn EnsureLocalCapacity(env: *mut JNIEnv, capacity: jint) -> jint{
-        unimplemented!()
+        debug!("NATIVE: EnsureLocalCapacity: amount:{}", capacity);
+        //TODO
+        JNI_OK
     }
 
     pub fn AllocObject(env: *mut JNIEnv, clazz: jclass) -> jobject{
@@ -345,8 +354,30 @@ impl JNINativeInterface_ {
         unimplemented!()
     }
 
-    pub fn GetStaticMethodID(clazz: jclass, name: *const c_char, sig: *const c_char) -> jmethodID{
-        unimplemented!()
+    pub unsafe extern "system-unwind" fn GetStaticMethodID(env: *mut JNIEnv, clazz: jclass, name: *const c_char, sig: *const c_char) -> jmethodID{
+        let method_name = unsafe{CStr::from_ptr(name)}.to_str().map_err(|e| VmError::Native(e.to_string())).unwrap();
+        let signature = unsafe{CStr::from_ptr(sig)}.to_str().map_err(|e| VmError::Native(e.to_string())).unwrap();
+        let vm = unsafe{&*(*env).vm};
+        if let Some(class_ref) = vm.find_class_by_id(ClassId(clazz)) {
+            debug!("NATIVE: GetStaticMethodID: Class:{}::{}{}", class_ref.name, method_name, signature);
+            class_ref.find_method_index(method_name, signature).ok_or(VmError::Native(format!("GetStaticMethodID: {}::{}{} not found", class_ref.name, method_name, signature))).unwrap()
+        } else {
+            unreachable!()
+        }
+    }
+
+    pub unsafe extern "system-unwind" fn CallStaticObjectMethodV(env: *mut JNIEnv, clazz: jclass, methodID: jmethodID, mut args: VaList) -> jobject{
+        let vm = unsafe{&*(*env).vm};
+        if let Some(class_ref) = vm.find_class_by_id(ClassId(clazz)) {
+            let objects = vm.objects_by_id.borrow();
+            let first: u32 = unsafe{args.arg()};
+            let first = objects.get(&first);
+            let second: u32 = unsafe{args.arg()};
+            let second = objects.get(&second);
+            todo!("CallStaticObjectMethodV: {}::{}({:?})", class_ref.name, class_ref.methods[methodID].name, vec![first, second]);
+        } else {
+            unreachable!("CallStaticObjectMethodV")
+        }
     }
 
     pub fn CallStaticObjectMethodA(clazz: jclass, methodID: jmethodID, args: *const jvalue) -> jobject{
@@ -452,9 +483,44 @@ impl JNINativeInterface_ {
     pub fn ReleaseStringChars(env: *mut JNIEnv, str: jstring, chars: *const jchar){
         unimplemented!()
     }
-    pub fn NewStringUTF(env: *mut JNIEnv, utf: *const c_char) -> jstring{
+    //0x7ffde0618048
+    //0x7ffde0618390
+    pub unsafe extern "system" fn NewStringUTF(env: *const JNIEnv, utf: *const c_char) -> jstring{
+        debug!("NATIVE: NewStringUTF");
+        unsafe {
+            let utf_r = CStr::from_ptr(utf).to_owned().into_string().map_err(|e| VmError::Native(e.to_string())).unwrap();
+            let vm = &*(*env).vm;
+            let str = vm.try_new_string_object(utf_r).map_err(|e| VmError::Native(e.to_string())).unwrap();
+            str.id
+        }
+    }
+    pub unsafe extern "system" fn GetStringUTFLength(env: *mut JNIEnv, str: jstring) -> jsize{
         unimplemented!()
     }
+    pub unsafe extern "system" fn GetStringUTFChars(env: *mut JNIEnv, str: jstring, isCopy: *mut jboolean) -> *const c_char{
+        unimplemented!()
+    }
+    pub unsafe extern "system" fn ReleaseStringUTFChars(env: *mut JNIEnv, str: jstring, chars: *const c_char){
+        unimplemented!()
+    }
+
+    pub unsafe extern "system" fn GetArrayLength(env: *mut JNIEnv, array: jarray){
+        unimplemented!()
+    }
+
+    pub unsafe extern "system" fn GetLongArrayRegion(env: *mut JNIEnv, array: jlongArray, start: jsize, len: jsize, buf: *mut jlong){
+        unimplemented!()
+    }
+
+    pub unsafe extern "system-unwind" fn ExceptionCheck(env: *mut JNIEnv) -> jboolean{
+        //TODO
+        JNI_FALSE
+    }
+
+    pub unsafe extern "system-unwind" fn NewDirectByteBuffer(env: *mut JNIEnv, address: *const c_void, capacity: jlong) -> jobject{
+        unimplemented!()
+    }
+
 }
 
 #[repr(C)]
@@ -493,7 +559,10 @@ impl JNIInvokeInterface_ {
         unimplemented!()
     }
     pub unsafe extern "system" fn GetEnv(vm: *mut JavaVM, penv: *mut *const c_void, version: jint) -> jint{
-        (*penv) = &(*vm).env as *const JNIEnv as _;
+        unsafe {
+            *penv = &(*vm).env as *const JNIEnv as _;
+            println!("{:?} {:p}", *penv, *penv);
+        }
         JNI_OK
     }
     pub fn AttachCurrentThreadAsDaemon(vm: *mut JavaVM, penv: *const *const c_void, args: *const c_void) -> jint{
