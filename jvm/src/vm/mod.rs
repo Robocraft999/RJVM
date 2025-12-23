@@ -93,11 +93,12 @@ impl<'a> VM<'a>{
     }
 
     pub fn invoke_new_frame(&self, java_vm: &JavaVM, class_and_method: ClassAndMethod<'a>, object: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
+        let current_index = self.call_stack.len() as isize -1;
         self.call_stack.create_and_push_call_frame(class_and_method, object, args, false);
-        self.invoke_current_frame(java_vm)
+        self.invoke_frames_until(java_vm, current_index)
     }
 
-    pub fn invoke_current_frame(&self, java_vm: &JavaVM) -> VMPartialResult<'a, Option<Value<'a>>> {
+    pub fn invoke_frames_until(&self, java_vm: &JavaVM, stop_index: isize) -> VMPartialResult<'a, Option<Value<'a>>> {
         let mut last_result: Option<VMResultType<Option<Value>>> = None;
         loop {
             let frame_amount = self.call_stack.len();
@@ -117,7 +118,7 @@ impl<'a> VM<'a>{
             match current_result{
                 VMResultType::Ok(result) => {
                     let frame = self.call_stack.pop_call_frame();
-                    if self.call_stack.is_empty(){
+                    if frame_amount as isize -2 == stop_index{
                         return Ok(VMResultType::Ok(result));
                     }
                     if let Some(value) = result{
@@ -127,7 +128,7 @@ impl<'a> VM<'a>{
                     }
                 }
                 VMResultType::NativeOk(result) => {
-                    if self.call_stack.is_empty(){
+                    if frame_amount as isize -2 == stop_index{
                         return Ok(VMResultType::Ok(result));
                     }
                     let frame = self.call_stack.pop_call_frame_at(frame_index);
@@ -145,7 +146,7 @@ impl<'a> VM<'a>{
                         let class_and_method = self.call_stack.frames.borrow().get(calling_frame_index).unwrap().class_and_method.clone();
 
                         let exception_table = class_and_method.method.get_exception_handlers();
-                        let current_pc = &self.call_stack.pcs.borrow()[calling_frame_index];
+                        let current_pc = &self.call_stack.pcs.borrow()[calling_frame_index].clone();
                         //[unchecked] class already loaded by native
                         if let Some(handler_pc) = self.unchecked_resolve_exception_handler(exception_table, current_pc, thrown_class_name.as_str())? {
                             self.call_stack.pcs.borrow_mut()[calling_frame_index] = handler_pc;
@@ -371,23 +372,25 @@ impl<'a> VM<'a>{
         }
     }
 
-    fn resolve_exception_handler(&self, exception_table: &ExceptionTable, pc: &ProgramCounter, thrown_class_name: &str) -> VMPartialResult<'a, Option<ProgramCounter>>{
+    fn resolve_exception_handler(&self, exception_table_option: Option<&ExceptionTable>, pc: &ProgramCounter, thrown_class_name: &str) -> VMPartialResult<'a, Option<ProgramCounter>>{
         let _ = self.get_or_resolve_class(thrown_class_name)?;
-        self.unchecked_resolve_exception_handler(exception_table, pc, thrown_class_name).map(VMResultType::Ok)
+        self.unchecked_resolve_exception_handler(exception_table_option, pc, thrown_class_name).map(VMResultType::Ok)
     }
 
-    fn unchecked_resolve_exception_handler(&self, exception_table: &ExceptionTable, pc: &ProgramCounter, thrown_class_name: &str) -> VMResult<Option<ProgramCounter>>{
-        for handler in &exception_table.0 {
-            let can_handle = match handler.catch_type {
-                Some(ref class_name) => {
-                    self.unchecked_check_if_subclass_of(class_name.as_str(), thrown_class_name)?
-                }
-                None => true
-            };
-            if can_handle{
-                //FIXME check if end_pc is inclusive or exclusive
-                if handler.start_pc.0 <= pc.0 && pc.0 <= handler.end_pc.0{
-                    return Ok(Some(handler.handler_pc));
+    fn unchecked_resolve_exception_handler(&self, exception_table_option: Option<&ExceptionTable>, pc: &ProgramCounter, thrown_class_name: &str) -> VMResult<Option<ProgramCounter>>{
+        if let Some(exception_table) = exception_table_option {
+            for handler in &exception_table.0 {
+                let can_handle = match handler.catch_type {
+                    Some(ref class_name) => {
+                        self.unchecked_check_if_subclass_of(class_name.as_str(), thrown_class_name)?
+                    }
+                    None => true
+                };
+                if can_handle{
+                    //FIXME check if end_pc is inclusive or exclusive
+                    if handler.start_pc.0 <= pc.0 && pc.0 <= handler.end_pc.0{
+                        return Ok(Some(handler.handler_pc));
+                    }
                 }
             }
         }
@@ -397,15 +400,21 @@ impl<'a> VM<'a>{
     pub fn get_or_resolve_class(&self, class_name: &str) -> VMPartialResult<'a, ClassRef<'a>>{
         let resolved = self.class_manager.get_or_resolve_class(class_name)?;
         if let ResolvedClass::NewClass(to_init) = &resolved{
-            Ok(VMResultType::NeedsClassInit(
-                to_init.to_initialize
-                    .iter()
-                    .map(|class| self.init_class(class))
-                    .filter(Option::is_some)
-                    .map(Option::unwrap)
-                    .collect(),
-                true
-            ))
+            let filtered_to_init: Vec<()> = to_init.to_initialize
+                .iter()
+                .map(|class| self.init_class(class))
+                .filter(Option::is_some)
+                .map(Option::unwrap)
+                .collect();
+            if filtered_to_init.len() == 0{
+                Ok(VMResultType::Ok(resolved.get_class()))
+            } else {
+                Ok(VMResultType::NeedsClassInit(
+                    filtered_to_init,
+                    true
+                ))
+            }
+
             /*for class in to_init.to_initialize.iter(){
                 if let Some(clinit) = self.init_class(class)?{
                     //self.invoke_frame_on_stack(clinit)?;

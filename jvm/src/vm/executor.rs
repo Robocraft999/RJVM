@@ -117,7 +117,7 @@ pub fn execute_current_block<'a>(vm: &VM<'a>) -> Option<VMPartialResult<'a, Opti
                 Instruction::ALOAD2 => wrap_error!(aload(vm, 2)),
                 Instruction::ALOAD3 => wrap_error!(aload(vm, 3)),
 
-                Instruction::IALOAD | Instruction::AALOAD | Instruction::BALOAD | Instruction::CALOAD => {
+                Instruction::IALOAD | Instruction::AALOAD | Instruction::BALOAD | Instruction::CALOAD | Instruction::SALOAD => {
                     let index = vm.call_stack.pop_operand_value().unwrap().expect_int().unwrap();
                     let array = vm.call_stack.pop_operand_value();
                     debug!("XALOAD: {:?}[{}]", array, index);
@@ -226,6 +226,17 @@ pub fn execute_current_block<'a>(vm: &VM<'a>) -> Option<VMPartialResult<'a, Opti
                         vm.call_stack.push_operand_value(value1);
                     }
                 }
+                Instruction::SWAP => {
+                    debug!("SWAP");
+                    let value1 = vm.call_stack.pop_operand_value().unwrap();
+                    let value2 = vm.call_stack.pop_operand_value().unwrap();
+                    if value1.get_computational_type() == 1 && value2.get_computational_type() == 1{
+                        vm.call_stack.push_operand_value(value1);
+                        vm.call_stack.push_operand_value(value2);
+                    } else {
+                        return Some(Err(VmError::ValidationError("SWAP can only be applied to computational type 1 values".to_string())));
+                    }
+                }
 
                 Instruction::IADD => wrap_error!(execute_i_arithmetic(vm, |val1, val2| Ok(val1.wrapping_add(val2)))),
                 Instruction::LADD => wrap_error!(execute_l_arithmetic(vm, |val1, val2| Ok(val1.wrapping_add(val2)))),
@@ -236,6 +247,7 @@ pub fn execute_current_block<'a>(vm: &VM<'a>) -> Option<VMPartialResult<'a, Opti
                 Instruction::IMUL => wrap_error!(execute_i_arithmetic(vm, |val1, val2| Ok(val1.wrapping_mul(val2)))),
                 Instruction::LMUL => wrap_error!(execute_l_arithmetic(vm, |val1, val2| Ok(val1.wrapping_mul(val2)))),
                 Instruction::FMUL => wrap_error!(execute_f_arithmetic(vm, |val1, val2| Ok(val1 * val2))),
+                Instruction::DMUL => wrap_error!(execute_d_arithmetic(vm, |val1, val2| Ok(val1 * val2))),
 
                 Instruction::IDIV => wrap_error!(execute_i_arithmetic(vm, |val1, val2| {
                     if val2 != 0 {
@@ -254,6 +266,11 @@ pub fn execute_current_block<'a>(vm: &VM<'a>) -> Option<VMPartialResult<'a, Opti
 
                 Instruction::IREM => wrap_error!(execute_i_arithmetic(vm, |val1, val2| Ok(val1.wrapping_rem(val2)))),
                 Instruction::LREM => wrap_error!(execute_l_arithmetic(vm, |val1, val2| Ok(val1.wrapping_rem(val2)))),
+
+                Instruction::INEG => {
+                    let value = wrap_error!(vm.call_stack.pop_operand_value().unwrap().expect_int());
+                    vm.call_stack.push_operand_value(Value::Integer(-value))
+                }
 
                 Instruction::ISHL => wrap_error!(execute_i_arithmetic(vm, |val1, val2| Ok(val1 << (val2 & 0x1f)))),
                 Instruction::LSHL => wrap_error!(execute_ji_arithmetic(vm, |val1, val2| Ok(val1 << (val2 & 0x3f)))),
@@ -303,6 +320,15 @@ pub fn execute_current_block<'a>(vm: &VM<'a>) -> Option<VMPartialResult<'a, Opti
                         warn!("I2F Conversion failed, because {value:?} is not of type Integer")
                     }
                 }
+                Instruction::I2D => {
+                    let value = vm.call_stack.pop_operand_value().unwrap();
+                    debug!("I2D");
+                    if let Value::Integer(val) = value {
+                        vm.call_stack.push_operand_value(Value::Double(val as f64));
+                    } else {
+                        warn!("I2D Conversion failed, because {value:?} is not of type Integer")
+                    }
+                }
                 Instruction::L2I => {
                     let value = vm.call_stack.pop_operand_value().unwrap();
                     debug!("L2I");
@@ -321,6 +347,24 @@ pub fn execute_current_block<'a>(vm: &VM<'a>) -> Option<VMPartialResult<'a, Opti
                         warn!("F2I Conversion failed, because {value:?} is not of type Float")
                     }
                 }
+                Instruction::F2D => {
+                    let value = vm.call_stack.pop_operand_value().unwrap();
+                    debug!("F2D");
+                    if let Value::Float(val) = value {
+                        vm.call_stack.push_operand_value(Value::Double(val as f64));
+                    } else {
+                        warn!("F2D Conversion failed, because {value:?} is not of type Float")
+                    }
+                }
+                Instruction::D2I => {
+                    let value = vm.call_stack.pop_operand_value().unwrap();
+                    debug!("D2I");
+                    if let Value::Double(val) = value {
+                        vm.call_stack.push_operand_value(Value::Integer(val as i32));
+                    } else {
+                        warn!("D2I Conversion failed, because {value:?} is not of type Double")
+                    }
+                }
                 Instruction::I2B => {
                     let value = vm.call_stack.pop_operand_value().unwrap();
                     debug!("I2B");
@@ -337,6 +381,15 @@ pub fn execute_current_block<'a>(vm: &VM<'a>) -> Option<VMPartialResult<'a, Opti
                         vm.call_stack.push_operand_value(Value::Integer((val as u16) as i32));
                     } else {
                         warn!("I2C Conversion failed, because {value:?} is not of type Integer")
+                    }
+                }
+                Instruction::I2S => {
+                    let value = vm.call_stack.pop_operand_value().unwrap();
+                    debug!("I2S");
+                    if let Value::Integer(val) = value {
+                        vm.call_stack.push_operand_value(Value::Integer((val as i16) as i32));
+                    } else {
+                        warn!("I2S Conversion failed, because {value:?} is not of type Integer")
                     }
                 }
 
@@ -802,6 +855,20 @@ fn execute_f_arithmetic<F: FnOnce(f32, f32) -> VMResult<f32>>(vm: &VM, f: F) -> 
     } else {
         warn!("dat sin nich zwee floats to keck");
         Err(VmError::ValidationError("Expected two floats".to_string()))
+    }
+}
+
+fn execute_d_arithmetic<F: FnOnce(f64, f64) -> VMResult<f64>>(vm: &VM, f: F) -> VMResult<()> {
+    let value2 = vm.call_stack.pop_operand_value();
+    let value1 = vm.call_stack.pop_operand_value();
+    if let (Some(Value::Double(val1)), Some(Value::Double(val2))) = (value1, value2){
+        let res = f(val1, val2)?;
+        debug!("Double ARITHMETIC {}&{}={}", val1, val2, res);
+        vm.call_stack.push_operand_value(Value::Double(res));
+        Ok(())
+    } else {
+        warn!("dat sin nich zwee doubles to keck");
+        Err(VmError::ValidationError("Expected two doubles".to_string()))
     }
 }
 

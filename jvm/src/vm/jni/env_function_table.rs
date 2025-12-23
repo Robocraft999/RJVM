@@ -150,11 +150,11 @@ const TABLE: JNINativeInterface = [
     JNINativeInterface_::GetStaticMethodID as _,
 
     //114
-    not_implemented as _,
+    JNINativeInterface_::CallStaticObjectMethodV as _,
     JNINativeInterface_::CallStaticObjectMethodV as _,
     JNINativeInterface_::CallStaticObjectMethodA as _,
-    not_implemented as _,
-    not_implemented as _,
+    JNINativeInterface_::CallStaticBooleanMethodV as _,
+    JNINativeInterface_::CallStaticBooleanMethodV as _,
     JNINativeInterface_::CallStaticBooleanMethodA as _,
     not_implemented as _,
     not_implemented as _,
@@ -177,8 +177,8 @@ const TABLE: JNINativeInterface = [
     not_implemented as _,
     not_implemented as _,
     JNINativeInterface_::CallStaticDoubleMethodA as _,
-    not_implemented as _,
-    not_implemented as _,
+    JNINativeInterface_::CallStaticVoidMethodV as _,
+    JNINativeInterface_::CallStaticVoidMethodV as _,
     JNINativeInterface_::CallStaticVoidMethodA as _,
 
     //144

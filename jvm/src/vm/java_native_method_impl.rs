@@ -117,6 +117,7 @@ pub fn register_all_natives(registry: &mut NativeMethodRegistry){
     registry.register("java/lang/Thread", "isAlive", "()Z", delegate_is_alive);
     registry.register("java/lang/Runtime", "availableProcessors", "()I", delegate_available_processors);
     registry.register("java/lang/Runtime", "freeMemory", "()J", delegate_free_memory);
+    registry.register("java/lang/ProcessEnvironment", "environ", "()[[B", delegate_environ);
     registry.register("java/security/AccessController", "getStackAccessControlContext", "()Ljava/security/AccessControlContext;", delegate_get_stack_access_control_context);
     registry.register("java/security/AccessController", "doPrivileged", "(Ljava/security/PrivilegedAction;)Ljava/lang/Object;", delegate_do_privileged);
     registry.register("java/security/AccessController", "doPrivileged", "(Ljava/security/PrivilegedAction;Ljava/security/AccessControlContext;)Ljava/lang/Object;", delegate_do_privileged);
@@ -426,11 +427,10 @@ fn delegate_for_name0<'a>(vm: &VM<'a>, _: &JavaVM,  _: ClassRef<'a>, _: Option<R
 
                 let exception_class = get_or_init!(vm.get_or_resolve_class(&exception_class_name)?);
                 let exception_object = vm.try_new_object(&exception_class_name)?;
-                //let init = vm.get_class_method(exception_class, "<init>", "(Ljava/lang/String;)V")?;
+
                 let details = get_or_init!(vm.new_string_object(exception_message.clone())?);
                 //detailsMessage
                 exception_object.set_field(2, Value::Reference(details));
-                //vm.call_stack.create_and_push_call_frame(init, Some(exception_object), vec![Value::Reference(details)], false);
                 Ok(VMResultType::NativeException(
                     VmError::JavaException(
                         JavaExceptionThrown(
@@ -856,6 +856,11 @@ fn delegate_free_memory<'a>(_: &VM<'a>, _: &JavaVM, _: ClassRef<'a>, _: Option<R
     non_failing_some(Value::Long(1024 * 1024 * 20))
 }
 
+fn delegate_environ<'a>(vm: &VM<'a>, _: &JavaVM, _: ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
+    let array_ref = get_or_init!(vm.new_array(2, FieldType::Primitive(PrimitiveType::Byte).to_array_field_type(2), RefCell::new(Vec::new()))?);
+    non_failing_some(Value::Reference(array_ref))
+}
+
 fn delegate_get_stack_access_control_context<'a>(_: &VM<'a>, _: &JavaVM, _: ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<'a, Option<Value<'a>>>{
     non_failing_some(Value::Null)
 }
@@ -1016,15 +1021,23 @@ fn delegate_read_bytes<'a>(vm: &VM<'a>, _: &JavaVM, _: ClassRef<'a>, obj: Option
                     Ok(Some(Value::Integer((end - start) as i32)))
                 }*/
             } else {
-                unimplemented!("see getName0");
+                let exception_class_name = String::from("java/io/IOException");
+                let exception_message = format!("File {} was not found", path);
+
                 let exception_object = vm.try_new_object("java/io/IOException")?;
-                let init = vm.get_class_method(io_exception_class, "<init>", "(Ljava/lang/String;)V")?;
-                let details = get_or_init!(vm.new_string_object(format!("File {} was not found", path))?);
-                let init_frame = vm.call_stack.create_and_push_call_frame(init, Some(exception_object), vec![Value::Reference(details)], false);
-                //let throw_frame = CallStack::create_throwing_frame(vm.find_class_by_id(ClassId(0)).unwrap(), Value::Reference(exception_object));
-                //Ok(VMResultType::NeedsClassInit(vec![(), ()], false))
-                non_failing_none()
-                //Err(VmError::JavaException(JavaError::IOException(format!("File {} was not found", path))))
+                let details = get_or_init!(vm.new_string_object(exception_message.clone())?);
+                //detailsMessage
+                exception_object.set_field(2, Value::Reference(details));
+                Ok(VMResultType::NativeException(
+                    VmError::JavaException(
+                        JavaExceptionThrown(
+                            exception_class_name,
+                            exception_message,
+                            String::from("java/io/FileInputStream.readBytes([BII)I")
+                        )
+                    ),
+                    Value::Reference(exception_object)
+                ))
             }
         } else {
             Err(VmError::ValidationError("Expected an object reference".to_string()))

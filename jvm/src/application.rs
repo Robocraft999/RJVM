@@ -15,20 +15,26 @@ impl <'a> Application<'a>{
         let env = JNIEnv{
             methods: jni::env_function_table::METHODS,
             vm: vm.as_ref().get_ref(),
+            pvm: std::ptr::null(),
         };
-        let javavm = Box::pin(JavaVM{
+        let mut javavm = Box::pin(JavaVM{
             methods: jni::vm_function_table::METHODS,
             env
         });
+        let javavm_ptr: *const JavaVM<'a> = javavm.as_ref().get_ref();
+        unsafe {
+            //SAFETY: JavaVM is !UnPin so it will not be moved and get_unchecked_mut has to be used
+            let javavm_mut = Pin::as_mut(&mut javavm).get_unchecked_mut();
+            javavm_mut.env.pvm = javavm_ptr;
+        }
+
         println!("javavm: {:p}", javavm);
         Self { java_vm: javavm, vm }
     }
 
     fn init_vm(&self) -> Result<(), VmError>{
         if let VMResultType::NeedsClassInit(classes, _) = self.vm.get_or_resolve_class("sun/misc/VM")?{
-            for frame in classes{
-                self.vm.invoke_current_frame(&self.java_vm)?;
-            }
+            self.vm.invoke_frames_until(&self.java_vm, -1)?;
         }
 
         Ok(())
@@ -36,9 +42,7 @@ impl <'a> Application<'a>{
 
     fn init_system(&self) -> Result<(), VmError>{
         if let VMResultType::NeedsClassInit(classes, _) = self.vm.get_or_resolve_class("java/lang/System")?{
-            for frame in classes{
-                self.vm.invoke_current_frame(&self.java_vm)?;
-            }
+            self.vm.invoke_frames_until(&self.java_vm, -1)?;
         }
         let init = self.vm.try_resolve_class_method("java/lang/System", "initializeSystemClass", "()V")?;
         self.vm.invoke_new_frame(&self.java_vm, init, None, vec![])?;
@@ -47,9 +51,7 @@ impl <'a> Application<'a>{
 
     pub fn run_and_catch_method(&self, class_name: &str, method_name: &str, method_descriptor: &str, args: Vec<Value<'a>>){
         if let VMResultType::NeedsClassInit(classes, _) = self.vm.get_or_resolve_class(class_name).unwrap().clone(){
-            for frame in classes{
-                self.vm.invoke_current_frame(&self.java_vm).unwrap();
-            }
+            self.vm.invoke_frames_until(&self.java_vm, -1).unwrap();
         }
         let main_method = self.vm.try_resolve_class_method(class_name, method_name, method_descriptor).unwrap();
         let result = self.vm.invoke_new_frame(&self.java_vm, main_method, None, args);

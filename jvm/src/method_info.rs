@@ -43,11 +43,11 @@ impl MethodInfo{
         }
     }
     
-    pub fn get_exception_handlers(&self) -> &ExceptionTable {
+    pub fn get_exception_handlers(&self) -> Option<&ExceptionTable> {
         if let Some(code) = &self.code {
-            &code.exception_table
+            Some(&code.exception_table)
         } else {
-            unreachable!("No exception handlers, because Code block is missing");
+            None
         }
     }
 
