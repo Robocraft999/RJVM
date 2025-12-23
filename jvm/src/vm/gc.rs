@@ -1,5 +1,5 @@
 use crate::field_info::FieldType;
-use crate::vm::class::ClassRef;
+use crate::vm::class::{ClassId, ClassRef};
 use crate::vm::value::{Reference, ReferenceType, ReferenceValue, Value};
 use std::cell::RefCell;
 use typed_arena::Arena;
@@ -11,9 +11,16 @@ pub struct ObjectAllocator<'a>{
 
 impl<'a> ObjectAllocator<'a>{
     pub(crate) fn new() -> Self{
+        let arena = Arena::with_capacity(1024);
+        let _null = arena.alloc(ReferenceValue{
+            id: 0,
+            class_id: ClassId(u32::MAX),
+            class_name: String::from("xXxNullxXx"),
+            reference_type: ReferenceType::Object(RefCell::new(Vec::new())),
+        });
         ObjectAllocator{
-            arena: Arena::with_capacity(1024),
-            next_object_id: RefCell::new(0),
+            arena,
+            next_object_id: RefCell::new(1),
         }
     }
 
