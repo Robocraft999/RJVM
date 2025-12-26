@@ -14,7 +14,7 @@ macro_rules! wrap_error {
     };
 }
 
-pub fn execute<'a>(vm: &VM<'a>) -> VMPartialResult<'a, Option<Value<'a>>>{
+pub fn execute<'a>(vm: &VM<'a>) -> VMPartialResult<Option<Value<'a>>>{
     let class_and_method = &vm.call_stack.frames.borrow().last().unwrap().class_and_method.clone();
     info!("");
     info!("METHOD_NAME: {} at {}", class_and_method.format(), vm.call_stack.get_pc().0);
@@ -29,7 +29,7 @@ pub fn execute<'a>(vm: &VM<'a>) -> VMPartialResult<'a, Option<Value<'a>>>{
     Err(VmError::MethodCallError(format!("Method: {} is not executeable, because it has no code", class_and_method.format())))
 }
 
-pub fn execute_current_block<'a>(vm: &VM<'a>) -> Option<VMPartialResult<'a, Option<Value<'a>>>>{
+pub fn execute_current_block<'a>(vm: &VM<'a>) -> Option<VMPartialResult<Option<Value<'a>>>>{
     let class_and_method = &vm.call_stack.frames.borrow().last().unwrap().class_and_method.clone();
     let block = class_and_method.method.get_code_block_at(vm.call_stack.get_pc());
     let current_pc = vm.call_stack.get_pc();
@@ -489,10 +489,10 @@ pub fn execute_current_block<'a>(vm: &VM<'a>) -> Option<VMPartialResult<'a, Opti
                 Instruction::IRETURN | Instruction::LRETURN | Instruction::FRETURN | Instruction::ARETURN => {
                     //TODO seperate for validation
                     let value = vm.call_stack.pop_operand_value().unwrap();
-                    return Some(Ok(VMResultType::Ok(Some(value))))
+                    return Some(Ok(VMResultType::Successful(Some(value))))
                 }
                 Instruction::RETURN => {
-                    return Some(Ok(VMResultType::Ok(None)))
+                    return Some(Ok(VMResultType::Successful(None)))
                 }
 
                 Instruction::PUTSTATIC(index) => {
@@ -613,7 +613,9 @@ pub fn execute_current_block<'a>(vm: &VM<'a>) -> Option<VMPartialResult<'a, Opti
                         {
                             vm.debug_helper.exception_helper.push(format!("Throw   {}: {}\n└-- thrown by {} at {}", exception_name, string, class_and_method.format(), vm.call_stack.get_pc().0));
                         }
-                        return Some(Ok(VMResultType::ExceptionThrown(VmError::JavaException(JavaError::JavaExceptionThrown(exception_name, string, class_and_method.format())), Value::Reference(error))));
+                        let prev = vm.caught_exception.replace(Some((string, class_and_method.format(), Value::Reference(error))));
+                        assert!(prev.is_none());
+                        return Some(Ok(VMResultType::ExceptionThrown));
                     }
                     return Some(Err(VmError::JavaException(JavaError::JavaExceptionThrown("JavaException".to_string(), "Unknown".to_string(), class_and_method.format()))));
                 }
@@ -691,7 +693,7 @@ pub fn execute_current_block<'a>(vm: &VM<'a>) -> Option<VMPartialResult<'a, Opti
             vm.call_stack.store_local(top, *index);
         }
         InstructionBlock::IConstReturn(val) => {
-            return Some(Ok(VMResultType::Ok(Some(Value::Integer(*val)))))
+            return Some(Ok(VMResultType::Successful(Some(Value::Integer(*val)))))
         }
         other => {
             return Some(Err(VmError::Unspecified(format!("Block of type {:?} not executable", other))))
@@ -886,7 +888,7 @@ fn execute_ji_arithmetic<F: FnOnce(i64, i32) -> Result<i64, VmError>>(vm: &VM, f
     }
 }
 
-fn execute_invoke<'a>(vm: &VM<'a>, index: u16, kind: InvokeKind) -> VMPartialResult<'a, Option<Value<'a>>> {
+fn execute_invoke<'a>(vm: &VM<'a>, index: u16, kind: InvokeKind) -> VMPartialResult<Option<Value<'a>>> {
     let class_and_method = &vm.call_stack.frames.borrow().last().unwrap().class_and_method.clone();
     let (class_name, method_name, descriptor) = class_and_method.get_constant_method_info_descriptor(index).expect("GIB MICH DIE METHODE");
     trace!("loading class to execute on: '{}'", class_name.as_str());
@@ -953,8 +955,8 @@ fn execute_invoke<'a>(vm: &VM<'a>, index: u16, kind: InvokeKind) -> VMPartialRes
         trace!("    [{}] {:?}", index, value);
     }
     debug!("INVOKE{:?}: {}{} on {:?}", kind, method_name, descriptor, receiver);
-    let call_frame = vm.call_stack.create_and_push_call_frame(class_and_method, receiver, args, true);
-    Ok(VMResultType::CallPaused(call_frame))
+    vm.call_stack.create_and_push_call_frame(class_and_method, receiver, args, true);
+    Ok(VMResultType::Interrupted(1, false))
     //Ok(VMResultType::Ok(Some(Value::Null)))
     /*let res = vm.invoke(class_and_method, receiver, args)?.to_option();
     if res.is_some(){
@@ -1018,7 +1020,7 @@ fn get_method_interface_virtual<'a>(class: ClassRef<'a>, method_name: &str, desc
     }
 }
 
-fn get_constant_as_value<'a>(vm: &VM<'a>, index: u16) -> VMPartialResult<'a, Value<'a>>{
+fn get_constant_as_value<'a>(vm: &VM<'a>, index: u16) -> VMPartialResult<Value<'a>>{
     let class_and_method = &vm.call_stack.frames.borrow().last().unwrap().class_and_method.clone();
     let constant_value = class_and_method.class.get_constant(index).unwrap();
     let value = match constant_value {
@@ -1029,7 +1031,7 @@ fn get_constant_as_value<'a>(vm: &VM<'a>, index: u16) -> VMPartialResult<'a, Val
         ConstantPoolEntry::String(string_index) => {
             if let Some(ConstantPoolEntry::Utf8(string)) = class_and_method.class.get_constant(string_index){
                 //FIXME maybe needs preloading
-                let string_object = get_or_init!(vm.new_string_object(string)?);
+                let string_object = get_or_init!(vm.new_string_object(string.as_str())?);
                 Value::Reference(string_object)
             } else {
                 //return Err(ValidationError("Expected string".to_string()));
@@ -1039,7 +1041,7 @@ fn get_constant_as_value<'a>(vm: &VM<'a>, index: u16) -> VMPartialResult<'a, Val
         }
         ConstantPoolEntry::Class(name_index) => {
             if let Some(ConstantPoolEntry::Utf8(string)) = class_and_method.class.get_constant(name_index){
-                let class_object = get_or_init!(vm.new_class_object_by_name(string)?);
+                let class_object = get_or_init!(vm.new_class_object_by_name(string.as_str())?);
                 Value::Reference(class_object)
             } else {
                 warn!("expected but didnt find string object");
@@ -1055,10 +1057,10 @@ fn get_constant_as_value<'a>(vm: &VM<'a>, index: u16) -> VMPartialResult<'a, Val
         }
         _ => unimplemented!("Constant of type {constant_value:?} cannot be converted to a value")
     };
-    Ok(VMResultType::Ok(value))
+    Ok(VMResultType::Successful(value))
 }
 
-fn execute_create_array<'a>(vm: &VM<'a>, array_field_type: FieldType, dims: usize) -> VMPartialResult<'a, Value<'a>>{
+fn execute_create_array<'a>(vm: &VM<'a>, array_field_type: FieldType, dims: usize) -> VMPartialResult<Value<'a>>{
     if let FieldType::Array(_, component_type) = array_field_type{
         //ensure that the array class get loaded before popping the count(s)
         for i in 0..dims{
@@ -1082,7 +1084,7 @@ fn execute_create_array<'a>(vm: &VM<'a>, array_field_type: FieldType, dims: usiz
             content = local_content;
         }
         //FIXME component_type.to_array_field_type(dims) is just array_field_type
-        Ok(VMResultType::Ok(Value::Reference(vm.try_new_array(dims, component_type.to_array_field_type(dims), RefCell::new(content))?)))
+        Ok(VMResultType::Successful(Value::Reference(vm.try_new_array(dims, component_type.to_array_field_type(dims), RefCell::new(content))?)))
     } else {
         Err(VmError::ValidationError(format!("Field type for creating an array must be FieldType::Array but is {:?}", array_field_type)))
     }

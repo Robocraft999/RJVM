@@ -33,8 +33,8 @@ macro_rules! get_or_init {
         {
             let res = $x;
             match res{
-                VMResultType::Ok(value) => value,
-                VMResultType::NeedsClassInit(classes, reenter) => {return Ok(VMResultType::NeedsClassInit(classes, reenter))}
+                VMResultType::Successful(value) => value,
+                VMResultType::Interrupted(amount, reset_pc) => {return Ok(VMResultType::Interrupted(amount, reset_pc))}
                 _ => unreachable!("[get_after_init] got unexpected result {:?}", res)
             }
         }
@@ -47,8 +47,8 @@ macro_rules! get_or_init_option {
         {
             let res = $x;
             match res{
-                Ok(VMResultType::Ok(value)) => value,
-                Ok(VMResultType::NeedsClassInit(classes, reenter)) => {return Some(Ok(VMResultType::NeedsClassInit(classes, reenter)))}
+                Ok(VMResultType::Successful(value)) => value,
+                Ok(VMResultType::Interrupted(amount, reset_pc)) => {return Some(Ok(VMResultType::Interrupted(amount, reset_pc)))}
                 Err(e) => {return Some(Err(e))}
                 Ok(_) => unreachable!("[get_after_init] got unexpected result {:?}", res)
             }
@@ -62,8 +62,8 @@ macro_rules! get_or_init_special {
         {
             let res = $x;
             match res{
-                VMResultType::Ok(value) => ($wrapper)(value),
-                VMResultType::NeedsClassInit(classes, reenter) => {return Ok(VMResultType::NeedsClassInit(classes, reenter))}
+                VMResultType::Successful(value) => ($wrapper)(value),
+                VMResultType::Interrupted(amount, reset_pc) => {return Ok(VMResultType::Interrupted(amount, reset_pc))}
                 _ => unreachable!("[get_after_init] got unexpected result {:?}", res)
             }
         }
@@ -77,7 +77,7 @@ pub fn run() {
     println!("Booting up VM");
     let vm = Box::pin(VM::new(class_path));
 
-    //simple_logger::SimpleLogger::new().with_level(LevelFilter::Error).without_timestamps().init().unwrap();
+    simple_logger::SimpleLogger::new().with_level(LevelFilter::Info).without_timestamps().init().unwrap();
 
     /*unsafe {
         use libffi::middle::{Closure, Cif, Type, Arg};
@@ -96,14 +96,13 @@ pub fn run() {
     }*/
     let app = Application::new(vm);
     app.startup();
-    //todo!("Init complete");
 
     //vm.class_manager.get_or_resolve_class("Empty").expect("TODO: panic message");
     //run_and_catch_method(&mut vm, "Test", "main", "([Ljava/lang/String;)V");
 
-    simple_logger::SimpleLogger::new().with_level(LevelFilter::Error).without_timestamps().init().unwrap();
+    //simple_logger::SimpleLogger::new().with_level(LevelFilter::Warn).without_timestamps().init().unwrap();
 
-    let args = env::args().skip(1).map(|s| Value::Reference(app.vm.try_new_string_object(s).unwrap())).collect();
+    let args = env::args().skip(1).map(|s| Value::Reference(app.vm.try_new_string_object(&s).unwrap())).collect();
     let args_array = app.vm.try_new_array(1, FieldType::Object("java/lang/String".to_string()).to_array_field_type(1), RefCell::new(args)).unwrap();
     let p_args = vec![Value::Reference(args_array)];
     //run_and_catch_method(&mut vm, "de/klassenserver7b/k7bot/Main", "main", "([Ljava/lang/String;)V", p_args);

@@ -33,7 +33,7 @@ impl <'a> Application<'a>{
     }
 
     fn init_vm(&self) -> Result<(), VmError>{
-        if let VMResultType::NeedsClassInit(classes, _) = self.vm.get_or_resolve_class("sun/misc/VM")?{
+        if let VMResultType::Interrupted(..) = self.vm.get_or_resolve_class("sun/misc/VM")?{
             self.vm.invoke_frames_until(&self.java_vm, -1)?;
         }
 
@@ -41,7 +41,7 @@ impl <'a> Application<'a>{
     }
 
     fn init_system(&self) -> Result<(), VmError>{
-        if let VMResultType::NeedsClassInit(classes, _) = self.vm.get_or_resolve_class("java/lang/System")?{
+        if let VMResultType::Interrupted(..) = self.vm.get_or_resolve_class("java/lang/System")?{
             self.vm.invoke_frames_until(&self.java_vm, -1)?;
         }
         let init = self.vm.try_resolve_class_method("java/lang/System", "initializeSystemClass", "()V")?;
@@ -50,7 +50,7 @@ impl <'a> Application<'a>{
     }
 
     pub fn run_and_catch_method(&self, class_name: &str, method_name: &str, method_descriptor: &str, args: Vec<Value<'a>>){
-        if let VMResultType::NeedsClassInit(classes, _) = self.vm.get_or_resolve_class(class_name).unwrap().clone(){
+        if let VMResultType::Interrupted(..) = self.vm.get_or_resolve_class(class_name).unwrap().clone(){
             self.vm.invoke_frames_until(&self.java_vm, -1).unwrap();
         }
         let main_method = self.vm.try_resolve_class_method(class_name, method_name, method_descriptor).unwrap();
@@ -63,6 +63,10 @@ impl <'a> Application<'a>{
                 error!("Error: {}", error);
                 println!("Frames:");
                 self.vm.call_stack.print_call_stack();
+                #[cfg(feature = "debug")]
+                {
+                    self.vm.debug_helper.exception_helper.print();
+                }
             }
         }
     }

@@ -106,6 +106,7 @@ pub struct ReferenceValue<'a>{
 }
 
 impl<'a> ReferenceValue<'a>{
+    //FIXME switch these to Option for safety
     pub fn set_field(&self, index: usize, value: Value<'a>) {
         match &self.reference_type {
             ReferenceType::Object(fields) => {fields.borrow_mut()[index] = value}
@@ -180,7 +181,8 @@ impl<'a> ReferenceValue<'a>{
                 }
             },
             ReferenceType::Array(_, field_type, content) => {
-                if let FieldType::Primitive(PrimitiveType::Char) = field_type {
+                vec![String::from("<redacted>")]
+                /*if let FieldType::Primitive(PrimitiveType::Char) = field_type {
                     let chars: Vec<char> = content.borrow().iter().map(|e| if let Value::Integer(val) = e {char::from_u32(*val as u32).unwrap()} else {'?'}).collect();
                     vec![chars.iter().collect::<String>()]
                 } else if let FieldType::Primitive(PrimitiveType::Byte) = field_type {
@@ -203,7 +205,7 @@ impl<'a> ReferenceValue<'a>{
                         vec.push(format!("{}x{}", null_counter, object(&Value::Null)));
                     }
                     vec
-                }
+                }*/
             }
         }
     }

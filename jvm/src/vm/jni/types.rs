@@ -137,11 +137,11 @@ macro_rules! wrap_init{
             let macro_current_frame_index: isize = macro_vm.call_stack.len() as isize -1;
             let macro_res = $x;
             match macro_res.unwrap(){
-                VMResultType::Ok(v) => v,
-                VMResultType::NeedsClassInit(classes, _) => {
+                VMResultType::Successful(v) => v,
+                VMResultType::Interrupted(..) => {
                     let init_res = macro_vm.invoke_frames_until(macro_javavm, macro_current_frame_index).unwrap();
-                    if let VMResultType::Ok(None) = init_res{
-                        if let VMResultType::Ok(v) = ($x).unwrap(){
+                    if let VMResultType::Successful(None) = init_res{
+                        if let VMResultType::Successful(v) = ($x).unwrap(){
                             v
                         } else {
                             unreachable!("[wrap_init] still needs classes even after loading them")
@@ -469,7 +469,7 @@ impl JNINativeInterface_ {
         debug!("CallStaticObjectMethodV: {} ({:?})", class_and_method.format(), args);
         vm.call_stack.create_and_push_call_frame(class_and_method, None, args, false);
         let res = vm.invoke_frames_until(javavm, stop_index).unwrap();
-        if let VMResultType::Ok(Some(result)) = res{
+        if let VMResultType::Successful(Some(result)) = res{
             if let Value::Null = result{
                 0 as jobject
             } else if let Value::Reference(r) = result{
@@ -497,7 +497,7 @@ impl JNINativeInterface_ {
         debug!("CallStaticBooleanMethod: {} ({:?})", class_and_method.format(), args);
         vm.call_stack.create_and_push_call_frame(class_and_method, None, args, false);
         let res = vm.invoke_frames_until(javavm, stop_index).unwrap();
-        if let VMResultType::Ok(Some(result)) = res{
+        if let VMResultType::Successful(Some(result)) = res{
             if let Value::Integer(val) = result{
                 assert!(val == 0 || val == 1);
                 val as jboolean
@@ -544,7 +544,7 @@ impl JNINativeInterface_ {
         debug!("CallStaticVoidMethod: {} ({:?})", class_and_method.format(), args);
         vm.call_stack.create_and_push_call_frame(class_and_method, None, args, false);
         let res = vm.invoke_frames_until(javavm, stop_index).unwrap();
-        if let VMResultType::Ok(None) = res{
+        if let VMResultType::Successful(None) = res{
             //works
         } else {
             unimplemented!("CallStaticVoidMethod: expected no return value but got: {:?}", res)
@@ -620,7 +620,7 @@ impl JNINativeInterface_ {
 
         println!("NATIVE: NewString: '{}' , {:?}", unicode_str, raw_slice);
         let vm = unsafe{&*(*env).vm};
-        let str = vm.try_new_string_object(unicode_str).map_err(|e| VmError::Native(e.to_string())).unwrap();
+        let str = vm.try_new_string_object(unicode_str.as_str()).map_err(|e| VmError::Native(e.to_string())).unwrap();
         str.id
     }
     pub fn GetStringLength(env: *mut JNIEnv, str: jstring) -> jsize{
@@ -639,7 +639,7 @@ impl JNINativeInterface_ {
         unsafe {
             let utf_r = CStr::from_ptr(utf).to_owned().into_string().map_err(|e| VmError::Native(e.to_string())).unwrap();
             let vm = &*(*env).vm;
-            let str = vm.try_new_string_object(utf_r).map_err(|e| VmError::Native(e.to_string())).unwrap();
+            let str = vm.try_new_string_object(utf_r.as_str()).map_err(|e| VmError::Native(e.to_string())).unwrap();
             str.id
         }
     }

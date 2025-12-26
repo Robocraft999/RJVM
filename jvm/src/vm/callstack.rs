@@ -47,6 +47,7 @@ impl<'a> CallStack<'a> {
         self.locals_stack.borrow_mut().push(locals);
         self.operand_stacks.borrow_mut().push(Vec::with_capacity(class_and_method.get_max_stack_size()));
         self.pcs.borrow_mut().push(ProgramCounter(0));
+        trace!("Pushing frame for: {}", class_and_method.format());
         let frame = CallFrame{
             class_and_method,
             should_push_return,
@@ -58,6 +59,7 @@ impl<'a> CallStack<'a> {
         self.locals_stack.borrow_mut().pop();
         self.operand_stacks.borrow_mut().pop();
         self.pcs.borrow_mut().pop();
+        trace!("Popping frame for: {}", self.frames.borrow().last().unwrap().class_and_method.format());
         self.frames.borrow_mut().pop().unwrap()
     }
 
