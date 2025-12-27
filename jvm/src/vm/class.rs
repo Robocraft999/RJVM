@@ -5,7 +5,7 @@ use crate::attribute::{BootstrapMethods, VisibleRuntimeAnnotations};
 use crate::constants::{ConstantPool, ConstantPoolEntry};
 use crate::field_info::{FieldInfo, FieldType};
 use crate::method_info::MethodInfo;
-use crate::vm::value::Value;
+use crate::vm::value::{Reference, Value};
 
 #[derive()]
 pub struct Class<'a>{
@@ -69,7 +69,7 @@ impl<'a> Class<'a>{
         self.constants.0.get(index as usize - 1).cloned()
     }
 
-    pub fn get_constant_as_value(&self, index: u16) -> Value{
+    pub fn get_constant_as_value(&'a self, index: u16, null: Value<'a>) -> Value<'a>{
         let optional_constant = self.get_constant(index);
         if let Some(constant) = optional_constant{
             match constant {
@@ -77,7 +77,7 @@ impl<'a> Class<'a>{
                 ConstantPoolEntry::Long(value) => Value::Long(value),
                 ConstantPoolEntry::Float(value) => Value::Float(value),
                 ConstantPoolEntry::Double(value) => Value::Double(value),
-                ConstantPoolEntry::String(index) => Value::Null,
+                ConstantPoolEntry::String(_index) => null, //FIXME resolve string and allocate
                 _ => {panic!("Constant of type {constant:?} not supported")}
             }
         } else {
@@ -85,18 +85,18 @@ impl<'a> Class<'a>{
         }
     }
 
-    pub fn get_fields(&self) -> Vec<Value>{
+    pub fn get_fields(&'a self, null: Reference<'a>) -> Vec<Value<'a>>{
         let local_values = (self.first_field_index..self.transitive_field_count)
             .map(|index| {
                 let field = self.field_at_index(index).unwrap();
                 if let Some(constant_value) = field.constant_value.clone(){
-                    self.get_constant_as_value(constant_value.constant_index)
+                    self.get_constant_as_value(constant_value.constant_index, Value::Reference(null))
                 } else {
-                    field.field_type.get_default_value()
+                    field.field_type.get_default_value(Value::Reference(null))
                 }
             });
         let mut superclass_values = match self.superclass {
-            Some(super_class) => super_class.get_fields(),
+            Some(super_class) => super_class.get_fields(null),
             None => Vec::new()
         };
 
@@ -167,8 +167,8 @@ impl<'a> ClassAndMethod<'a>{
         }
     }
 
-    pub fn get_constant_as_value(&self, index: u16) -> Value<'a>{
-        self.class.get_constant_as_value(index)
+    pub fn get_constant_as_value(&self, index: u16, null: Value<'a>) -> Value<'a>{
+        self.class.get_constant_as_value(index, null)
     }
 
     pub fn get_constant_method_info_descriptor(&self, index: u16) -> Option<(String, String, String)>{

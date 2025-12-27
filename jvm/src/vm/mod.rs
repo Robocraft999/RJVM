@@ -525,8 +525,10 @@ impl<'a> VM<'a>{
 
     pub fn extract_string_from_object(value: &Value<'a>) -> VMResult<String>{
         if let Value::Reference(reference) = value{
-            let chars = reference.get_field(0);
-            return Self::extract_string_from_char_arr(&chars);
+            if !reference.is_null() {
+                let chars = reference.get_field(0);
+                return Self::extract_string_from_char_arr(&chars);
+            }
         }
         Err(VmError::ValidationError(format!( "Expected String Object but found: {:?}", value)))
     }

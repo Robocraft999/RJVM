@@ -276,7 +276,7 @@ fn delegate_init_system_props<'a>(vm: &VM<'a>, java_vm: &JavaVM, _ : ClassRef<'a
     }
     let res = vm.invoke_frames_until(java_vm, current_frame_index)?;
     //Ok(VMResultType::NeedsClassInit(frames, false))
-    non_failing_some(Value::Null)
+    non_failing_some(vm.null())
 }
 
 fn delegate_system_map_library_name<'a>(vm: &VM<'a>, java_vm: &JavaVM, _ : ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
@@ -327,7 +327,7 @@ fn delegate_get_component_type<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a
 fn delegate_get_classloader<'a>(vm: &VM<'a>, _: &JavaVM, _ : ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
     //TODO check
     debug!("getClassLoader0");
-    non_failing_some(Value::Null)
+    non_failing_some(vm.null())
 }
 
 fn delegate_desired_assertion_status<'a>(vm: &VM<'a>, _: &JavaVM, _ : ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
@@ -432,7 +432,7 @@ fn delegate_get_super_class<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, 
                 let super_class_object = wrap_init!(vm, java_vm, vm.new_class_object_by_name(super_class.name.as_str())?);
                 non_failing_some(Value::Reference(super_class_object))
             }
-            None => non_failing_some(Value::Null)
+            None => non_failing_some(vm.null())
         }
 
     } else {
@@ -442,7 +442,27 @@ fn delegate_get_super_class<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, 
 
 fn delegate_for_name0<'a>(vm: &VM<'a>, java_vm: &JavaVM,  _: ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
     debug!("forName0");
-    if let Some(name) = args.get(0) {
+    let exception = |name: &str| {
+        let exception_class_name = String::from("java/lang/ClassNotFoundException");
+        let exception_message = format!("Class '{}' was not found", name);
+
+        let exception_class = wrap_init!(vm, java_vm, vm.get_or_resolve_class(&exception_class_name)?);
+        let exception_object = vm.try_new_object(&exception_class_name)?;
+
+        let details = wrap_init!(vm, java_vm, vm.new_string_object(exception_message.as_str())?);
+        //detailsMessage
+        exception_object.set_field(2, Value::Reference(details));
+
+        let prev = vm.caught_exception.replace(
+            Some((
+                exception_message,
+                String::from("java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/Class;"),
+                Value::Reference(exception_object)
+            )));
+        Ok(VMResultType::ExceptionThrown)
+    };
+
+    if let Some(name) = args.get(0) && !name.is_null(){
         let name = VM::extract_string_from_object(&name)?;
         let name = name.replace(".", "/");
         let current_frame_index = vm.call_stack.len() as isize -1;
@@ -458,30 +478,12 @@ fn delegate_for_name0<'a>(vm: &VM<'a>, java_vm: &JavaVM,  _: ClassRef<'a>, _: Op
                 Ok(VMResultType::ExceptionThrown)
             }
             Err(VmError::ParseError(ClassParseError::ResolveError(_))) => {
-                let exception_class_name = String::from("java/lang/ClassNotFoundException");
-                let exception_message = format!("Class {} was not found", name);
-
-                let exception_class = wrap_init!(vm, java_vm, vm.get_or_resolve_class(&exception_class_name)?);
-                let exception_object = vm.try_new_object(&exception_class_name)?;
-
-                let details = wrap_init!(vm, java_vm, vm.new_string_object(exception_message.as_str())?);
-                //detailsMessage
-                exception_object.set_field(2, Value::Reference(details));
-                
-                let prev = vm.caught_exception.replace(
-                    Some((
-                        exception_message,
-                        String::from("java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/Class;"),
-                        Value::Reference(exception_object)
-                    )));
-                Ok(VMResultType::ExceptionThrown)
+                exception(name.as_str())
             }
             Err(err) => Err(err)
         }
-        //let class = vm.find_class_by_name(name)?;
-
     } else {
-        Err(VmError::ValidationError("no name".to_string()))
+        exception("")
     }
 }
 
@@ -538,7 +540,7 @@ fn delegate_find_loaded_class0<'a>(vm: &VM<'a>, java_vm: &JavaVM,  _: ClassRef<'
         if vm.class_manager.find_class_by_name(class_name.as_str()).is_some() {
             non_failing_some(Value::Reference(wrap_init!(vm, java_vm, vm.new_class_object_by_name(class_name.as_str())?)))
         } else {
-            non_failing_some(Value::Null)
+            non_failing_some(vm.null())
         }
     } else {
         Err(VmError::ValidationError("expected a string reference".to_string()))
@@ -552,7 +554,7 @@ fn delegate_find_bootstrap_class<'a>(vm: &VM<'a>, java_vm: &JavaVM,  _: ClassRef
         if vm.class_manager.find_class_by_name(class_name.as_str()).is_some() {
             non_failing_some(Value::Reference(wrap_init!(vm, java_vm, vm.new_class_object_by_name(class_name.as_str())?)))
         } else {
-            non_failing_some(Value::Null)
+            non_failing_some(vm.null())
         }
     } else {
         Err(VmError::ValidationError("expected a string reference".to_string()))
@@ -668,9 +670,11 @@ fn delegate_fill_in_stacktrace<'a>(_: &VM<'a>, _: &JavaVM, _ : ClassRef<'a>, obj
     Err(VmError::ValidationError("Expected a Throwable".to_string()))
 }
 
+const ARRAY_BASE_OFFSET: usize = 16;
+
 fn delegate_array_base_offset<'a>(_: &VM<'a>, _: &JavaVM, _ : ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
     if let Some(Value::Reference(class)) = args.get(0){
-        non_failing_some(Value::Integer(16))
+        non_failing_some(Value::Integer(ARRAY_BASE_OFFSET as i32))
     } else {
         Err(VmError::ValidationError("Expected a class object reference".to_string()))
     }
@@ -717,7 +721,7 @@ fn delegate_get_object_volatile<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'
     debug!("get_object_volatile args: {:?}", args);
     if let (Some(Value::Reference(o)), Some(Value::Long(index))) = (args.get(0), args.get(1)) {
         if o.is_array(){
-            return non_failing_some(o.get_element(*index as usize  - 16));
+            return non_failing_some(o.get_element(*index as usize  - ARRAY_BASE_OFFSET));
         }
         let field_value = if o.class_name == "java/lang/Class"{
             let class_ref = wrap_init!(vm, java_vm, vm.extract_class_from_class_object(o)?);
@@ -745,10 +749,21 @@ fn delegate_static_field_base<'a>(_: &VM<'a>, _: &JavaVM, _: ClassRef<'a>, _: Op
 
 fn delegate_compare_and_swap_object<'a>(_: &VM<'a>, _: &JavaVM, _ : ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
     if let (Some(Value::Reference(o)), Some(Value::Long(offset)), Some(Value::Reference(expected)), Some(Value::Reference(x))) = (args.get(0), args.get(1), args.get(3), args.get(4)) {
-        if let Value::Reference(current) = o.get_field(*offset as usize){
-            if current.id == expected.id{
-                o.set_field(*offset as usize, Value::Reference(*x));
-                return non_failing_some(Value::from(true));
+        if o.is_null(){
+            return Err(VmError::ValidationError("Expected an object or array but found null".to_string()))
+        } else if o.is_object(){
+            if let Value::Reference(current) = o.get_field(*offset as usize){
+                if current.id == expected.id{
+                    o.set_field(*offset as usize, Value::Reference(*x));
+                    return non_failing_some(Value::from(true));
+                }
+            }
+        } else if o.is_array(){
+            if let Value::Reference(current) = o.get_element(*offset as usize - ARRAY_BASE_OFFSET){
+                if current.id == expected.id{
+                    o.set_element(*offset as usize - ARRAY_BASE_OFFSET, Value::Reference(*x));
+                    return non_failing_some(Value::from(true));
+                }
             }
         }
     }
@@ -768,7 +783,7 @@ fn delegate_compare_and_swap_int<'a>(_: &VM<'a>, _: &JavaVM, _ : ClassRef<'a>, _
 }
 
 fn delegate_compare_and_swap_long<'a>(_: &VM<'a>, _: &JavaVM, _ : ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
-    if let (Some(Value::Reference(o)), Some(Value::Long(offset)), Some(Value::Long(expected)), Some(Value::Long(x))) = (args.get(0), args.get(1), args.get(3), args.get(4)) {
+    if let (Some(Value::Reference(o)), Some(Value::Long(offset)), Some(Value::Long(expected)), Some(Value::Long(x))) = (args.get(0), args.get(1), args.get(3), args.get(5)) {
         if let Value::Long(current) = o.get_field(*offset as usize){
             if current == *expected{
                 o.set_field(*offset as usize, Value::Long(*x));
@@ -887,7 +902,7 @@ fn delegate_current_thread<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, _
         group.set_field(6, Value::Integer(0));
         group.set_field(1, Value::Reference(group_name));
         group.set_field(2, Value::Integer(10));
-        group.set_field(0, Value::Null);
+        group.set_field(0, vm.null());
 
         //let group_init = vm.try_resolve_class_method("java/lang/ThreadGroup", "<init>", "()V")?;
         //vm.invoke_new_frame(group_init, Some(group), vec![])?;
@@ -919,8 +934,8 @@ fn delegate_environ<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, _: Optio
     non_failing_some(Value::Reference(array_ref))
 }
 
-fn delegate_get_stack_access_control_context<'a>(_: &VM<'a>, _: &JavaVM, _: ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
-    non_failing_some(Value::Null)
+fn delegate_get_stack_access_control_context<'a>(vm: &VM<'a>, _: &JavaVM, _: ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
+    non_failing_some(vm.null())
 }
 
 fn delegate_do_privileged<'a>(vm: &VM<'a>, java_vm: &JavaVM, class: ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{

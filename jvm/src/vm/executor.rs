@@ -50,7 +50,7 @@ pub fn execute_current_block<'a>(vm: &VM<'a>) -> Option<VMPartialResult<Option<V
         InstructionBlock::Single(instruction) => {
             match instruction{
                 Instruction::ACONST_NULL => {
-                    vm.call_stack.push_operand_value(Value::Null);
+                    vm.call_stack.push_operand_value(vm.null());
                 }
                 Instruction::ICONSTM1 => x_const(vm, Value::Integer(-1)),
                 Instruction::ICONST0 => x_const(vm, Value::Integer(0)),
@@ -448,7 +448,6 @@ pub fn execute_current_block<'a>(vm: &VM<'a>) -> Option<VMPartialResult<Option<V
                                 vm.call_stack.set_pc(*target);
                             }
                         }
-                        (Value::Null, Value::Null) => vm.call_stack.set_pc(*target),
                         _ => {}
                     };
                 }
@@ -462,7 +461,6 @@ pub fn execute_current_block<'a>(vm: &VM<'a>) -> Option<VMPartialResult<Option<V
                                 vm.call_stack.set_pc(*target);
                             }
                         }
-                        (Value::Reference(_), Value::Null) | (Value::Null, Value::Reference(_)) => vm.call_stack.set_pc(*target),
                         _ => {}
                     };
                 }
@@ -594,10 +592,8 @@ pub fn execute_current_block<'a>(vm: &VM<'a>) -> Option<VMPartialResult<Option<V
                         if let ReferenceType::Array(_, _, content) = &reference.reference_type{
                             vm.call_stack.push_operand_value(Value::Integer(content.borrow().len() as i32));
                         } else {
-                            return Some(Err(VmError::ValidationError("Expected an Array ref but found: Object ref".to_string())))
+                            return Some(Err(VmError::ValidationError(format!("Expected an Array ref but found: {:?}", reference))))
                         }
-                    } else if let Some(Value::Null) = popped{
-                        return Some(Err(VmError::JavaException(JavaError::NullPointerException("Expected an array".to_string()))))
                     } else {
                         return Some(Err(VmError::ValidationError(format!("Expected an array ref but found: {:?}", &popped))))
                     }
@@ -607,7 +603,7 @@ pub fn execute_current_block<'a>(vm: &VM<'a>) -> Option<VMPartialResult<Option<V
                     debug!("ATHROW");
                     if let Some(Value::Reference(error)) = vm.call_stack.pop_operand_value(){
                         let string_value = error.get_field(2);
-                        let string = VM::extract_string_from_object(&string_value).unwrap();
+                        let string = if !string_value.is_null() {VM::extract_string_from_object(&string_value).unwrap()} else {String::new()};
                         let exception_name = vm.class_manager.find_class_by_id(error.class_id).unwrap().name.clone();
                         #[cfg(feature = "debug")]
                         {
@@ -628,7 +624,7 @@ pub fn execute_current_block<'a>(vm: &VM<'a>) -> Option<VMPartialResult<Option<V
                     let of_class = get_or_init_option!(vm.get_or_resolve_class(get_constant_printable(&class_and_method.class.constants, *constant_index).as_str()));
 
                     let object = vm.call_stack.pop_operand_value().unwrap();
-                    if object == Value::Null{
+                    if object.is_null(){
                         vm.call_stack.push_operand_value(Value::from(false));
                         return None;
                     }
@@ -670,16 +666,28 @@ pub fn execute_current_block<'a>(vm: &VM<'a>) -> Option<VMPartialResult<Option<V
                 Instruction::IFNULL(target) => {
                     let reference = vm.call_stack.pop_operand_value().unwrap();
                     match reference {
-                        Value::Null => {debug!("+IFNULL is NULL"); vm.call_stack.set_pc(*target);}
-                        Value::Reference(_) => {debug!("-IFNULL is reference");}
+                        Value::Reference(r) => {
+                            if r.is_null(){
+                                debug!("+IFNULL is NULL");
+                                vm.call_stack.set_pc(*target);
+                            } else {
+                                debug!("-IFNULL is reference");
+                            }
+                        }
                         _ => {warn!("?IFNULL {:?} is this valid?", reference.clone())}
                     }
                 }
                 Instruction::IFNONNULL(target) => {
                     let reference = vm.call_stack.pop_operand_value().unwrap();
                     match reference {
-                        Value::Null => {debug!("-IFNONNULL is NULL");}
-                        Value::Reference(_) => {debug!("+IFNONNULL is reference"); vm.call_stack.set_pc(*target);}
+                        Value::Reference(r) => {
+                            if r.is_null(){
+                                debug!("-IFNONNULL is NULL");
+                            } else {
+                                debug!("+IFNONNULL is reference");
+                                vm.call_stack.set_pc(*target);
+                            }
+                        }
                         _ => {warn!("?IFNONNULL {:?} is this valid?", reference.clone())}
                     }
                 }
@@ -791,9 +799,6 @@ fn aload<'a>(vm: &VM<'a>, index: usize) -> VMResult<()>{
     match popped {
         Value::Reference(reference) => {
             debug!("ALOAD{} {:?}", index, reference);
-        }
-        Value::Null => {
-            debug!("ALOAD{} (loaded null)", index);
         }
         _ => return Err(VmError::ValidationError(format!("ALOAD{} failed", index)))
     }
@@ -1036,7 +1041,7 @@ fn get_constant_as_value<'a>(vm: &VM<'a>, index: u16) -> VMPartialResult<Value<'
             } else {
                 //return Err(ValidationError("Expected string".to_string()));
                 warn!("expected but didnt find string object");
-                Value::Null
+                vm.null()
             }
         }
         ConstantPoolEntry::Class(name_index) => {
@@ -1045,7 +1050,7 @@ fn get_constant_as_value<'a>(vm: &VM<'a>, index: u16) -> VMPartialResult<Value<'
                 Value::Reference(class_object)
             } else {
                 warn!("expected but didnt find string object");
-                Value::Null
+                vm.null()
             }
         }
         ConstantPoolEntry::InvokeDynamic(bootstrap_method_index, name_and_type_index) => {
@@ -1053,7 +1058,7 @@ fn get_constant_as_value<'a>(vm: &VM<'a>, index: u16) -> VMPartialResult<Value<'
                 println!("{:?} {:?}", class_and_method.class.get_constant(name_index), class_and_method.class.get_constant(type_index))
             }
             println!("{:?}", class_and_method.class.bootstrap_methods.0.get(bootstrap_method_index as usize));
-            Value::Null
+            vm.null()
         }
         _ => unimplemented!("Constant of type {constant_value:?} cannot be converted to a value")
     };
@@ -1074,7 +1079,7 @@ fn execute_create_array<'a>(vm: &VM<'a>, array_field_type: FieldType, dims: usiz
             }
             let mut local_content = Vec::new();
             if i == 0{
-                local_content = vec![component_type.get_default_value(); current_dim as usize];
+                local_content = vec![component_type.get_default_value(vm.null()); current_dim as usize];
                 content = local_content;
                 continue
             }

@@ -470,9 +470,7 @@ impl JNINativeInterface_ {
         vm.call_stack.create_and_push_call_frame(class_and_method, None, args, false);
         let res = vm.invoke_frames_until(javavm, stop_index).unwrap();
         if let VMResultType::Successful(Some(result)) = res{
-            if let Value::Null = result{
-                0 as jobject
-            } else if let Value::Reference(r) = result{
+            if let Value::Reference(r) = result{
                 r.id as jobject
             } else {
                 unreachable!("CallStaticObjectMethodV: expected an object or null return value")

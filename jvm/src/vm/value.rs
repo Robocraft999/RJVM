@@ -15,16 +15,19 @@ pub enum Value<'a>{
     Float(f32),
     Double(f64),
     Dummy,
-
-    Null,
 }
 
 impl Debug for Value<'_>{
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Value::Reference(rv) => write!(f,"{:?}", rv),
+            Value::Reference(rv) => {
+                if rv.is_null(){
+                    write!(f, "VNull")
+                } else {
+                    write!(f,"{:?}", rv)
+                }
+            },
             Value::Uninitialized => write!(f, "VUninitialized"),
-            Value::Null => write!(f, "VNull"),
             Value::Integer(value) => write!(f, "VInt ({})", value),
             Value::Long(value) => write!(f, "VLong ({})", value),
             Value::Float(value) => write!(f, "VFloat ({:.8})", value),
@@ -84,7 +87,14 @@ impl<'a> Value<'a>{
             Value::Float(_) => 1,
             Value::Double(_) => 2,
             Value::Dummy => -1,
-            Value::Null => 1,
+        }
+    }
+
+    pub fn is_null(&self) -> bool{
+        if let Value::Reference(r) = self{
+            r.is_null()
+        } else {
+            false
         }
     }
 }
@@ -156,11 +166,17 @@ impl<'a> ReferenceValue<'a>{
         }
     }
 
+    pub fn is_null(&self) -> bool{
+        self.id == 0
+    }
+
     fn get_components_printable(&self) -> Vec<String>{
         let object = |field: &Value| match field {
             Value::Reference(rv) => {
                 if rv.class_name == "java/lang/String" {
                     format!("{}:{}:{:?}->'{}'", rv.id, rv.class_name, rv.class_id.0, VM::extract_string_from_object(field).unwrap_or("VMError".to_string()))
+                } else if rv.id == 0{
+                    "Null".to_string()
                 } else {
                     format!("{}:{}:{:?}", rv.id, rv.class_name, rv.class_id.0)
                 }

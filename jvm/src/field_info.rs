@@ -95,7 +95,7 @@ impl FieldType {
         }
     }
 
-    pub fn get_default_value<'a>(&self) -> Value<'a> {
+    pub fn get_default_value<'a>(&self, null: Value<'a>) -> Value<'a> {
         match self {
             FieldType::Primitive(primitive) => {
                 match primitive {
@@ -109,8 +109,8 @@ impl FieldType {
                     PrimitiveType::Double => Value::Double(0f64),
                 }
             }
-            FieldType::Object(_) => Value::Null,
-            FieldType::Array(_, _) => Value::Null,
+            FieldType::Object(_) => null,
+            FieldType::Array(_, _) => null,
         }
     }
 

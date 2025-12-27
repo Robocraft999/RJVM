@@ -7,6 +7,7 @@ use typed_arena::Arena;
 pub struct ObjectAllocator<'a>{
     arena: Arena<ReferenceValue<'a>>,
     next_object_id: RefCell<u32>,
+    pub null: Reference<'a>,
 }
 
 impl<'a> ObjectAllocator<'a>{
@@ -18,9 +19,12 @@ impl<'a> ObjectAllocator<'a>{
             class_name: String::from("xXxNullxXx"),
             reference_type: ReferenceType::Object(RefCell::new(Vec::new())),
         });
+        let null_ptr: *const ReferenceValue = _null;
+        let null = unsafe{&*null_ptr};
         ObjectAllocator{
             arena,
             next_object_id: RefCell::new(1),
+            null
         }
     }
 
@@ -34,7 +38,7 @@ impl<'a> ObjectAllocator<'a>{
     }
 
     fn object_from_class(&self, class: ClassRef<'a>) -> ReferenceValue<'a>{
-        let fields = class.get_fields();
+        let fields = class.get_fields(self.null);
         ReferenceValue{
             id: *self.next_object_id.borrow(),
             class_id: class.id,
