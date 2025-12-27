@@ -77,7 +77,7 @@ pub fn run() {
     println!("Booting up VM");
     let vm = Box::pin(VM::new(class_path));
 
-    simple_logger::SimpleLogger::new().with_level(LevelFilter::Info).without_timestamps().init().unwrap();
+    //simple_logger::SimpleLogger::new().with_level(LevelFilter::Error).without_timestamps().init().unwrap();
 
     /*unsafe {
         use libffi::middle::{Closure, Cif, Type, Arg};
@@ -100,7 +100,7 @@ pub fn run() {
     //vm.class_manager.get_or_resolve_class("Empty").expect("TODO: panic message");
     //run_and_catch_method(&mut vm, "Test", "main", "([Ljava/lang/String;)V");
 
-    //simple_logger::SimpleLogger::new().with_level(LevelFilter::Warn).without_timestamps().init().unwrap();
+    simple_logger::SimpleLogger::new().with_level(LevelFilter::Warn).without_timestamps().init().unwrap();
 
     let args = env::args().skip(1).map(|s| Value::Reference(app.vm.try_new_string_object(&s).unwrap())).collect();
     let args_array = app.vm.try_new_array(1, FieldType::Object("java/lang/String".to_string()).to_array_field_type(1), RefCell::new(args)).unwrap();

@@ -64,6 +64,8 @@ pub fn execute_current_block<'a>(vm: &VM<'a>) -> Option<VMPartialResult<Option<V
                 Instruction::FCONST0 => x_const(vm, Value::Float(0.0)),
                 Instruction::FCONST1 => x_const(vm, Value::Float(1.0)),
                 Instruction::FCONST2 => x_const(vm, Value::Float(2.0)),
+                Instruction::DCONST0 => x_const(vm, Value::Double(0.0)),
+                Instruction::DCONST1 => x_const(vm, Value::Double(1.0)),
                 Instruction::BIPUSH(value) => {
                     debug!("BIPUSH {:?}", value);
                     vm.call_stack.push_operand_value(Value::Integer(*value as i32))
@@ -151,7 +153,7 @@ pub fn execute_current_block<'a>(vm: &VM<'a>) -> Option<VMPartialResult<Option<V
                 Instruction::ASTORE2 => wrap_error!(astore(vm, 2)),
                 Instruction::ASTORE3 => wrap_error!(astore(vm, 3)),
 
-                Instruction::IASTORE | Instruction::AASTORE | Instruction::CASTORE | Instruction::BASTORE | Instruction::SASTORE => {
+                Instruction::IASTORE | Instruction::LASTORE | Instruction::FASTORE | Instruction::DASTORE | Instruction::AASTORE | Instruction::BASTORE | Instruction::CASTORE | Instruction::SASTORE => {
                     //TODO validate type of value to fit instruction
                     let value = vm.call_stack.pop_operand_value().unwrap();
                     let index = vm.call_stack.pop_operand_value().unwrap().expect_int().unwrap();
@@ -193,6 +195,22 @@ pub fn execute_current_block<'a>(vm: &VM<'a>) -> Option<VMPartialResult<Option<V
                     vm.call_stack.push_operand_value(value.clone());
                     vm.call_stack.push_operand_value(value2);
                     vm.call_stack.push_operand_value(value);
+                }
+                Instruction::DUPX2 => {
+                    debug!("DUPX2");
+                    let value1 = vm.call_stack.pop_operand_value().unwrap();
+                    let value2 = vm.call_stack.pop_operand_value().unwrap();
+                    if value2.get_computational_type() == 1{
+                        let value3 = vm.call_stack.pop_operand_value().unwrap();
+                        vm.call_stack.push_operand_value(value1.clone());
+                        vm.call_stack.push_operand_value(value3);
+                        vm.call_stack.push_operand_value(value2);
+                        vm.call_stack.push_operand_value(value1);
+                    } else {
+                        vm.call_stack.push_operand_value(value1.clone());
+                        vm.call_stack.push_operand_value(value2);
+                        vm.call_stack.push_operand_value(value1);
+                    }
                 }
                 Instruction::DUP2 => {
                     debug!("DUP2");
@@ -467,6 +485,17 @@ pub fn execute_current_block<'a>(vm: &VM<'a>) -> Option<VMPartialResult<Option<V
 
                 Instruction::GOTO(target) => vm.call_stack.set_pc(*target),
 
+                Instruction::TABLESWITCH(default, low, high, offsets) => {
+                    let index = vm.call_stack.pop_operand_value().unwrap().expect_int().unwrap();
+                    if index < *low || index > *high{
+                        debug!("TABLESWITCH default {}", default);
+                        vm.call_stack.set_pc((current_pc.0 as i32 + default) as u16);
+                    } else {
+                        let offset = offsets[(index - low) as usize];
+                        debug!("TABLESWITCH[{}]: {}", index, offset);
+                        vm.call_stack.set_pc((current_pc.0 as i32 + offset) as u16);
+                    }
+                }
                 Instruction::LOOKUPSWITCH(default, pair_stream) => {
                     let popped = vm.call_stack.pop_operand_value().unwrap().expect_int().unwrap();
                     debug!("LOOKUPSWITCH: {}", popped);
@@ -660,6 +689,12 @@ pub fn execute_current_block<'a>(vm: &VM<'a>) -> Option<VMPartialResult<Option<V
                         debug!("MONITOREXIT")
                     } else {
                         warn!("No object to lock")
+                    }
+                }
+
+                Instruction::WIDE(op, index, const_option) => {
+                    match Instruction::from_repr(*op).unwrap(){
+                        unknown => unreachable!("WIDE with op: {:?} not executable", unknown)
                     }
                 }
 

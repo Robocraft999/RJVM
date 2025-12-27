@@ -92,6 +92,17 @@ pub fn parse_instruction(code_bytes: &Vec<u8>, mut pc: usize) -> Result<(Instruc
                 }
                 LOOKUPSWITCH(default, offsets)
             }
+            WIDE(..) => {
+                let ins = parse_u1(code_bytes, &mut pc)?;
+                let index = parse_u2(code_bytes, &mut pc)?;
+                //IINC
+                let value = if ins == 0x84{
+                    Some(parse_u2(code_bytes, &mut pc)?)
+                } else {
+                    None
+                };
+                WIDE(ins, index, value)
+            }
             INVOKEVIRTUAL(_) => INVOKEVIRTUAL(parse_u2(code_bytes, &mut pc)?),
             INVOKESPECIAL(_) => INVOKESPECIAL(parse_u2(code_bytes, &mut pc)?),
             INVOKESTATIC(_) => INVOKESTATIC(parse_u2(code_bytes, &mut pc)?),
@@ -149,17 +160,17 @@ pub fn parse_instruction(code_bytes: &Vec<u8>, mut pc: usize) -> Result<(Instruc
             ACONST_NULL |
             ICONST0 | ICONST1 | ICONST2 | ICONST3 | ICONST4 | ICONST5 | ICONSTM1 |
             LCONST0 | LCONST1 |
-            FCONST0 | FCONST1 |
+            FCONST0 | FCONST1 | FCONST2 |
             DCONST0 | DCONST1 |
             ISTORE0 | ISTORE1 | ISTORE2 | ISTORE3 |
             ASTORE0 | ASTORE1 | ASTORE2 | ASTORE3 | IASTORE | BASTORE | CASTORE | SASTORE | LASTORE | FASTORE | DASTORE | AASTORE |
             LSTORE0 | LSTORE1 | LSTORE2 | LSTORE3 |
             FSTORE0 | FSTORE1 | FSTORE2 | FSTORE3 |
             DSTORE0 | DSTORE1 | DSTORE2 | DSTORE3 |
-            DUP | DUPX1 | DUP2 | DUP2X1 | LCMP | ATHROW |
+            DUP | DUPX1 | DUPX2 | DUP2 | DUP2X1 | LCMP | ATHROW |
             IADD | LADD | DADD | FADD | ISUB | LSUB | FSUB | DSUB | IMUL | LMUL | FMUL | DMUL | IDIV | LDIV | FDIV | DDIV |
             ARRAYLENGTH | POP | NOP | POP2 | SWAP |
-            LUSHR | LSHR | LSHL | ISHL | ISHR | IUSHR | IOR | LOR | IXOR | LXOR | IAND | LAND | INEG | LNEG | FNEG | IREM | LREM |
+            LUSHR | LSHR | LSHL | ISHL | ISHR | IUSHR | IOR | LOR | IXOR | LXOR | IAND | LAND | INEG | LNEG | FNEG | DNEG | IREM | LREM |
             MONITORENTER | MONITOREXIT |
             I2L | I2F | I2D | I2B | I2C | I2S | L2I | L2F | L2D | F2I | F2L | F2D | D2I | D2L | D2F |
             FCMPG | FCMPL | DCMPL | DCMPG => instruction,

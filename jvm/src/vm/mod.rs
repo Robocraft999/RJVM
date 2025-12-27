@@ -104,7 +104,6 @@ impl<'a> VM<'a>{
         loop {
             let frame_amount = self.call_stack.len();
             let frame_index = if frame_amount > 0 {frame_amount - 1} else {frame_amount};
-            let class_and_method = self.call_stack.get_class_and_method_cloned();
 
             // if an exception is caught, try to let the current frame handle it
             let mut clear_exception = false;
@@ -118,6 +117,8 @@ impl<'a> VM<'a>{
                     }
                     return Err(VmError::JavaException(JavaError::JavaExceptionThrown(thrown_class_name, message.to_owned(), origin.to_owned())));
                 }
+
+                let class_and_method = self.call_stack.get_class_and_method_cloned();
                 if class_and_method.method.is_native(){
                     self.call_stack.pop_call_frame();
                     debug!("Exception handler not in this native function {}", class_and_method.format());
@@ -142,6 +143,7 @@ impl<'a> VM<'a>{
                 }
             }
 
+            let class_and_method = self.call_stack.get_class_and_method_cloned();
             if clear_exception {
                 self.caught_exception.replace(None);
             }
@@ -606,6 +608,10 @@ impl<'a> VM<'a>{
 
     pub fn find_class_by_name(&self, name: &str) -> Option<ClassRef<'a>>{
         self.class_manager.find_class_by_name(name)
+    }
+
+    pub fn null(&self) -> Value<'a>{
+        Value::Reference(self.object_allocator.null)
     }
 }
 

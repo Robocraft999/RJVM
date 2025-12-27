@@ -254,6 +254,7 @@ fn delegate_init_system_props<'a>(vm: &VM<'a>, java_vm: &JavaVM, _ : ClassRef<'a
         ("user.dir", env::current_dir().unwrap().to_string_lossy().to_string()),
         ("user.home", env::home_dir().unwrap().to_string_lossy().to_string()),
         ("os.name", "Linux".to_string()),
+        ("java.awt.graphicsenv", "sun.awt.X11GraphicsEnvironment".to_owned())
     ];
     if env::consts::OS == "windows"{
         props = vec![
@@ -930,7 +931,20 @@ fn delegate_free_memory<'a>(_: &VM<'a>, _: &JavaVM, _: ClassRef<'a>, _: Option<R
 }
 
 fn delegate_environ<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
-    let array_ref = wrap_init!(vm, java_vm, vm.new_array(2, FieldType::Primitive(PrimitiveType::Byte).to_array_field_type(2), RefCell::new(Vec::new()))?);
+    let vars = vec![
+        ("DISPLAY", ":0")
+    ];
+    fn byte_array_from_str<'s>(vm: &VM<'s>, string: &str) -> VMResult<Reference<'s>>{
+        vm.try_new_array(1, FieldType::Primitive(PrimitiveType::Byte).to_array_field_type(1), RefCell::new(string.as_bytes().iter().map(|c| Value::Integer(*c as i32)).collect()))
+    }
+    let _ = wrap_init!(vm, java_vm, vm.new_array(1, FieldType::Primitive(PrimitiveType::Byte).to_array_field_type(1), RefCell::new(Vec::new()))?);
+    let values: Vec<Value> = vars.iter()
+        .flat_map(|(k, v)| vec![
+            Value::Reference(byte_array_from_str(vm, k).unwrap()),
+            Value::Reference(byte_array_from_str(vm, v).unwrap()),
+        ])
+        .collect();
+    let array_ref = wrap_init!(vm, java_vm, vm.new_array(2, FieldType::Primitive(PrimitiveType::Byte).to_array_field_type(2), RefCell::new(values.clone()))?);
     non_failing_some(Value::Reference(array_ref))
 }
 

@@ -63,10 +63,10 @@ impl <'a> Application<'a>{
                 error!("Error: {}", error);
                 println!("Frames:");
                 self.vm.call_stack.print_call_stack();
-                #[cfg(feature = "debug")]
+                /*#[cfg(feature = "debug")]
                 {
                     self.vm.debug_helper.exception_helper.print();
-                }
+                }*/
             }
         }
     }
@@ -91,10 +91,10 @@ impl <'a> Application<'a>{
                 panic!();
             }
         }
-        #[cfg(feature = "debug")]
+        /*#[cfg(feature = "debug")]
         {
             self.vm.debug_helper.exception_helper.print();
-        }
+        }*/
         println!("Init complete. Starting Main Program");
     }
 }
