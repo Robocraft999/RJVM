@@ -47,13 +47,13 @@ macro_rules! store_without_pop {
 }
 
 pub fn get_blocks(bytes: &Vec<u8>) -> BTreeMap<u16, InstructionBlock>{
-    let mut indices: Vec<u16> = Vec::new();
-    let mut code_to_instruction_map: HashMap<u16, Instruction> = HashMap::new();
+    let mut pcs: Vec<u16> = Vec::new();
+    let mut pc_to_instruction_map: HashMap<u16, Instruction> = HashMap::new();
     let mut labels: Vec<u16> = Vec::new();
-    let mut pc = 0;
+    let mut parse_pc = 0;
 
-    while pc < bytes.len(){
-        if let Ok((instruction, new_pc)) = parse_instruction(bytes, pc){
+    while parse_pc < bytes.len(){
+        if let Ok((instruction, new_parse_pc)) = parse_instruction(bytes, parse_pc){
             match instruction{
                 Instruction::GOTO(t) | Instruction::IF_ACMPEQ(t) | Instruction::IF_ACMPNE(t) | 
                 Instruction::IF_ICMPEQ(t) | Instruction::IF_ICMPGE(t) | Instruction::IF_ICMPGT(t) |
@@ -64,20 +64,20 @@ pub fn get_blocks(bytes: &Vec<u8>) -> BTreeMap<u16, InstructionBlock>{
                 => {labels.push(t);}
                 _ => {}
             }
-            code_to_instruction_map.insert(pc as u16, instruction);
-            indices.push(pc as u16);
-            pc = new_pc;
+            pc_to_instruction_map.insert(parse_pc as u16, instruction);
+            pcs.push(parse_pc as u16);
+            parse_pc = new_parse_pc;
         }
     }
     let mut blocks = BTreeMap::new();
-    let mut index_index = 0;
-    let num_indices = indices.len();
-    while index_index < num_indices{
-        let index = indices[index_index];
-        let next = indices.get(index_index+1).map(|i| code_to_instruction_map[i].clone());
+    let mut instruction_index = 0;
+    let num_instructions = pcs.len();
+    while instruction_index < num_instructions {
+        let pc = pcs[instruction_index];
+        let next = pcs.get(instruction_index +1).map(|i| pc_to_instruction_map[i].clone());
 
-        let instruction = code_to_instruction_map[&index].clone();
-        let (offset, block) = match instruction{
+        let instruction = pc_to_instruction_map[&pc].clone();
+        let (instruction_offset, block) = match instruction{
             //AstoreWithoutPop
             Instruction::ASTORE(idx) => {
                 if let Some(Instruction::ALOAD(idx2)) = next{
@@ -108,13 +108,13 @@ pub fn get_blocks(bytes: &Vec<u8>) -> BTreeMap<u16, InstructionBlock>{
             //Instruction::ACONST_NULL => const_ret!(Instruction::ARETURN, Value::Null, next, InstructionBlock::Single(instruction)),
             instruction => {(1, InstructionBlock::Single(instruction))}
         };
-        let end_index = if index_index + offset < num_indices{indices[index_index + offset]} else {indices[num_indices-1]};
-        if labels.iter().any(|&l| l > index && l <= end_index){
-            blocks.insert(index, InstructionBlock::Single(code_to_instruction_map[&index].clone()));
-            index_index += 1;
+        let end_pc = if instruction_index + instruction_offset < num_instructions { pcs[instruction_index + instruction_offset]} else { u16::MAX };
+        if labels.iter().any(|&label_pc| label_pc > pc && label_pc < end_pc){
+            blocks.insert(pc, InstructionBlock::Single(pc_to_instruction_map[&pc].clone()));
+            instruction_index += 1;
         } else {
-            blocks.insert(index, block);
-            index_index += offset;
+            blocks.insert(pc, block);
+            instruction_index += instruction_offset;
         }
     }
     blocks
