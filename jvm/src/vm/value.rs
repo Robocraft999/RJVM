@@ -175,6 +175,8 @@ impl<'a> ReferenceValue<'a>{
             Value::Reference(rv) => {
                 if rv.class_name == "java/lang/String" {
                     format!("{}:{}:{:?}->'{}'", rv.id, rv.class_name, rv.class_id.0, VM::extract_string_from_object(field).unwrap_or("VMError".to_string()))
+                } else if rv.class_name == "[C"{
+                    format!("{}:{}:{:?}->'{}'", rv.id, rv.class_name, rv.class_id.0, VM::extract_string_from_char_arr(field).unwrap_or("VMError".to_string()))
                 } else if rv.id == 0{
                     "Null".to_string()
                 } else {
