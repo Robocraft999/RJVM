@@ -3,7 +3,7 @@ use std::hash::Hash;
 use crate::access_flags::{ClassFlag, ClassFlags, MethodFlag};
 use crate::attribute::{BootstrapMethods, VisibleRuntimeAnnotations};
 use crate::constants::{ConstantPool, ConstantPoolEntry};
-use crate::field_info::{FieldInfo, FieldType};
+use crate::field_info::{native_escape, native_escaped_descriptor, FieldInfo, FieldType};
 use crate::method_info::MethodInfo;
 use crate::vm::value::{Reference, Value};
 
@@ -139,6 +139,14 @@ impl<'a> Debug for Class<'a>{
     }
 }
 
+impl PartialEq for Class<'_>{
+    fn eq(&self, other: &Self) -> bool{
+        self.id == other.id
+    }
+}
+
+impl Eq for Class<'_>{}
+
 pub type ClassRef<'a> = &'a Class<'a>;
 
 #[derive(Debug, PartialEq, Clone, Copy, Eq, Hash)]
@@ -150,10 +158,18 @@ pub struct ArrayInfo{
     pub(crate) component_type: FieldType
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ClassAndMethod<'a> {
     pub class: ClassRef<'a>,
     pub method: &'a MethodInfo,
+}
+
+impl Hash for ClassAndMethod<'_>{
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.class.id.hash(state);
+        self.method.name.hash(state);
+        self.method.descriptor.hash(state);
+    }
 }
 
 impl<'a> ClassAndMethod<'a>{
@@ -227,5 +243,18 @@ impl<'a> ClassAndMethod<'a>{
 
     pub fn format(&self) -> String{
         format!("{}.{}{}", self.class.name, self.method.name, self.method.descriptor.as_str())
+    }
+
+    pub fn native_escaped(&self) -> (String, String){
+        let mut short = String::from("Java_");
+        short.push_str(native_escape(self.class.name.as_str()).as_str());
+        short.push('_');
+        short.push_str(native_escape(self.method.name.as_str()).as_str());
+
+        let mut long = short.clone();
+        long.push_str("__");
+        long.push_str(native_escaped_descriptor(&self.method.descriptor).as_str());
+
+        (short, long)
     }
 }

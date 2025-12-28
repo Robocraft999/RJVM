@@ -1,17 +1,24 @@
+use std::any::{Any, TypeId};
 use crate::error::ClassParseError;
 use crate::field_info::{get_class_descriptor, FieldType, PrimitiveType};
 use crate::method_info::MethodDescriptor;
 use crate::vm::class::{ClassAndMethod, ClassRef};
-use crate::vm::jni::types::JavaVM;
+use crate::vm::jni::types::{JavaVM, jbyte, jchar, jdouble, jfloat, jint, jlong, jshort, jboolean, JNIEnv, jobject, jvalue};
 use crate::vm::result::{VMPartialResult, VMResult, VMResultType};
 use crate::vm::value::{Reference, ReferenceType, Value};
 use crate::vm::{VmError, VM};
 use libloading::{Library, Symbol};
 use log::{debug, trace, warn};
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::env;
+use std::ffi::{c_schar, c_uchar, c_ushort, c_void};
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
+use libffi::low::CodePtr;
+use libffi::middle::{Arg, Cif, Type};
+use crate::access_flags::MethodFlag;
 use crate::vm::java_error::JavaError;
 
 macro_rules! wrap_init{
@@ -39,14 +46,66 @@ macro_rules! wrap_init{
     }
 }
 
+fn primitive_type_to_native(primitive_type: &PrimitiveType) -> Type {
+    match primitive_type {
+        PrimitiveType::Boolean => Type::c_uchar(),
+        PrimitiveType::Byte => Type::c_schar(),
+        PrimitiveType::Char => Type::c_ushort(),
+        PrimitiveType::Double => Type::f64(),
+        PrimitiveType::Float => Type::f32(),
+        PrimitiveType::Integer => Type::c_int(),
+        PrimitiveType::Long => Type::c_long(),
+        PrimitiveType::Short => Type::c_short(),
+    }
+}
+
+fn field_type_to_native(field_type: &FieldType) -> Type{
+    match field_type {
+        FieldType::Object(..) => Type::pointer(),
+        FieldType::Array(..) => Type::pointer(),
+        FieldType::Primitive(pt) => primitive_type_to_native(pt)
+    }
+}
+
+fn descriptor_to_cif(method_descriptor: &MethodDescriptor) -> Cif {
+    // first arg is always JNIEnv, second arg is this / class depending on whether static
+    let args: Vec<Type> = vec![Type::pointer(), primitive_type_to_native(&PrimitiveType::Integer)]
+        .into_iter()
+        .chain(method_descriptor.args.iter().map(field_type_to_native))
+        .collect();
+    let return_type = if let Some(ft) = &method_descriptor.return_type{
+        field_type_to_native(ft)
+    } else {
+        Type::void()
+    };
+    Cif::new(args, return_type)
+}
+
+fn values_to_jni_args<'a>(args: &'a Vec<Value>) -> Vec<Arg<'a>> {
+    args.iter().filter(|v| if let Value::Dummy = v {false} else {true}).map(|arg| {
+        match arg{
+            Value::Reference(reference) => Arg::new(&reference.id),
+            Value::Integer(integer) => Arg::new(integer),
+            Value::Long(long) => Arg::new(long),
+            Value::Float(float) => Arg::new(float),
+            Value::Double(double) => Arg::new(double),
+            val => unreachable!("Value of type: {:?} cannot be converted to an arg", val)
+        }
+    }).collect()
+}
+
 pub struct NativeMethodRegistry<'a>{
-    methods: Vec<NativeMethod<'a>>
+    methods: Vec<NativeMethod<'a>>,
+    loaded_libraries: RefCell<Vec<Library>>,
+    extern_methods: RefCell<HashMap<ClassAndMethod<'a>, ExternNativeMethod>>, //FIXME consider saving native as option to prevent duplicate lookup
 }
 
 impl <'a>NativeMethodRegistry<'a>{
     pub fn new() -> Self{
         Self{
-            methods: Vec::new()
+            methods: Vec::new(),
+            loaded_libraries: RefCell::new(Vec::new()),
+            extern_methods: RefCell::new(HashMap::new())
         }
     }
 
@@ -57,6 +116,28 @@ impl <'a>NativeMethodRegistry<'a>{
             method_descriptor: MethodDescriptor::new(method_descriptor.to_string()),
             delegate
         })
+    }
+
+    fn add_loaded_library(&self, lib: Library){
+        self.loaded_libraries.borrow_mut().push(lib);
+    }
+
+    fn try_resolve_extern_native(&self, class_and_method: &ClassAndMethod<'a>) -> bool {
+        let (short, long) = class_and_method.native_escaped();
+        println!("[try_resolve_extern_native]: {short} {long}");
+        for lib in self.loaded_libraries.borrow().iter(){
+            unsafe {
+                let ptr = if let Ok(sym) = lib.get::<*const ()>(short.as_bytes()){
+                    CodePtr::from_ptr(*sym as * const c_void)
+                } else if let Ok(sym) = lib.get::<*const ()>(long.as_bytes()){
+                    CodePtr::from_ptr(*sym as * const c_void)
+                } else { continue };
+                let cif = descriptor_to_cif(&class_and_method.method.descriptor);
+                self.extern_methods.borrow_mut().insert(class_and_method.clone(), ExternNativeMethod::new(ptr, cif));
+                return true
+            }
+        }
+        false
     }
 
     pub fn invoke(vm: &VM<'a>, java_vm: &JavaVM, class_and_method: &ClassAndMethod<'a>, object: Option<Reference<'a>>, args: Vec<Value<'a>>) -> Option<VMPartialResult<Option<Value<'a>>>>{
@@ -70,7 +151,41 @@ impl <'a>NativeMethodRegistry<'a>{
                 return Some(Err(VmError::ValidationError(format!("expected {} args but got: {}:{:?}", needed_arg_count, provided_arg_count, args))))
             }
         }
-        //Some(Err(VmError::JavaException(JavaError::MethodNotFoundException(class_and_method.method.name.clone()))))
+        if vm.native_method_registry.try_resolve_extern_native(class_and_method){
+            let optional_extern = vm.native_method_registry.extern_methods.borrow().get(&class_and_method).cloned();
+            if let Some(extern_native) = optional_extern {
+                let class_object_or_this = if class_and_method.method.is_static(){
+                    vm.try_new_class_object(class_and_method.class.name.as_str(), class_and_method.class.id).ok()?
+                } else {
+                    object.unwrap()
+                };
+                let jni_result = extern_native.call(java_vm, class_and_method, class_object_or_this, args);
+                let result = if let Some(val) = jni_result{
+                    unsafe {
+                        Some(match val{
+                            jvalue { z } => Value::Integer(z as i32),
+                            jvalue { b } => Value::Integer(b as i32),
+                            jvalue { c } => Value::Integer(c as i32),
+                            jvalue { d } => Value::Double(d as f64),
+                            jvalue { f } => Value::Float(f as f32),
+                            jvalue { i } => Value::Integer(i as i32),
+                            jvalue { j } => Value::Long(j as i64),
+                            jvalue { s } => Value::Integer(s as i32),
+                            jvalue { l } => {
+                                if let Some(reference) = vm.objects_by_id.borrow().get(&(l as u32)){
+                                    Value::Reference(reference)
+                                } else {
+                                    return Some(Err(VmError::ValidationError(format!("object with id {} does not exist", l))))
+                                }
+                            }
+                        })
+                    }
+                } else {
+                    None
+                };
+                return Some(Ok(VMResultType::Successful(result)));
+            }
+        }
         None
     }
 }
@@ -83,6 +198,69 @@ pub struct NativeMethod<'a>{
 }
 
 type NativeMethodDelegate<'a> = fn(&VM<'a>, &JavaVM, ClassRef<'a>, Option<Reference<'a>>, Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>;
+
+#[derive(Debug, Clone)]
+pub struct ExternNativeMethod{
+    ptr: CodePtr,
+    cif: Cif
+}
+
+impl ExternNativeMethod{
+    pub fn new(ptr: CodePtr, cif: Cif) -> Self{
+        Self { ptr, cif }
+    }
+
+    pub fn call<'a>(&self, java_vm: &JavaVM, class_and_method: &ClassAndMethod, object: Reference<'a>, args: Vec<Value<'a>>) -> Option<jvalue>{
+        let env: *const JNIEnv = &java_vm.env;
+        let second = object.id as jobject;
+        let mut jni_args = vec![Arg::new(&env), Arg::new(&second)];
+        jni_args.extend(values_to_jni_args(&args));
+        unsafe {
+            match class_and_method.method.descriptor.return_type{
+                Some(FieldType::Object(..)) | Some(FieldType::Array(..)) => {
+                    let object_id: jobject = self.cif.call(self.ptr, jni_args.as_slice());
+                    Some(jvalue {l: object_id})
+                }
+                Some(FieldType::Primitive(PrimitiveType::Boolean)) => {
+                    let val: jboolean = self.cif.call(self.ptr, jni_args.as_slice());
+                    Some(jvalue {z: val})
+                }
+                Some(FieldType::Primitive(PrimitiveType::Byte)) => {
+                    let val: jbyte = self.cif.call(self.ptr, jni_args.as_slice());
+                    Some(jvalue {b: val})
+                }
+                Some(FieldType::Primitive(PrimitiveType::Char)) => {
+                    let val: jchar = self.cif.call(self.ptr, jni_args.as_slice());
+                    Some(jvalue {c: val})
+                }
+                Some(FieldType::Primitive(PrimitiveType::Double)) => {
+                    let val: jdouble = self.cif.call(self.ptr, jni_args.as_slice());
+                    Some(jvalue {d: val})
+                }
+                Some(FieldType::Primitive(PrimitiveType::Float)) => {
+                    let val: jfloat = self.cif.call(self.ptr, jni_args.as_slice());
+                    Some(jvalue {f: val})
+                }
+                Some(FieldType::Primitive(PrimitiveType::Integer)) => {
+                    let val: jint = self.cif.call(self.ptr, jni_args.as_slice());
+                    Some(jvalue {i: val})
+                }
+                Some(FieldType::Primitive(PrimitiveType::Long)) => {
+                    let val: jlong = self.cif.call(self.ptr, jni_args.as_slice());
+                    Some(jvalue {j: val})
+                }
+                Some(FieldType::Primitive(PrimitiveType::Short)) => {
+                    let val: jshort = self.cif.call(self.ptr, jni_args.as_slice());
+                    Some(jvalue {s: val})
+                }
+                None => {
+                    let _: c_void = self.cif.call(self.ptr, jni_args.as_slice());
+                    None
+                }
+            }
+        }
+    }
+}
 
 pub fn register_all_natives(registry: &mut NativeMethodRegistry){
     registry.register("Test", "nop3", "()I", |_, _, _, _, _| non_failing_some(Value::Integer(-1)));
@@ -191,9 +369,10 @@ fn delegate_millis_time<'a>(_: &VM<'a>, _: &JavaVM, _ : ClassRef<'a>, _: Option<
 
 fn delegate_identity_hash_code<'a>(_: &VM<'a>, _: &JavaVM, _ : ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
     if let Some(Value::Reference(object)) = args.get(0){
-        let addr = &object as *const _;
-        let addr = addr as i32;
-        trace!("HASH: {addr}");
+        let mut hasher = DefaultHasher::new();
+        object.id.hash(&mut hasher);
+        let addr = hasher.finish() as i32;
+        trace!(target: "native", "HASH: {addr} {object:?}");
         non_failing_some(Value::Integer(addr))
     } else {
         Err(VmError::ValidationError(format!("Expected Object but found '{:?}'", args.get(0))))
@@ -637,7 +816,7 @@ fn delegate_native_lib_load<'a>(vm: &VM<'a>, java_vm: &JavaVM,  _: ClassRef<'a>,
             let sym: Symbol<*const ()> = lib.get(b"JNI_OnLoad").unwrap();
 
             let func_ptr = *sym as * const c_void;
-
+            vm.native_method_registry.add_loaded_library(lib);
 
             let vm_ptr = ptr::from_ref(java_vm) as *const c_void;
             println!("javavmp: {:p}", vm_ptr);
@@ -680,11 +859,11 @@ fn delegate_get_class<'a>(vm: &VM<'a>, java_vm: &JavaVM, class: ClassRef<'a>, ob
 }
 
 fn delegate_hashcode<'a>(_: &VM<'a>, _: &JavaVM, _: ClassRef<'a>, reference: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
-    //FIXME hash string not address
     if let Some(obj) = reference{
-        let addr = &obj as *const _;
-        let addr = addr as i32;
-        trace!("HASHCODE: {addr}");
+        let mut hasher = DefaultHasher::new();
+        obj.id.hash(&mut hasher);
+        let addr = hasher.finish() as i32;
+        trace!(target: "native", "HASHCODE: {addr} {obj:?}");
         non_failing_some(Value::Integer(addr))
     } else {
         Err(VmError::ValidationError("Expected object".to_string()))

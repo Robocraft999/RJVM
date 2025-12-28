@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-
+use std::hash::{Hash, Hasher};
 use lazy_regex::{lazy_regex, Lazy};
 use regex::Regex;
 
@@ -7,6 +7,7 @@ use crate::access_flags::{MethodFlag, MethodFlags};
 use crate::attribute::{Attribute, Code, ExceptionTable, Exceptions, ProgramCounter};
 use crate::field_info::FieldType;
 use crate::vm::bytecode::InstructionBlock;
+use crate::vm::VmError;
 
 #[derive(Debug)]
 pub struct MethodInfo{
@@ -64,11 +65,25 @@ impl MethodInfo{
     }
 }
 
+impl PartialEq for MethodInfo{
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name && self.descriptor == other.descriptor
+    }
+}
+
+impl Eq for MethodInfo{}
+
 #[derive(Debug)]
 pub struct MethodDescriptor{
     raw: String,
     pub args: Vec<FieldType>,
     pub return_type: Option<FieldType>,
+}
+
+impl Hash for MethodDescriptor{
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.raw.hash(state);
+    }
 }
 
 static PATTERN: Lazy<Regex> = lazy_regex!(r"(?<array>\[+)?(?:(?<primitive>[ZBSIJFDC])|L(?<object>[\/a-zA-Z$0-9]+);|(?<void>V))");
@@ -113,3 +128,5 @@ impl PartialEq for MethodDescriptor{
         self.matches(other.raw.as_str())
     }
 }
+
+impl Eq for MethodDescriptor{}

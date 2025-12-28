@@ -50,15 +50,15 @@ pub type jweak = jobject;
 
 #[repr(C)]
 pub union jvalue{
-    z: jboolean,
-    b: jbyte,
-    c: jchar,
-    s: jshort,
-    i: jint,
-    j: jlong,
-    f: jfloat,
-    d: jdouble,
-    l: jobject,
+    pub z: jboolean,
+    pub b: jbyte,
+    pub c: jchar,
+    pub s: jshort,
+    pub i: jint,
+    pub j: jlong,
+    pub f: jfloat,
+    pub d: jdouble,
+    pub l: jobject,
 }
 
 #[repr(C)]
@@ -385,8 +385,23 @@ impl JNINativeInterface_ {
         unimplemented!()
     }
 
-    pub fn GetFieldID(clazz: jclass, name: *const c_char, sig: *const c_char) -> jfieldID{
-        unimplemented!()
+    pub unsafe extern "system-unwind" fn GetFieldID(env: *mut JNIEnv, clazz: jclass, name: *const c_char, sig: *const c_char) -> jfieldID{
+        let field_name = unsafe{CStr::from_ptr(name)}.to_str().map_err(|e| VmError::Native(e.to_string())).unwrap();
+        let signature = unsafe{CStr::from_ptr(sig)}.to_str().map_err(|e| VmError::Native(e.to_string())).unwrap();
+        let vm = unsafe{&*(*env).vm};
+
+        let class_obj = vm.objects_by_id.borrow().get(&clazz).copied().unwrap();
+        let class_ref = wrap_init!(env, vm.extract_class_from_class_object(&class_obj));
+        println!("NATIVE: GetFieldID: {}::{}{}", class_ref.name, field_name, signature);
+        // FIXME same as GetMethodID, there is a field at index 0 which is recognized as NULL
+        if let Some((index, _)) = class_ref.find_field(field_name){
+            index as jfieldID
+        } else {
+            let message = format!("GetMethodID: {}::{} not found", class_ref.name, field_name);
+            // NoSuchFieldError
+            let prev = vm.caught_exception.replace(Some((message, "JNI_GetFieldID".to_string(), vm.null())));
+            0 as jfieldID
+        }
     }
 
     pub fn GetObjectField(obj: jobject, fieldID: jfieldID) -> jobject{
