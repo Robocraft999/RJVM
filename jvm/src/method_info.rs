@@ -52,7 +52,7 @@ impl MethodInfo{
     }
 
     pub fn get_code_block_at(&self, pc: ProgramCounter) -> &InstructionBlock{
-        &self.code_blocks.as_ref().unwrap()[&pc.0]
+        &self.code_blocks.as_ref().unwrap().get(&pc.0).ok_or(VmError::ValidationError(format!("Code block out of bounds: {}, {:?}", pc.0, self.code_blocks))).unwrap()
     }
 
     pub fn next_pc(&self, pc: ProgramCounter) -> Option<u16>{

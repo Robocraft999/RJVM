@@ -1,6 +1,6 @@
 use callstack::CallStack;
 use cesu8::{from_java_cesu8, to_java_cesu8, Cesu8DecodingError};
-use log::{debug, error, info, trace};
+use log::{debug, error, info, trace, warn};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fs::File;
@@ -110,11 +110,7 @@ impl<'a> VM<'a>{
             if let Some((message, origin, throwable)) = self.caught_exception.borrow().as_ref(){
                 let thrown_class_name = throwable.expect_reference().map(|r| r.class_name.clone())?;
                 if frame_amount as isize - 1 == stop_index{
-                    #[cfg(feature = "debug")]
-                    {
-                        self.debug_helper.exception_helper.push(format!("Subroutine could not handle {} thrown by function {} with message: {}", thrown_class_name, origin, message));
-                        self.debug_helper.exception_helper.print();
-                    }
+                    self.debug_helper.exception_helper.push(format!("Subroutine could not handle {} thrown by function {} with message: {}", thrown_class_name, origin, message));
                     return Err(VmError::JavaException(JavaError::JavaExceptionThrown(thrown_class_name, message.to_owned(), origin.to_owned())));
                 }
 
@@ -130,10 +126,7 @@ impl<'a> VM<'a>{
                 if let Some(handler_pc) = self.unchecked_resolve_exception_handler(exception_table, current_pc, thrown_class_name.as_str())?{
                     self.call_stack.set_pc(handler_pc.0);
                     self.call_stack.push_operand_value(throwable.clone());
-                    #[cfg(feature = "debug")]
-                    {
-                        self.debug_helper.exception_helper.push(format!("Handled {} by {}\n└-- thrown by {} with message: {}", thrown_class_name, class_and_method.format(), origin, message));
-                    }
+                    self.debug_helper.exception_helper.push(format!("Handled {} by {}\n└-- thrown by {} with message: {}", thrown_class_name, class_and_method.format(), origin, message));
                     debug!("Exception thrown handled by {}", class_and_method.format());
                     clear_exception = true;
                 } else {
@@ -336,6 +329,7 @@ impl<'a> VM<'a>{
             if class_and_method.method.descriptor.return_type.is_some(){
                 Err(VmError::MethodCallError(format!("native {} returns a value which is probably used", class_and_method.format())))
             } else {
+                warn!(target: "native", "Native function: {} not found. Skipping", class_and_method.format());
                 Ok(VMResultType::Successful(None))
             }
         }
@@ -465,6 +459,7 @@ impl<'a> VM<'a>{
         info!("CC[{:?}] = {}", class.id, class.name);
         let obj = self.object_allocator.allocate_object(class);
         self.objects_by_id.borrow_mut().insert(obj.id, obj);
+        self.debug_helper.tracker.push_event(obj.id, format!("Object ({}) allocated", class.name));
         obj
     }
 
@@ -482,6 +477,7 @@ impl<'a> VM<'a>{
             |class| {
                 let obj = self.object_allocator.allocate_array(class, dims, *component_type, content);
                 self.objects_by_id.borrow_mut().insert(obj.id, obj);
+                self.debug_helper.tracker.push_event(obj.id, format!("Array ({}) allocated", class.name));
                 Ok(VMResultType::Successful(obj))
             }
         )

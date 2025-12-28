@@ -13,12 +13,15 @@ impl ExceptionHelper{
     }
     
     pub fn push(&self, line: String){
-        self.history.borrow_mut().push(line);
+        #[cfg(feature = "debug")]
+        {
+            self.history.borrow_mut().push(line);
+        }
     }
     
     pub fn print(&self){
         for line in self.history.borrow().iter(){
-            error!("{}", line);
+            error!(target: "debug", "{}", line);
         }
     }
 }

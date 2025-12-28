@@ -516,6 +516,11 @@ pub fn execute_current_block<'a>(vm: &VM<'a>) -> Option<VMPartialResult<Option<V
                 Instruction::IRETURN | Instruction::LRETURN | Instruction::FRETURN | Instruction::ARETURN => {
                     //TODO seperate for validation
                     let value = vm.call_stack.pop_operand_value().unwrap();
+                    if !class_and_method.method.is_static(){
+                        if let Some(Value::Reference(this)) = vm.call_stack.load_local(0){
+                            vm.debug_helper.tracker.push_event(this.id, format!("Function {} returned:\n    {:?}", class_and_method.format(), value))
+                        }
+                    }
                     return Some(Ok(VMResultType::Successful(Some(value))))
                 }
                 Instruction::RETURN => {
@@ -529,6 +534,7 @@ pub fn execute_current_block<'a>(vm: &VM<'a>) -> Option<VMPartialResult<Option<V
                     let value = vm.call_stack.pop_operand_value().unwrap();
                     //let class_id = vm.class_manager.find_class_by_name(class_name.as_str()).unwrap().id;
                     let object = vm.get_static_class_object(class_id).unwrap();
+                    vm.debug_helper.tracker.push_event(object.id, format!("Set static field: {}: {:?} to:\n    {:?}", info.name, info.field_type, value));
                     object.set_field(field_index, value);
                 }
                 Instruction::GETSTATIC(index) => {
@@ -568,7 +574,8 @@ pub fn execute_current_block<'a>(vm: &VM<'a>) -> Option<VMPartialResult<Option<V
                     debug!("PUTFIELD {}.{} {} {} {:?}", class_name, field_name, descriptor, field_index, info);
                     let value = vm.call_stack.pop_operand_value().unwrap();
                     let object = vm.call_stack.pop_operand_value().unwrap();
-                    if let Value::Reference(obj) = object {
+                    if let Value::Reference(obj) = object && !object.is_null(){
+                        vm.debug_helper.tracker.push_event(obj.id, format!("Set field: {}: {:?} to:\n    {:?}", info.name, info.field_type, value));
                         obj.set_field(field_index, value);
                         debug!("obj:{:?}", &obj);
                     } else {
@@ -634,10 +641,7 @@ pub fn execute_current_block<'a>(vm: &VM<'a>) -> Option<VMPartialResult<Option<V
                         let string_value = error.get_field(2);
                         let string = if !string_value.is_null() {VM::extract_string_from_object(&string_value).unwrap()} else {String::new()};
                         let exception_name = vm.class_manager.find_class_by_id(error.class_id).unwrap().name.clone();
-                        #[cfg(feature = "debug")]
-                        {
-                            vm.debug_helper.exception_helper.push(format!("Throw   {}: {}\n└-- thrown by {} at {}", exception_name, string, class_and_method.format(), vm.call_stack.get_pc().0));
-                        }
+                        vm.debug_helper.exception_helper.push(format!("Throw   {}: {}\n└-- thrown by {} at {}", exception_name, string, class_and_method.format(), vm.call_stack.get_pc().0));
                         let prev = vm.caught_exception.replace(Some((string, class_and_method.format(), Value::Reference(error))));
                         assert!(prev.is_none());
                         return Some(Ok(VMResultType::ExceptionThrown));
@@ -961,7 +965,7 @@ fn execute_invoke<'a>(vm: &VM<'a>, index: u16, kind: InvokeKind) -> VMPartialRes
         None
     } else {
         let popped = vm.call_stack.pop_operand_value();
-        if let Some(Value::Reference(reference)) = popped{
+        if let Some(Value::Reference(reference)) = popped && !reference.is_null(){
             Some(reference)
         } else {
             return Err(VmError::ValidationError(format!("Expected object or array as receiver for {} but found: {:?}", class_and_method.format(), popped)));
@@ -995,6 +999,9 @@ fn execute_invoke<'a>(vm: &VM<'a>, index: u16, kind: InvokeKind) -> VMPartialRes
         trace!("    [{}] {:?}", index, value);
     }
     debug!("INVOKE{:?}: {}{} on {:?}", kind, method_name, descriptor, receiver);
+    if let Some(rec) = receiver{
+        vm.debug_helper.tracker.push_event(rec.id, format!("Preparing call {} with args:{}", class_and_method.format(), args.iter().map(|v| format!("\n    {:?}", v)).collect::<Vec<_>>().join("")));
+    }
     vm.call_stack.create_and_push_call_frame(class_and_method, receiver, args, true);
     Ok(VMResultType::Interrupted(1, false))
     //Ok(VMResultType::Ok(Some(Value::Null)))

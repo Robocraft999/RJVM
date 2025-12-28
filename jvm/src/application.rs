@@ -63,10 +63,7 @@ impl <'a> Application<'a>{
                 error!("Error: {}", error);
                 println!("Frames:");
                 self.vm.call_stack.print_call_stack();
-                /*#[cfg(feature = "debug")]
-                {
-                    self.vm.debug_helper.exception_helper.print();
-                }*/
+                self.vm.debug_helper.print();
             }
         }
     }
@@ -84,10 +81,7 @@ impl <'a> Application<'a>{
             Err(error) => {
                 println!("'{}'", error);
                 error!("Init System: {}", error);
-                #[cfg(feature = "debug")]
-                {
-                    self.vm.debug_helper.exception_helper.print();
-                }
+                self.vm.debug_helper.print();
                 panic!();
             }
         }
