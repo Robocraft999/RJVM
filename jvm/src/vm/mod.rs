@@ -504,6 +504,15 @@ impl<'a> VM<'a>{
             Err(VmError::ClassNotLoadedError("[try_new_string_object]: Class not loaded".to_string()))
         }
     }
+
+    pub fn try_new_class_object(&self, class_name: &str, class_id: ClassId) -> VMResult<Reference<'a>>{
+        let result = self.new_class_object(class_name, class_id)?;
+        if let VMResultType::Successful(object) = result {
+            Ok(object)
+        } else {
+            Err(VmError::ClassNotLoadedError("[try_new_class_object]: Class not loaded".to_string()))
+        }
+    }
     
     pub fn new_string_object(&self, string: &str) -> VMPartialResult<Reference<'a>>{
         if self.string_objects.borrow().contains_key(string){
@@ -546,6 +555,7 @@ impl<'a> VM<'a>{
         Err(VmError::ValidationError(format!( "Expected CharArray but found: {:?}", chars)))
     }
 
+    // FIXME use only ClassRef instead
     pub fn new_class_object(&self, class_name: &str, class_id: ClassId) -> VMPartialResult<Reference<'a>>{
         if !self.class_objects.borrow().contains_key(&class_id){
             let class_object = get_or_init!(self.new_object("java/lang/Class")?);

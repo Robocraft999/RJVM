@@ -9,8 +9,6 @@ use vm::class_path::ClassPath;
 use crate::application::Application;
 use crate::attribute::ProgramCounter;
 use crate::field_info::FieldType;
-use crate::vm::jni::types::{JNIEnv, JavaVM};
-use crate::vm::jni::{self};
 use crate::vm::value::Value;
 use crate::vm::{VmError, VM};
 

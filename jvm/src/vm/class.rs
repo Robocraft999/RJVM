@@ -1,6 +1,6 @@
 use std::fmt::{Debug, Formatter};
-
-use crate::access_flags::{ClassFlag, ClassFlags};
+use std::hash::Hash;
+use crate::access_flags::{ClassFlag, ClassFlags, MethodFlag};
 use crate::attribute::{BootstrapMethods, VisibleRuntimeAnnotations};
 use crate::constants::{ConstantPool, ConstantPoolEntry};
 use crate::field_info::{FieldInfo, FieldType};
@@ -46,7 +46,7 @@ impl<'a> Class<'a>{
         self.fields
             .iter()
             .enumerate()
-            .find(|(i, f)| f.name == field_name)
+            .find(|(_, f)| f.name == field_name)
             .map(|(index, field)| (index + self.first_field_index, field, self.id))
             .or_else(|| {
                 if let Some(superclass) = &self.superclass{
@@ -104,14 +104,17 @@ impl<'a> Class<'a>{
         superclass_values
     }
 
-    pub fn get_constructors(&self) -> Vec<&MethodInfo>{
-        let mut constructors = Vec::new();
-        for method in &self.methods{
-            if method.name == "<init>"{
-                constructors.push(method);
-            }
-        }
-        constructors
+    pub fn get_methods(&self, public_only: bool) -> Vec<&MethodInfo>{
+        self.methods.iter()
+            .filter(|m| !public_only || m.flags.contains(&MethodFlag::Public))
+            .collect()
+    }
+
+    pub fn get_constructors(&self, public_only: bool) -> Vec<&MethodInfo>{
+        self.methods.iter()
+            .filter(|m| m.name == "<init>")
+            .filter(|m| !public_only || m.flags.contains(&MethodFlag::Public))
+            .collect()
     }
 
     pub fn field_at_index(&self, index: usize) -> Option<&FieldInfo>{

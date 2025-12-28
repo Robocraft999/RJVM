@@ -1084,7 +1084,7 @@ fn get_constant_as_value<'a>(vm: &VM<'a>, index: u16) -> VMPartialResult<Value<'
                 let class_object = get_or_init!(vm.new_class_object_by_name(string.as_str())?);
                 Value::Reference(class_object)
             } else {
-                warn!("expected but didnt find string object");
+                warn!("expected but didnt find class object");
                 vm.null()
             }
         }

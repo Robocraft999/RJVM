@@ -100,6 +100,7 @@ pub fn register_all_natives(registry: &mut NativeMethodRegistry){
     registry.register("java/lang/Class", "desiredAssertionStatus0", "(Ljava/lang/Class;)Z", delegate_desired_assertion_status);
     registry.register("java/lang/Class", "getDeclaredFields0", "(Z)[Ljava/lang/reflect/Field;", delegate_get_declared_fields0);
     registry.register("java/lang/Class", "getDeclaredConstructors0", "(Z)[Ljava/lang/reflect/Constructor;", delegate_get_declared_constructors0);
+    registry.register("java/lang/Class", "getDeclaredMethods0", "(Z)[Ljava/lang/reflect/Method;", delegate_get_declared_methods0);
     registry.register("java/lang/Class", "getModifiers", "()I", delegate_get_class_modifiers);
     registry.register("java/lang/Class", "getSuperclass", "()Ljava/lang/Class;", delegate_get_super_class);
     registry.register("java/lang/Class", "forName0", "(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/Class;", delegate_for_name0);
@@ -149,6 +150,7 @@ pub fn register_all_natives(registry: &mut NativeMethodRegistry){
     registry.register("java/security/AccessController", "doPrivileged", "(Ljava/security/PrivilegedExceptionAction;Ljava/security/AccessControlContext;)Ljava/lang/Object;", delegate_do_privileged);
     registry.register("java/lang/String", "intern", "()Ljava/lang/String;", delegate_string_intern);
     registry.register("sun/reflect/NativeConstructorAccessorImpl", "newInstance0", "(Ljava/lang/reflect/Constructor;[Ljava/lang/Object;)Ljava/lang/Object;", delegate_new_instance0);
+    registry.register("sun/reflect/NativeMethodAccessorImpl", "invoke0", "(Ljava/lang/reflect/Method;Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;", delegate_invoke0);
     registry.register("java/io/FileOutputStream", "writeBytes", "([BIIZ)V", delegate_write_bytes);
     //registry.register("java/io/FileInputStream", "initIDs", "()V", delegate_nop);
     registry.register("java/io/FileInputStream", "readBytes", "([BII)I", delegate_read_bytes);
@@ -374,12 +376,12 @@ fn delegate_get_declared_fields0<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<
     }
 }
 
-fn delegate_get_declared_constructors0<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, class_object: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
-    debug!("getDeclaredConstructors");
-    if let Some(class_ref) = class_object{
+fn delegate_get_declared_constructors0<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, class_object: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
+    debug!("getDeclaredConstructors0");
+    if let (Some(class_ref), Some(Value::Integer(public_only))) = (class_object, args.get(0)){
         let class = wrap_init!(vm, java_vm, vm.extract_class_from_class_object(class_ref)?);
         let mut content = Vec::new();
-        for constructor in class.get_constructors().iter(){
+        for constructor in class.get_constructors(*public_only == 1).iter(){
             let java_constructor = wrap_init!(vm, java_vm, vm.new_object("java/lang/reflect/Constructor")?);
 
             //clazz
@@ -403,7 +405,7 @@ fn delegate_get_declared_constructors0<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: Cla
             //exceptionTypes
             java_constructor.set_field(7, Value::Reference(wrap_init!(vm, java_vm, vm.new_array(1, FieldType::Object("java/lang/Class".to_string()).to_array_field_type(1), RefCell::new(exceptions.clone()))?)));
 
-            let flags = constructor.flags.iter().map(|flag| flag.clone() as u16).reduce(|flag1, flag2| flag1 | flag2).unwrap_or(0);
+            let flags = constructor.flags.iter().map(|flag| flag.clone() as u16).fold(0, |flag1, flag2| flag1 | flag2);
             //modifiers
             java_constructor.set_field(8, Value::Integer(flags as i32));
 
@@ -411,7 +413,61 @@ fn delegate_get_declared_constructors0<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: Cla
         }
         non_failing_some(Value::Reference(wrap_init!(vm, java_vm, vm.new_array(1, FieldType::Object("java/lang/reflect/Constructor".to_string()).to_array_field_type(1), RefCell::new(content.clone()))?)))
     } else {
-        Err(VmError::ValidationError("Expected Class object".to_string()))
+        Err(VmError::ValidationError("Expected Class object and boolean".to_string()))
+    }
+}
+
+fn delegate_get_declared_methods0<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, class_object: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>> {
+    debug!("getDeclaredMethods0");
+    if let (Some(class_ref), Some(Value::Integer(public_only))) = (class_object, args.get(0)){
+        let class = wrap_init!(vm, java_vm, vm.extract_class_from_class_object(class_ref)?);
+        let mut content = Vec::new();
+        for method in class.get_methods(*public_only == 1).iter(){
+            let java_method = wrap_init!(vm, java_vm, vm.new_object("java/lang/reflect/Method")?);
+
+            //clazz
+            java_method.set_field(4, Value::Reference(class_ref));
+
+            let name = wrap_init!(vm, java_vm, vm.new_string_object(&method.name.as_str())?);
+            //name
+            java_method.set_field(6, Value::Reference(name));
+
+            let return_type = if let Some(f) = &method.descriptor.return_type{
+                Value::Reference(wrap_init!(vm, java_vm, vm.new_class_object_by_name(f.to_class_name().as_str())?))
+            } else {
+                vm.null()
+            };
+            let mut parameters = Vec::new();
+            for field_type in method.descriptor.args.iter(){
+                let parameter_class = wrap_init!(vm, java_vm, vm.new_class_object_by_name(field_type.to_class_name().as_str())?);
+                parameters.push(Value::Reference(parameter_class));
+            }
+            let mut exceptions = Vec::new();
+            if let Some(exception_vec) = method.exceptions.clone(){
+                for exception in exception_vec.0{
+                    let parameter_class = wrap_init!(vm, java_vm, vm.new_class_object_by_name(exception.as_str())?);
+                    exceptions.push(Value::Reference(parameter_class));
+                }
+            }
+
+            //returnType
+            java_method.set_field(7, return_type);
+
+            //parameterTypes
+            java_method.set_field(8, Value::Reference(wrap_init!(vm, java_vm, vm.new_array(1, FieldType::Object("java/lang/Class".to_string()).to_array_field_type(1), RefCell::new(parameters.clone()))?)));
+
+            //exceptionTypes
+            java_method.set_field(9, Value::Reference(wrap_init!(vm, java_vm, vm.new_array(1, FieldType::Object("java/lang/Class".to_string()).to_array_field_type(1), RefCell::new(exceptions.clone()))?)));
+
+            let flags = method.flags.iter().map(|flag| flag.clone() as u16).fold(0, |flag1, flag2| flag1 | flag2);
+            //modifiers
+            java_method.set_field(10, Value::Integer(flags as i32));
+
+            content.push(Value::Reference(java_method));
+        }
+        non_failing_some(Value::Reference(wrap_init!(vm, java_vm, vm.new_array(1, FieldType::Object("java/lang/reflect/Method".to_string()).to_array_field_type(1), RefCell::new(content.clone()))?)))
+    } else {
+        Err(VmError::ValidationError("Expected Class object and boolean".to_string()))
     }
 }
 
@@ -460,6 +516,7 @@ fn delegate_for_name0<'a>(vm: &VM<'a>, java_vm: &JavaVM,  _: ClassRef<'a>, _: Op
                 String::from("java/lang/Class.forName0(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/Class;"),
                 Value::Reference(exception_object)
             )));
+        assert!(prev.is_none());
         Ok(VMResultType::ExceptionThrown)
     };
 
@@ -740,7 +797,7 @@ fn delegate_get_object_volatile<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'
 fn delegate_static_field_base<'a>(_: &VM<'a>, _: &JavaVM, _: ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
     if let Some(field_object_value) = args.get(0){
         let field_object = field_object_value.expect_reference()?;
-        println!("'{:?}'", field_object);
+        trace!("staticFieldBase: on field: '{:?}'", field_object);
         let class_object = field_object.get_field(4);
         non_failing_some(class_object)
     } else {
@@ -1038,6 +1095,76 @@ fn delegate_new_instance0<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, ob
     } else {
         Err(VmError::ValidationError("Expected a constructor object and a array reference".to_string()))
     }
+}
+
+fn delegate_invoke0<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
+    debug!("invoke0");
+    debug!("{:?}", args);
+    if let (Some(Value::Reference(method)), Some(Value::Reference(obj))) = (args.get(0), args.get(1)) {
+        let clazz = method.get_field(4);
+        let method_name_val = method.get_field(6);
+        let return_type_val = method.get_field(7);
+        let parameter_types = method.get_field(8);
+        if let (Value::Reference(class_ref), Value::Reference(return_type_ref), Value::Reference(parameter_array)) = (clazz, return_type_val, parameter_types) {
+            if let ReferenceType::Array(_, _, type_content) = &parameter_array.reference_type {
+                let class = wrap_init!(vm, java_vm, vm.extract_class_from_class_object(class_ref)?);
+                let mut descriptor = String::from("(");
+                for constructor_parameter_type in type_content.borrow().iter(){
+                    if let Value::Reference(parameter_type_ref) = constructor_parameter_type {
+                        let class = wrap_init!(vm, java_vm, vm.extract_class_from_class_object(parameter_type_ref)?);
+                        if !class.is_array(){
+                            descriptor.push_str(&get_class_descriptor(&class.name));
+                        } else {
+                            descriptor.push_str(&class.name);
+                        }
+                    }
+                }
+                descriptor.push_str(")");
+                if !return_type_ref.is_null(){
+                    let return_type = wrap_init!(vm, java_vm, vm.extract_class_from_class_object(return_type_ref)?);
+                    if !return_type.is_array(){
+                        descriptor.push_str(&get_class_descriptor(&return_type.name));
+                    } else {
+                        descriptor.push_str(&return_type.name);
+                    }
+                }
+                let method_name = VM::extract_string_from_object(&method_name_val)?;
+                if let Some(method) = class.find_method(method_name.as_str(), descriptor.as_str()) {
+                    debug!("method: {:?}", method);
+                    let class_and_method = ClassAndMethod {class, method};
+                    let method_args = if let Some(Value::Reference(argument_array)) = args.get(1){
+                        if let ReferenceType::Array(_, _, args_content) = &argument_array.reference_type{
+                            args_content.borrow().clone()
+                        } else {
+                            Vec::new()
+                        }
+                    } else {
+                        Vec::new()
+                    };
+                    let current_frame_index = vm.call_stack.len() as isize - 1;
+                    vm.call_stack.create_and_push_call_frame(class_and_method, if !obj.is_null() {Some(obj)} else {None}, method_args, false);
+                    let res = vm.invoke_frames_until(java_vm, current_frame_index);
+                    // invoke_frames_until returns occurred exceptions as Err(VmError::JavaException(JavaError::JavaExceptionThrown))
+                    // because it doesn't know whether it is a subroutine or not
+                    return match res {
+                        Ok(VMResultType::Successful(None)) => {
+                            assert!(return_type_ref.is_null());
+                            non_failing_some(vm.null())
+                        }
+                        Ok(VMResultType::Successful(Some(value))) => {
+                            assert!(!return_type_ref.is_null());
+                            non_failing_some(value)
+                        }
+                        Ok(typ) => unreachable!("{:?} can't escape invoke_frames_until", typ),
+                        //FIXME return InvocationTargetException
+                        Err(VmError::JavaException(JavaError::JavaExceptionThrown(..))) => Ok(VMResultType::ExceptionThrown),
+                        Err(e) => Err(e),
+                    }
+                }
+            }
+        }
+    }
+    Err(VmError::ValidationError("Expected a constructor object and a array reference".to_string()))
 }
 
 fn delegate_write_bytes<'a>(_: &VM<'a>, _: &JavaVM, _: ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
