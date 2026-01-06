@@ -119,7 +119,7 @@ pub fn execute_current_block<'a>(vm: &VM<'a>) -> Option<VMPartialResult<Option<V
                 Instruction::ALOAD2 => wrap_error!(aload(vm, 2)),
                 Instruction::ALOAD3 => wrap_error!(aload(vm, 3)),
 
-                Instruction::IALOAD | Instruction::AALOAD | Instruction::BALOAD | Instruction::CALOAD | Instruction::SALOAD => {
+                Instruction::IALOAD | Instruction::DALOAD | Instruction::AALOAD | Instruction::BALOAD | Instruction::CALOAD | Instruction::SALOAD => {
                     let index = vm.call_stack.pop_operand_value().unwrap().expect_int().unwrap();
                     let array = vm.call_stack.pop_operand_value();
                     debug!("XALOAD: {:?}[{}]", array, index);
@@ -242,6 +242,41 @@ pub fn execute_current_block<'a>(vm: &VM<'a>) -> Option<VMPartialResult<Option<V
                         vm.call_stack.push_operand_value(value1.clone());
                         vm.call_stack.push_operand_value(value2);
                         vm.call_stack.push_operand_value(value1);
+                    }
+                }
+                Instruction::DUP2X2 => {
+                    debug!("DUP2X1");
+                    let value1 = vm.call_stack.pop_operand_value().unwrap();
+                    let value2 = vm.call_stack.pop_operand_value().unwrap();
+                    if value1.get_computational_type() == 2{
+                        if value2.get_computational_type() == 2{
+                            vm.call_stack.push_operand_value(value1.clone());
+                            vm.call_stack.push_operand_value(value2);
+                            vm.call_stack.push_operand_value(value1);
+                        } else {
+                            let value3 = vm.call_stack.pop_operand_value().unwrap();
+                            vm.call_stack.push_operand_value(value1.clone());
+                            vm.call_stack.push_operand_value(value3);
+                            vm.call_stack.push_operand_value(value2);
+                            vm.call_stack.push_operand_value(value1);
+                        }
+                    } else {
+                        let value3 = vm.call_stack.pop_operand_value().unwrap();
+                        if value3.get_computational_type() == 2{
+                            vm.call_stack.push_operand_value(value2.clone());
+                            vm.call_stack.push_operand_value(value1.clone());
+                            vm.call_stack.push_operand_value(value3);
+                            vm.call_stack.push_operand_value(value2);
+                            vm.call_stack.push_operand_value(value1);
+                        } else {
+                            let value4 = vm.call_stack.pop_operand_value().unwrap();
+                            vm.call_stack.push_operand_value(value2.clone());
+                            vm.call_stack.push_operand_value(value1.clone());
+                            vm.call_stack.push_operand_value(value4);
+                            vm.call_stack.push_operand_value(value3);
+                            vm.call_stack.push_operand_value(value2);
+                            vm.call_stack.push_operand_value(value1);
+                        }
                     }
                 }
                 Instruction::SWAP => {
@@ -424,16 +459,34 @@ pub fn execute_current_block<'a>(vm: &VM<'a>) -> Option<VMPartialResult<Option<V
                     }
                 }
                 Instruction::FCMPG | Instruction::FCMPL => {
-                    if let (Some(Value::Float(value2)), Some(Value::Float(value1))) = (vm.call_stack.pop_operand_value(), vm.call_stack.pop_operand_value()){
+                    if let (Some(Value::Float(value2)), Some(Value::Float(value1))) = (vm.call_stack.pop_operand_value(), vm.call_stack.pop_operand_value()) {
                         debug!("FCMP");
-                        if value1 > value2{
+                        if value1 > value2 {
                             vm.call_stack.push_operand_value(Value::Integer(1))
-                        } else if value1 == value2{
+                        } else if value1 == value2 {
                             vm.call_stack.push_operand_value(Value::Integer(0))
-                        } else if value1 < value2{
+                        } else if value1 < value2 {
                             vm.call_stack.push_operand_value(Value::Integer(-1))
-                        } else if value1.is_nan() || value2.is_nan(){
-                            if instruction == &Instruction::FCMPG{
+                        } else if value1.is_nan() || value2.is_nan() {
+                            if instruction == &Instruction::FCMPG {
+                                vm.call_stack.push_operand_value(Value::Integer(1))
+                            } else {
+                                vm.call_stack.push_operand_value(Value::Integer(-1))
+                            }
+                        }
+                    }
+                }
+                Instruction::DCMPG | Instruction::DCMPL => {
+                    if let (Some(Value::Double(value2)), Some(Value::Double(value1))) = (vm.call_stack.pop_operand_value(), vm.call_stack.pop_operand_value()) {
+                        debug!("DCMP");
+                        if value1 > value2 {
+                            vm.call_stack.push_operand_value(Value::Integer(1))
+                        } else if value1 == value2 {
+                            vm.call_stack.push_operand_value(Value::Integer(0))
+                        } else if value1 < value2 {
+                            vm.call_stack.push_operand_value(Value::Integer(-1))
+                        } else if value1.is_nan() || value2.is_nan() {
+                            if instruction == &Instruction::DCMPG {
                                 vm.call_stack.push_operand_value(Value::Integer(1))
                             } else {
                                 vm.call_stack.push_operand_value(Value::Integer(-1))

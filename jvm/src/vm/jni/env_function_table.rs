@@ -85,8 +85,8 @@ const TABLE: JNINativeInterface = [
     not_implemented as _,
     not_implemented as _,
     JNINativeInterface_::CallDoubleMethodA as _,
-    not_implemented as _,
-    not_implemented as _,
+    JNINativeInterface_::CallVoidMethod as _,
+    JNINativeInterface_::CallVoidMethodV as _,
     JNINativeInterface_::CallVoidMethodA as _,
 
     //64
@@ -294,7 +294,7 @@ const TABLE: JNINativeInterface = [
 
     //219
     //GetJavaVM
-    not_implemented as _,
+    JNINativeInterface_::GetJavaVM as _,
 
     //220
     //get string region
