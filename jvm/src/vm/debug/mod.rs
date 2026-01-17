@@ -13,7 +13,7 @@ impl DebugHelper{
     pub fn new() -> Self{
         Self{
             exception_helper: ExceptionHelper::new(),
-            tracker: Tracker::new(None)
+            tracker: Tracker::new(None, None),
         }
     }
 
@@ -48,6 +48,7 @@ mod loader{
     #[derive(Deserialize, Debug)]
     pub struct TrackerConfig{
         pub ids: HashSet<u32>,
+        pub descs: Vec<String>,
     }
 
     pub fn load_config() -> Option<Config>{

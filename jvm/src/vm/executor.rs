@@ -4,6 +4,7 @@ use crate::class_file::get_constant_printable;
 use crate::vm::result::{VMPartialResult, VMResultType};
 use crate::{bytecode::Instruction, constants::ConstantPoolEntry, field_info::{FieldType, PrimitiveType}, get_or_init, get_or_init_option, method_info::MethodDescriptor, vm::{bytecode::InstructionBlock, class::{ClassAndMethod, ClassRef}, java_error::JavaError, result::VMResult, value::{ReferenceType, Value}, VmError, VM}};
 use log::{debug, error, info, trace, warn};
+use crate::vm::class_manager::ClassLoadingState;
 
 macro_rules! wrap_error {
     ($res:expr) => {
@@ -16,6 +17,9 @@ macro_rules! wrap_error {
 
 pub fn execute<'a>(vm: &VM<'a>) -> VMPartialResult<Option<Value<'a>>>{
     let class_and_method = &vm.call_stack.frames.borrow().last().unwrap().class_and_method.clone();
+    if vm.class_manager.expect_class_state(class_and_method.class.id, ClassLoadingState::LOADED){
+        unreachable!("Class {} has to be initialized to call {} upon", class_and_method.class.name, class_and_method.format());
+    }
     info!("");
     info!("METHOD_NAME: {} at {}", class_and_method.format(), vm.call_stack.get_pc().0);
     debug!("{:?}", class_and_method.method.code_blocks);
@@ -119,7 +123,7 @@ pub fn execute_current_block<'a>(vm: &VM<'a>) -> Option<VMPartialResult<Option<V
                 Instruction::ALOAD2 => wrap_error!(aload(vm, 2)),
                 Instruction::ALOAD3 => wrap_error!(aload(vm, 3)),
 
-                Instruction::IALOAD | Instruction::DALOAD | Instruction::AALOAD | Instruction::BALOAD | Instruction::CALOAD | Instruction::SALOAD => {
+                Instruction::IALOAD | Instruction::LALOAD | Instruction::DALOAD | Instruction::AALOAD | Instruction::BALOAD | Instruction::CALOAD | Instruction::SALOAD => {
                     let index = vm.call_stack.pop_operand_value().unwrap().expect_int().unwrap();
                     let array = vm.call_stack.pop_operand_value();
                     debug!("XALOAD: {:?}[{}]", array, index);
@@ -293,9 +297,13 @@ pub fn execute_current_block<'a>(vm: &VM<'a>) -> Option<VMPartialResult<Option<V
 
                 Instruction::IADD => wrap_error!(execute_i_arithmetic(vm, |val1, val2| Ok(val1.wrapping_add(val2)))),
                 Instruction::LADD => wrap_error!(execute_l_arithmetic(vm, |val1, val2| Ok(val1.wrapping_add(val2)))),
+                Instruction::FADD => wrap_error!(execute_f_arithmetic(vm, |val1, val2| Ok(val1 + val2))),
+                Instruction::DADD => wrap_error!(execute_d_arithmetic(vm, |val1, val2| Ok(val1 + val2))),
 
                 Instruction::ISUB => wrap_error!(execute_i_arithmetic(vm, |val1, val2| Ok(val1.wrapping_sub(val2)))),
                 Instruction::LSUB => wrap_error!(execute_l_arithmetic(vm, |val1, val2| Ok(val1.wrapping_sub(val2)))),
+                Instruction::FSUB => wrap_error!(execute_f_arithmetic(vm, |val1, val2| Ok(val1 - val2))),
+                Instruction::DSUB => wrap_error!(execute_d_arithmetic(vm, |val1, val2| Ok(val1 - val2))),
 
                 Instruction::IMUL => wrap_error!(execute_i_arithmetic(vm, |val1, val2| Ok(val1.wrapping_mul(val2)))),
                 Instruction::LMUL => wrap_error!(execute_l_arithmetic(vm, |val1, val2| Ok(val1.wrapping_mul(val2)))),
@@ -346,6 +354,7 @@ pub fn execute_current_block<'a>(vm: &VM<'a>) -> Option<VMPartialResult<Option<V
                 Instruction::IAND => wrap_error!(execute_i_arithmetic(vm, |val1, val2| Ok(val1 & val2))),
                 Instruction::LAND => wrap_error!(execute_l_arithmetic(vm, |val1, val2| Ok(val1 & val2))),
                 Instruction::IOR  => wrap_error!(execute_i_arithmetic(vm, |val1, val2| Ok(val1 | val2))),
+                Instruction::LOR  => wrap_error!(execute_l_arithmetic(vm, |val1, val2| Ok(val1 | val2))),
                 Instruction::IXOR => wrap_error!(execute_i_arithmetic(vm, |val1, val2| Ok(val1 ^ val2))),
                 Instruction::LXOR => wrap_error!(execute_l_arithmetic(vm, |val1, val2| Ok(val1 ^ val2))),
                 Instruction::IINC(index, amount) => {
@@ -391,6 +400,15 @@ pub fn execute_current_block<'a>(vm: &VM<'a>) -> Option<VMPartialResult<Option<V
                         warn!("L2I Conversion failed, because {value:?} is not of type Long")
                     }
                 }
+                Instruction::L2F => {
+                    let value = vm.call_stack.pop_operand_value().unwrap();
+                    debug!("L2F");
+                    if let Value::Long(val) = value {
+                        vm.call_stack.push_operand_value(Value::Float(val as f32));
+                    } else {
+                        warn!("L2F Conversion failed, because {value:?} is not of type Long")
+                    }
+                }
                 Instruction::F2I => {
                     let value = vm.call_stack.pop_operand_value().unwrap();
                     debug!("F2I");
@@ -416,6 +434,15 @@ pub fn execute_current_block<'a>(vm: &VM<'a>) -> Option<VMPartialResult<Option<V
                         vm.call_stack.push_operand_value(Value::Integer(val as i32));
                     } else {
                         warn!("D2I Conversion failed, because {value:?} is not of type Double")
+                    }
+                }
+                Instruction::D2L => {
+                    let value = vm.call_stack.pop_operand_value().unwrap();
+                    debug!("D2L");
+                    if let Value::Double(val) = value {
+                        vm.call_stack.push_operand_value(Value::Long(val as i64));
+                    } else {
+                        warn!("D2L Conversion failed, because {value:?} is not of type Double")
                     }
                 }
                 Instruction::I2B => {
@@ -566,35 +593,49 @@ pub fn execute_current_block<'a>(vm: &VM<'a>) -> Option<VMPartialResult<Option<V
                     }
                 }
 
-                Instruction::IRETURN | Instruction::LRETURN | Instruction::FRETURN | Instruction::ARETURN => {
+                Instruction::IRETURN | Instruction::LRETURN | Instruction::FRETURN | Instruction::DRETURN | Instruction::ARETURN => {
                     //TODO seperate for validation
                     let value = vm.call_stack.pop_operand_value().unwrap();
                     if !class_and_method.method.is_static(){
                         if let Some(Value::Reference(this)) = vm.call_stack.load_local(0){
-                            vm.debug_helper.tracker.push_event(this.id, format!("Function {} returned:\n    {:?}", class_and_method.format(), value))
+                            vm.debug_helper.tracker.push_object_event(this.id, format!("Function {} returned:\n    {:?}", class_and_method.format(), value))
                         }
+                    }
+                    vm.debug_helper.tracker.push_method_event(class_and_method.format(), format!("returning: {:?}", value));
+                    if !class_and_method.method.descriptor.return_type.clone().map(|rt| rt == value).unwrap_or(false) {
+                        unreachable!("Trying to return {:?} but expecting: {:?}", value, class_and_method.method.descriptor.return_type)
                     }
                     return Some(Ok(VMResultType::Successful(Some(value))))
                 }
                 Instruction::RETURN => {
+                    vm.debug_helper.tracker.push_method_event(class_and_method.format(), "returning".to_string());
+                    if class_and_method.method.name == "<clinit>"{
+                        vm.class_manager.update_class_state(class_and_method.class, ClassLoadingState::INITIALIZED);
+                    }
                     return Some(Ok(VMResultType::Successful(None)))
                 }
 
                 Instruction::PUTSTATIC(index) => {
                     let (_class_name, field_name, descriptor) = class_and_method.get_constant_field_info_descriptor(*index).expect("GIB MICH DIE FELD");
                     let (field_index, info, class_id) = class_and_method.class.find_field_static(field_name.as_str()).unwrap();
+                    if vm.class_manager.expect_class_state(class_id, ClassLoadingState::LOADED){
+                        unimplemented!()
+                    }
                     debug!("PUTSTATIC {} {} {} {:?}", field_name, descriptor, field_index, info);
                     let value = vm.call_stack.pop_operand_value().unwrap();
                     //let class_id = vm.class_manager.find_class_by_name(class_name.as_str()).unwrap().id;
                     let object = vm.get_static_class_object(class_id).unwrap();
-                    vm.debug_helper.tracker.push_event(object.id, format!("Set static field: {}: {:?} to:\n    {:?}", info.name, info.field_type, value));
+                    vm.debug_helper.tracker.push_object_event(object.id, format!("Set static field: {}: {:?} to:\n    {:?}", info.name, info.field_type, value));
                     object.set_field(field_index, value);
                 }
                 Instruction::GETSTATIC(index) => {
                     let (class_name, field_name, descriptor) = class_and_method.get_constant_field_info_descriptor(*index).expect("GIB MICH DIE FELD2");
                     //let (field_index, info) = self.class_and_method.class.find_field(field_name.as_str()).unwrap();
                     //let class = vm.class_manager.find_class_by_name(class_name.as_str()).unwrap();
-                    let class = get_or_init_option!(vm.get_or_resolve_class(class_name.as_str()));
+                    let class = get_or_init_option!(vm.get_or_initialize_class(class_name.as_str()));
+                    if vm.class_manager.expect_class_state(class.id, ClassLoadingState::LOADED){
+                        unimplemented!()
+                    }
                     let (field_index, info, class_id) = class.find_field_static(field_name.as_str()).unwrap();
                     let object = vm.get_static_class_object(class_id).unwrap();
                     debug!("GETSTATIC {} {} {} {:?}", field_name, descriptor, field_index, info);
@@ -606,14 +647,17 @@ pub fn execute_current_block<'a>(vm: &VM<'a>) -> Option<VMPartialResult<Option<V
                     let target_class = if class_name == class_and_method.class.name {
                         class_and_method.class
                     } else {
-                        get_or_init_option!(vm.get_or_resolve_class(class_name.as_str()))
+                        match vm.get_or_resolve_class(class_name.as_str()){
+                            Ok(clazz) => clazz,
+                            Err(e) => return Some(Err(e)),
+                        }
                     };
                     let (field_index, _) = target_class.find_field(field_name.as_str()).unwrap();
                     let object = vm.call_stack.pop_operand_value().unwrap();
-                    if let Value::Reference(obj) = object {
+                    if let Value::Reference(obj) = object && !object.is_null(){
                         vm.call_stack.push_operand_value(obj.get_field(field_index));
                     } else {
-                        warn!("NAO");
+                        return Some(Err(VmError::ValidationError(format!("Cannot get field: {}.{}::{} because 'this' is {:?}", class_name, field_name, descriptor, object))));
                     }
                 }
                 Instruction::PUTFIELD(index) => {
@@ -621,18 +665,21 @@ pub fn execute_current_block<'a>(vm: &VM<'a>) -> Option<VMPartialResult<Option<V
                     let target_class = if class_name == class_and_method.class.name {
                         class_and_method.class
                     } else {
-                        get_or_init_option!(vm.get_or_resolve_class(class_name.as_str()))
+                        match vm.get_or_resolve_class(class_name.as_str()){
+                            Ok(clazz) => clazz,
+                            Err(e) => return Some(Err(e)),
+                        }
                     };
                     let (field_index, info) = target_class.find_field(field_name.as_str()).unwrap();
                     debug!("PUTFIELD {}.{} {} {} {:?}", class_name, field_name, descriptor, field_index, info);
                     let value = vm.call_stack.pop_operand_value().unwrap();
                     let object = vm.call_stack.pop_operand_value().unwrap();
                     if let Value::Reference(obj) = object && !object.is_null(){
-                        vm.debug_helper.tracker.push_event(obj.id, format!("Set field: {}: {:?} to:\n    {:?}", info.name, info.field_type, value));
+                        vm.debug_helper.tracker.push_object_event(obj.id, format!("Set field: {}: {:?} to:\n    {:?}", info.name, info.field_type, value));
                         obj.set_field(field_index, value);
                         debug!("obj:{:?}", &obj);
                     } else {
-                        warn!("NAO");
+                        return Some(Err(VmError::ValidationError(format!("Cannot get field: {}.{}::{} because 'this' is {:?}", class_name, field_name, descriptor, object))));
                     }
                 }
 
@@ -640,10 +687,22 @@ pub fn execute_current_block<'a>(vm: &VM<'a>) -> Option<VMPartialResult<Option<V
                 Instruction::INVOKESPECIAL(index) => { return Some(execute_invoke(vm, *index, InvokeKind::SPECIAL)) }
                 Instruction::INVOKESTATIC(index) => { return Some(execute_invoke(vm, *index, InvokeKind::STATIC)) }
                 Instruction::INVOKEINTERFACE(index, _, _) => { return Some(execute_invoke(vm, *index, InvokeKind::INTERFACE)) }
+                Instruction::INVOKEDYNAMIC(index, _, _) => {
+                    if let ConstantPoolEntry::InvokeDynamic(a, b) = &class_and_method.class.constants.0[*index as usize - 1]{
+                        let d = &class_and_method.class.bootstrap_methods.0[0];
+                        let c = get_constant_printable(&class_and_method.class.constants, *b);
+                        unimplemented!()
+                    }
+                    unimplemented!()
+                }
 
                 Instruction::NEW(index) => {
                     let class_name = class_and_method.get_constant_utf8(*index).unwrap();
-                    let new_object = get_or_init_option!(vm.new_object(class_name.as_str()));
+                    let class_ref = get_or_init_option!(vm.get_or_initialize_class(class_name.as_str()));
+                    if vm.class_manager.expect_class_state(class_ref.id, ClassLoadingState::LOADED){
+                        unimplemented!("Cannot create instance of {:?} if not initializ-ed/-ing", class_ref.name);
+                    }
+                    let new_object = vm.new_object_from_class(class_ref);
 
                     debug!("NEW: {} {} {:?}", index, class_name, &new_object);
                     vm.call_stack.push_operand_value(Value::Reference(new_object));
@@ -707,7 +766,10 @@ pub fn execute_current_block<'a>(vm: &VM<'a>) -> Option<VMPartialResult<Option<V
                     debug!("CHECKCAST {}", get_constant_printable(&class_and_method.class.constants, *constant_index));
                 }
                 Instruction::INSTANCEOF(constant_index) => {
-                    let of_class = get_or_init_option!(vm.get_or_resolve_class(get_constant_printable(&class_and_method.class.constants, *constant_index).as_str()));
+                    let of_class = match vm.get_or_resolve_class(get_constant_printable(&class_and_method.class.constants, *constant_index).as_str()){
+                        Ok(clazz) => clazz,
+                        Err(e) => return Some(Err(e)),
+                    };
 
                     let object = vm.call_stack.pop_operand_value().unwrap();
                     if object.is_null(){
@@ -793,6 +855,7 @@ pub fn execute_current_block<'a>(vm: &VM<'a>) -> Option<VMPartialResult<Option<V
             vm.call_stack.store_local(top, *index);
         }
         InstructionBlock::IConstReturn(val) => {
+            vm.debug_helper.tracker.push_method_event(class_and_method.format(), format!("returning int: {}", val));
             return Some(Ok(VMResultType::Successful(Some(Value::Integer(*val)))))
         }
         other => {
@@ -986,10 +1049,13 @@ fn execute_ji_arithmetic<F: FnOnce(i64, i32) -> Result<i64, VmError>>(vm: &VM, f
 }
 
 fn execute_invoke<'a>(vm: &VM<'a>, index: u16, kind: InvokeKind) -> VMPartialResult<Option<Value<'a>>> {
-    let class_and_method = &vm.call_stack.frames.borrow().last().unwrap().class_and_method.clone();
-    let (class_name, method_name, descriptor) = class_and_method.get_constant_method_info_descriptor(index).expect("GIB MICH DIE METHODE");
+    let calling_class_and_method = &vm.call_stack.frames.borrow().last().unwrap().class_and_method.clone();
+    let (class_name, method_name, descriptor) = calling_class_and_method.get_constant_method_info_descriptor(index).expect("GIB MICH DIE METHODE");
     trace!("loading class to execute on: '{}'", class_name.as_str());
-    let class = get_or_init!(vm.get_or_resolve_class(class_name.as_str())?);
+    let class = get_or_init!(vm.get_or_initialize_class(class_name.as_str())?);
+    if vm.class_manager.expect_class_state(class.id, ClassLoadingState::LOADED){
+        unimplemented!()
+    }
     trace!("finished loading class to execute on: '{}'", class_name.as_str());
     let args_count = MethodDescriptor::new(descriptor.clone()).args.len();
     trace!("args_count: {}", args_count);
@@ -1053,7 +1119,15 @@ fn execute_invoke<'a>(vm: &VM<'a>, index: u16, kind: InvokeKind) -> VMPartialRes
     }
     debug!("INVOKE{:?}: {}{} on {:?}", kind, method_name, descriptor, receiver);
     if let Some(rec) = receiver{
-        vm.debug_helper.tracker.push_event(rec.id, format!("Preparing call {} with args:{}", class_and_method.format(), args.iter().map(|v| format!("\n    {:?}", v)).collect::<Vec<_>>().join("")));
+        vm.debug_helper.tracker.push_object_event(rec.id, format!("Preparing call {} with args:{}", class_and_method.format(), args.iter().map(|v| format!("\n    {:?}", v)).collect::<Vec<_>>().join("")));
+        vm.debug_helper.tracker.push_method_event(class_and_method.format(), format!("Calling on {:?} with args: {}", rec, args.iter().map(|v| format!("\n    {:?}", v)).collect::<Vec<_>>().join("") ));
+    } else {
+        vm.debug_helper.tracker.push_method_event(class_and_method.format(), format!("Calling static with args: {}", args.iter().map(|v| format!("\n    {:?}", v)).collect::<Vec<_>>().join("") ));
+    }
+    for (i, provided_arg) in args.iter().filter(|a| if let Value::Dummy = a {false} else {true}).enumerate(){
+        if !(&class_and_method.method.descriptor.args[i] == provided_arg){
+            return Err(VmError::ValidationError(format!("Expected arg type: {:?} but got value: {:?}", class_and_method.method.descriptor.args[i], provided_arg)));
+        }
     }
     vm.call_stack.create_and_push_call_frame(class_and_method, receiver, args, true);
     Ok(VMResultType::Interrupted(1, false))
@@ -1164,7 +1238,7 @@ fn execute_create_array<'a>(vm: &VM<'a>, array_field_type: FieldType, dims: usiz
     if let FieldType::Array(_, component_type) = array_field_type{
         //ensure that the array class get loaded before popping the count(s)
         for i in 0..dims{
-            let _ = get_or_init!(vm.get_or_resolve_class(component_type.clone().to_array_field_type(i+1).to_class_name().as_str())?);
+            let _ = vm.get_or_resolve_class(component_type.clone().to_array_field_type(i+1).to_class_name().as_str())?;
         }
         let mut content = Vec::new();
         for i in 0..dims{

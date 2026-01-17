@@ -18,7 +18,7 @@ pub struct FieldInfo{
     pub attributes: Vec<Attribute>
 }
 
-static PATTERN: Lazy<Regex> = lazy_regex!(r"(?<array>\[+)?(?:(?<primitive>[ZBSIJFDC])|L(?<object>[/a-zA-Z$0-9]+);)");
+static PATTERN: Lazy<Regex> = lazy_regex!(r"(?<array>\[+)?(?:(?<primitive>[ZBSIJFDC])|L(?<object>[/a-zA-Z$0-9_]+);)");
 
 pub fn get_field_type_raw_parts(raw: &str) -> VMResult<(Option<&str>, Option<&str>, Option<&str>)> {
     if let Some(cap) = PATTERN.captures(raw){
@@ -147,6 +147,23 @@ impl FromStr for FieldType{
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let (object, primitive, array) = get_field_type_raw_parts(s)?;
         FieldType::from_raw_parts(object, primitive, array)
+    }
+}
+
+impl PartialEq<Value<'_>> for FieldType{
+    fn eq(&self, other: &Value) -> bool {
+        match (other, self) {
+            (Value::Reference(..), FieldType::Object(..)) | (Value::Reference(..), FieldType::Array(..)) => true,
+            (Value::Integer(..), FieldType::Primitive(PrimitiveType::Integer)) => true,
+            (Value::Integer(..), FieldType::Primitive(PrimitiveType::Short)) => true,
+            (Value::Integer(..), FieldType::Primitive(PrimitiveType::Byte)) => true,
+            (Value::Integer(..), FieldType::Primitive(PrimitiveType::Boolean)) => true,
+            (Value::Integer(..), FieldType::Primitive(PrimitiveType::Char)) => true,
+            (Value::Long(..), FieldType::Primitive(PrimitiveType::Long)) => true,
+            (Value::Float(..), FieldType::Primitive(PrimitiveType::Float)) => true,
+            (Value::Double(..), FieldType::Primitive(PrimitiveType::Double)) => true,
+            _ => false
+        }
     }
 }
 

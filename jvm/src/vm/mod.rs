@@ -18,7 +18,7 @@ use crate::method_info::{MethodDescriptor, MethodInfo};
 use crate::vm::bytecode::InstructionBlock;
 use crate::vm::call_frame::CallFrame;
 use crate::vm::class::{Class, ClassAndMethod, ClassId, ClassRef};
-use crate::vm::class_manager::ResolvedClass;
+use crate::vm::class_manager::{ClassLoadingState, ResolvedClass};
 use crate::vm::debug::DebugHelper;
 use crate::vm::gc::ObjectAllocator;
 use crate::vm::java_error::JavaError;
@@ -103,7 +103,6 @@ impl<'a> VM<'a>{
     pub fn invoke_frames_until(&self, java_vm: &JavaVM, stop_index: isize) -> VMPartialResult<Option<Value<'a>>> {
         loop {
             let frame_amount = self.call_stack.len();
-            let frame_index = if frame_amount > 0 {frame_amount - 1} else {frame_amount};
 
             // if an exception is caught, try to let the current frame handle it
             let mut clear_exception = false;
@@ -321,7 +320,7 @@ impl<'a> VM<'a>{
             .take_while(|value| value != &Value::Uninitialized)
             .collect::<Vec<_>>();
         let try_native = NativeMethodRegistry::invoke(self, java_vm, &class_and_method, object, args);
-        debug!("TTT {:?}", try_native);
+        debug!("TTT native[{}] returned: {:?}", class_and_method.format(), try_native);
         if let Some(native) = try_native {
             native
         } else {
@@ -360,22 +359,29 @@ impl<'a> VM<'a>{
         Ok(None)
     }
 
-    pub fn get_or_resolve_class(&self, class_name: &str) -> VMPartialResult<ClassRef<'a>>{
+    pub fn get_or_resolve_class(&self, class_name: &str) -> VMResult<ClassRef<'a>>{
         let resolved = self.class_manager.get_or_resolve_class(class_name)?;
-        if let ResolvedClass::NewClass(to_init) = &resolved{
-            let filtered_to_init_amount = to_init.to_initialize
-                .iter()
-                .map(|class| self.init_class(class))
+        Ok(resolved.get_class())
+    }
+
+    pub fn get_or_initialize_class(&self, class_name: &str) -> VMPartialResult<ClassRef<'a>>{
+        let resolved = self.get_or_resolve_class(class_name)?;
+        let to_init = self.class_manager.get_classes_to_initialize(resolved)?;
+        if to_init.len() > 0{
+            let count = to_init.iter()
+                .map(|clazz| {
+                    self.class_manager.update_class_state(clazz, ClassLoadingState::INITIALIZING);
+                    self.init_class(clazz)
+                })
                 .filter(Option::is_some)
-                .map(Option::unwrap)
                 .count();
-            if filtered_to_init_amount == 0{
-                Ok(VMResultType::Successful(resolved.get_class()))
+            if count > 0{
+                Ok(VMResultType::Interrupted(count, true))
             } else {
-                Ok(VMResultType::Interrupted(filtered_to_init_amount, true))
+                Ok(VMResultType::Successful(resolved))
             }
         } else {
-            Ok(VMResultType::Successful(resolved.get_class()))
+            Ok(VMResultType::Successful(resolved))
         }
     }
 
@@ -388,7 +394,7 @@ impl<'a> VM<'a>{
         if resolved.is_none() {
             let to_init = self.class_manager.parse_and_load_class(class_name, class_name, None, bytes)?;
             return Ok(VMResultType::Interrupted(
-                to_init.to_initialize
+                to_init.to_load
                     .iter()
                     .map(|class| self.init_class(class))
                     .filter(Option::is_some)
@@ -402,11 +408,11 @@ impl<'a> VM<'a>{
     }
 
     fn init_class(&self, class: ClassRef<'a>) -> Option<()>{
+        info!("IC[{}]", class.name);
         if class.transitive_field_count > 0 && !class.is_array(){
             let static_object = self.new_object_from_class(class);
             self.static_class_objects.borrow_mut().insert(class.id, static_object);
             if let Some(clinit_method) = class.find_method("<clinit>", "()V"){
-                info!("IC[{}]", class.name);
                 let class_and_method = ClassAndMethod{
                     class,
                     method: clinit_method,
@@ -415,15 +421,14 @@ impl<'a> VM<'a>{
                 return Some(());
             }
         }
-
+        self.class_manager.update_class_state(class, ClassLoadingState::INITIALIZED);
         None
     }
 
-    pub fn resolve_class_method(&self, class_name: &str, method_name: &str, descriptor: &str) -> VMPartialResult<ClassAndMethod<'a>>{
+    pub fn resolve_class_method(&self, class_name: &str, method_name: &str, descriptor: &str) -> VMResult<ClassAndMethod<'a>>{
         let result = self.get_or_resolve_class(class_name);
         result.and_then(|class| {
-            let class = get_or_init!(class);
-            self.get_class_method(class, method_name, descriptor).map(|e| VMResultType::Successful(e))
+            self.get_class_method(class, method_name, descriptor)
         })
     }
     
@@ -434,16 +439,8 @@ impl<'a> VM<'a>{
             .ok_or(VmError::JavaException(JavaError::MethodNotFoundException(method_name.to_string())))
     }
 
-    pub fn try_resolve_class_method(&self, class_name: &str, method_name: &str, descriptor: &str) -> VMResult<ClassAndMethod<'a>>{
-        if let VMResultType::Successful(method) = self.resolve_class_method(class_name, method_name, descriptor)? {
-            Ok(method)
-        } else {
-            Err(VmError::ClassNotLoadedError(format!("[try_resolve_class_method]: Class not loaded: {}", class_name)))
-        }
-    }
-
     pub fn new_object(&self, class_name: &str) -> VMPartialResult<Reference<'a>>{
-        get_or_init_special!(self.get_or_resolve_class(class_name)?, |class| Ok(VMResultType::Successful(self.new_object_from_class(class))))
+        get_or_init_special!(self.get_or_initialize_class(class_name)?, |class| Ok(VMResultType::Successful(self.new_object_from_class(class))))
     }
 
     pub fn try_new_object(&self, class_name: &str) -> VMResult<Reference<'a>>{
@@ -459,7 +456,7 @@ impl<'a> VM<'a>{
         info!("CC[{:?}] = {}", class.id, class.name);
         let obj = self.object_allocator.allocate_object(class);
         self.objects_by_id.borrow_mut().insert(obj.id, obj);
-        self.debug_helper.tracker.push_event(obj.id, format!("Object ({}) allocated", class.name));
+        self.debug_helper.tracker.push_object_event(obj.id, format!("Object ({}) allocated", class.name));
         obj
     }
 
@@ -473,14 +470,20 @@ impl<'a> VM<'a>{
         } else {
             unreachable!("The field type for creating an array has to be an array field type")
         };
-        get_or_init_special!(self.get_or_resolve_class(class_name.as_str())?,
+        //FIXME verify if this is correct / maybe have to init the component type
+        let class = self.get_or_resolve_class(class_name.as_str())?;
+        let obj = self.object_allocator.allocate_array(class, dims, *component_type, content);
+        self.objects_by_id.borrow_mut().insert(obj.id, obj);
+        self.debug_helper.tracker.push_object_event(obj.id, format!("Array ({}) allocated", class.name));
+        Ok(VMResultType::Successful(obj))
+        /*get_or_init_special!(self.get_or_initialize_class(class_name.as_str())?,
             |class| {
                 let obj = self.object_allocator.allocate_array(class, dims, *component_type, content);
                 self.objects_by_id.borrow_mut().insert(obj.id, obj);
-                self.debug_helper.tracker.push_event(obj.id, format!("Array ({}) allocated", class.name));
+                self.debug_helper.tracker.push_object_event(obj.id, format!("Array ({}) allocated", class.name));
                 Ok(VMResultType::Successful(obj))
             }
-        )
+        )*/
     }
 
     pub fn try_new_array(&self, dims: usize, array_field_type: FieldType, content: RefCell<Vec<Value<'a>>>) -> VMResult<Reference<'a>>{
@@ -522,9 +525,10 @@ impl<'a> VM<'a>{
 
         let string_object = get_or_init!(self.new_object("java/lang/String")?);
 
+        //value
         string_object.set_field(0, char_array);
+        //hash
         string_object.set_field(1, Value::Integer(0));
-        string_object.set_field(6, Value::Integer(0));
 
         self.string_objects.borrow_mut().insert(string.to_owned(), string_object);
         Ok(VMResultType::Successful(string_object))
@@ -574,17 +578,17 @@ impl<'a> VM<'a>{
     }
 
     pub fn new_class_object_by_name(&self, class_name: &str) -> VMPartialResult<Reference<'a>> {
-        let class_id = get_or_init_special!(self.get_or_resolve_class(class_name)?, |v: ClassRef| v.id);
+        let class_id = self.get_or_resolve_class(class_name)?.id;
         self.new_class_object(class_name, class_id)
     }
 
-    pub fn extract_class_from_class_object(&self, object: Reference<'a>) -> VMPartialResult<ClassRef<'a>>{
+    pub fn extract_class_from_class_object(&self, object: Reference<'a>) -> VMResult<ClassRef<'a>>{
         let name_object = object.get_field(5);
         let name = VM::extract_string_from_object(&name_object)?;
         let name = name.replace(".", "/");
-        let class = get_or_init!(self.get_or_resolve_class(name.as_str())?);
+        let class = self.get_or_resolve_class(name.as_str())?;
 
-        Ok(VMResultType::Successful(class))
+        Ok(class)
     }
     
     pub fn extract_class_name_from_class_object(object: Reference<'a>) -> VMResult<String>{

@@ -41,6 +41,11 @@ impl<'a> CallStack<'a> {
             locals[0] = Value::Reference(object.unwrap());
             offset = 1;
         }
+        for (i, provided_arg) in args.iter().filter(|a| if let Value::Dummy = a {false} else {true}).enumerate(){
+            if !(&class_and_method.method.descriptor.args[i] == provided_arg){
+                //unreachable!("Expected arg type: {:?} but got value: {:?}", class_and_method.method.descriptor.args[i], provided_arg);
+            }
+        }
         for (dest, src) in locals[offset..].iter_mut().zip(args) {
             *dest = src;
         }

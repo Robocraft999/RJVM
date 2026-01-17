@@ -86,7 +86,7 @@ impl Hash for MethodDescriptor{
     }
 }
 
-static PATTERN: Lazy<Regex> = lazy_regex!(r"(?<array>\[+)?(?:(?<primitive>[ZBSIJFDC])|L(?<object>[\/a-zA-Z$0-9]+);|(?<void>V))");
+static PATTERN: Lazy<Regex> = lazy_regex!(r"(?<array>\[+)?(?:(?<primitive>[ZBSIJFDC])|L(?<object>[\/a-zA-Z$0-9_]+);|(?<void>V))");
 
 impl MethodDescriptor{
     pub fn new(raw_string: String) -> Self{

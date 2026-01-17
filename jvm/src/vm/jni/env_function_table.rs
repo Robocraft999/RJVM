@@ -47,9 +47,9 @@ const TABLE: JNINativeInterface = [
     JNINativeInterface_::EnsureLocalCapacity as _,
 
     JNINativeInterface_::AllocObject as _,
-    not_implemented as _,
-    not_implemented as _,
-    //30
+    //28
+    JNINativeInterface_::NewObject as _,
+    JNINativeInterface_::NewObjectV as _,
     JNINativeInterface_::NewObjectA as _,
 
     JNINativeInterface_::GetObjectClass as _,
@@ -58,8 +58,8 @@ const TABLE: JNINativeInterface = [
     JNINativeInterface_::GetMethodID as _,
 
     //34
-    not_implemented as _,
-    not_implemented as _,
+    JNINativeInterface_::CallObjectMethod as _,
+    JNINativeInterface_::CallObjectMethodV as _,
     JNINativeInterface_::CallObjectMethodA as _,
     not_implemented as _,
     not_implemented as _,
@@ -230,7 +230,7 @@ const TABLE: JNINativeInterface = [
     //175
     //NewPrimitiveArray
     not_implemented as _,
-    not_implemented as _,
+    JNINativeInterface_::NewByteArray as _,
     not_implemented as _,
     not_implemented as _,
     not_implemented as _,
@@ -263,7 +263,7 @@ const TABLE: JNINativeInterface = [
     //199
     //GetPrimitiveArrayRegion
     not_implemented as _,
-    not_implemented as _,
+    JNINativeInterface_::GetByteArrayRegion as _,
     not_implemented as _,
     not_implemented as _,
     not_implemented as _,
@@ -274,7 +274,7 @@ const TABLE: JNINativeInterface = [
     //207
     //SetPrimitiveArrayRegion
     not_implemented as _,
-    not_implemented as _,
+    JNINativeInterface_::SetByteArrayRegion as _,
     not_implemented as _,
     not_implemented as _,
     not_implemented as _,
@@ -308,8 +308,8 @@ const TABLE: JNINativeInterface = [
 
     //224
     //string critical
-    not_implemented as _,
-    not_implemented as _,
+    JNINativeInterface_::GetStringChars as _,
+    JNINativeInterface_::ReleaseStringChars as _,
 
     //226
     //week global ref

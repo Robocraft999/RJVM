@@ -4,6 +4,7 @@ use crate::vm::result::VMResultType;
 use crate::vm::value::Value;
 use crate::vm::{jni, VmError, VM};
 use log::error;
+use crate::vm::class::ClassId;
 
 pub struct Application<'a>{
     java_vm: Pin<Box<JavaVM<'a>>>,
@@ -33,7 +34,7 @@ impl <'a> Application<'a>{
     }
 
     fn init_vm(&self) -> Result<(), VmError>{
-        if let VMResultType::Interrupted(..) = self.vm.get_or_resolve_class("sun/misc/VM")?{
+        if let VMResultType::Interrupted(..) = self.vm.get_or_initialize_class("sun/misc/VM")?{
             self.vm.invoke_frames_until(&self.java_vm, -1)?;
         }
 
@@ -41,19 +42,22 @@ impl <'a> Application<'a>{
     }
 
     fn init_system(&self) -> Result<(), VmError>{
-        if let VMResultType::Interrupted(..) = self.vm.get_or_resolve_class("java/lang/System")?{
+        if let VMResultType::Interrupted(..) = self.vm.get_or_initialize_class("java/lang/System")?{
             self.vm.invoke_frames_until(&self.java_vm, -1)?;
         }
-        let init = self.vm.try_resolve_class_method("java/lang/System", "initializeSystemClass", "()V")?;
+        for (k,v) in self.vm.class_manager.class_loading_states.borrow().iter() {
+            println!("Class: {:?}, state: {:?}", self.vm.find_class_by_id(ClassId(k.0)).unwrap().name, v);
+        }
+        let init = self.vm.resolve_class_method("java/lang/System", "initializeSystemClass", "()V")?;
         self.vm.invoke_new_frame(&self.java_vm, init, None, vec![])?;
         Ok(())
     }
 
     pub fn run_and_catch_method(&self, class_name: &str, method_name: &str, method_descriptor: &str, args: Vec<Value<'a>>){
-        if let VMResultType::Interrupted(..) = self.vm.get_or_resolve_class(class_name).unwrap().clone(){
+        if let VMResultType::Interrupted(..) = self.vm.get_or_initialize_class(class_name).unwrap().clone(){
             self.vm.invoke_frames_until(&self.java_vm, -1).unwrap();
         }
-        let main_method = self.vm.try_resolve_class_method(class_name, method_name, method_descriptor).unwrap();
+        let main_method = self.vm.resolve_class_method(class_name, method_name, method_descriptor).unwrap();
         let result = self.vm.invoke_new_frame(&self.java_vm, main_method, None, args);
         match result {
             Ok(res) => {
@@ -73,6 +77,9 @@ impl <'a> Application<'a>{
             Ok(_) => {}
             Err(error) => {
                 error!("Init VM: {}", error);
+                println!("Frames:");
+                self.vm.call_stack.print_call_stack();
+                self.vm.debug_helper.print();
                 panic!();
             }
         };

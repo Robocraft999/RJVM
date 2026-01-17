@@ -33,6 +33,11 @@ fn parse_u2(code_bytes: &Vec<u8>, pc: &mut usize) -> Result<u16, VmError>{
     Ok(res)
 }
 
+fn parse_i2(code_bytes: &Vec<u8>, pc: &mut usize) -> Result<i16, VmError>{
+    let res = i16::from_be_bytes([parse_u1(code_bytes, pc)?, parse_u1(code_bytes, pc)?]);
+    Ok(res)
+}
+
 fn parse_i4(code_bytes: &Vec<u8>, pc: &mut usize) -> Result<i32, VmError>{
     let res = i32::from_be_bytes([parse_u1(code_bytes, pc)?, parse_u1(code_bytes, pc)?, parse_u1(code_bytes, pc)?, parse_u1(code_bytes, pc)?]);
     Ok(res)
@@ -130,8 +135,8 @@ pub fn parse_instruction(code_bytes: &Vec<u8>, mut pc: usize) -> Result<(Instruc
             LDC(_) => LDC(parse_u1(code_bytes, &mut pc)?),
             LDCW(_) => LDCW(parse_u2(code_bytes, &mut pc)?),
             LDC2W(_) => LDC2W(parse_u2(code_bytes, &mut pc)?),
-            BIPUSH(_) => BIPUSH(parse_u1(code_bytes, &mut pc)?),
-            SIPUSH(_) => SIPUSH(parse_u2(code_bytes, &mut pc)?),
+            BIPUSH(_) => BIPUSH(parse_i1(code_bytes, &mut pc)?),
+            SIPUSH(_) => SIPUSH(parse_i2(code_bytes, &mut pc)?),
             GETFIELD(_) => GETFIELD(parse_u2(code_bytes, &mut pc)?),
             PUTFIELD(_) => PUTFIELD(parse_u2(code_bytes, &mut pc)?),
             ISTORE(_) => ISTORE(parse_u1(code_bytes, &mut pc)?),
@@ -202,8 +207,8 @@ pub enum Instruction{
     DCONST0  = 0xe,
     DCONST1  = 0xf,
 
-    BIPUSH(u8)  = 0x10,
-    SIPUSH(u16) = 0x11,
+    BIPUSH(i8)  = 0x10,
+    SIPUSH(i16) = 0x11,
     LDC(u8)     = 0x12,
     LDCW(u16)   = 0x13,
     LDC2W(u16)  = 0x14,

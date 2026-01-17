@@ -95,16 +95,18 @@ pub fn run() {
     let app = Application::new(vm);
     app.startup();
 
-    //vm.class_manager.get_or_resolve_class("Empty").expect("TODO: panic message");
-    //run_and_catch_method(&mut vm, "Test", "main", "([Ljava/lang/String;)V");
-
     simple_logger::SimpleLogger::new()
-        .with_level(LevelFilter::Warn)
+        .with_level(LevelFilter::Info)
         .with_module_level("debug", LevelFilter::Debug)
-        .with_module_level("native", LevelFilter::Error)
+        .with_module_level("native", LevelFilter::Debug)
         .without_timestamps()
         .init()
         .unwrap();
+
+
+
+    //vm.class_manager.get_or_resolve_class("Empty").expect("TODO: panic message");
+    //run_and_catch_method(&mut vm, "Test", "main", "([Ljava/lang/String;)V");
 
     let args = env::args().skip(1).map(|s| Value::Reference(app.vm.try_new_string_object(&s).unwrap())).collect();
     let args_array = app.vm.try_new_array(1, FieldType::Object("java/lang/String".to_string()).to_array_field_type(1), RefCell::new(args)).unwrap();

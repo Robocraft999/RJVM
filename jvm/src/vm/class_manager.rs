@@ -9,14 +9,15 @@ use crate::vm::result::VMResult;
 use crate::vm::{bytecode, VmError};
 use log::info;
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::cmp::PartialEq;
+use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
 use typed_arena::Arena;
 
 #[derive(Debug, Clone)]
 pub(crate) enum ResolvedClass<'a> {
     AlreadyLoaded(ClassRef<'a>),
-    NewClass(ClassesToInitialize<'a>),
+    NewClass(ClassesToLoad<'a>),
 }
 
 impl<'a> ResolvedClass<'a> {
@@ -29,9 +30,17 @@ impl<'a> ResolvedClass<'a> {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct ClassesToInitialize<'a> {
+pub(crate) struct ClassesToLoad<'a> {
     resolved_class: ClassRef<'a>,
-    pub(crate) to_initialize: Vec<ClassRef<'a>>,
+    pub(crate) to_load: Vec<ClassRef<'a>>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ClassLoadingState{
+    LOADED,
+    PREPARED,
+    INITIALIZING,
+    INITIALIZED,
 }
 
 
@@ -39,6 +48,7 @@ pub struct ClassManager<'a>{
     pub class_path: ClassPath,
     pub classes_by_name: RefCell<HashMap<String, ClassRef<'a>>>,
     pub classes_by_id: RefCell<HashMap<ClassId, ClassRef<'a>>>,
+    pub class_loading_states: RefCell<HashMap<ClassId, ClassLoadingState>>,
     pub classes: Arena<Class<'a>>,
     next_id: RefCell<u32>,
 }
@@ -49,6 +59,7 @@ impl<'a> ClassManager<'a>{
             class_path,
             classes_by_name: RefCell::new(HashMap::new()),
             classes_by_id: RefCell::new(HashMap::new()),
+            class_loading_states: RefCell::new(HashMap::new()),
             classes: Arena::with_capacity(100),
             next_id: RefCell::new(1),
         }
@@ -62,13 +73,13 @@ impl<'a> ClassManager<'a>{
         }
     }
 
-    pub fn resolve_class(&self, class_name: &str) -> Result<ClassesToInitialize<'a>, VmError>{
+    fn resolve_class(&self, class_name: &str) -> Result<ClassesToLoad<'a>, VmError>{
         let (class_to_load_name, array_info) = self.try_create_array_class(class_name)?;
         let bytes = self.class_path.resolve(class_to_load_name.as_str()).map_err(|e| VmError::ParseError(ClassParseError::from(e)))?.ok_or(ClassParseError::ResolveError(class_name.to_string()))?;
         self.parse_and_load_class(class_name, class_to_load_name.as_str(), array_info, bytes)
     }
 
-    pub fn parse_and_load_class(&self, class_name: &str, class_to_load_name: &str, array_info: Option<ArrayInfo>, bytes: Vec<u8>) -> VMResult<ClassesToInitialize<'a>>{
+    pub fn parse_and_load_class(&self, class_name: &str, class_to_load_name: &str, array_info: Option<ArrayInfo>, bytes: Vec<u8>) -> VMResult<ClassesToLoad<'a>>{
         let parsed_class = parse_class_file(bytes, class_to_load_name)?;
         let next_id = *self.next_id.borrow();
         *self.next_id.borrow_mut() += 1;
@@ -76,7 +87,7 @@ impl<'a> ClassManager<'a>{
         let mut resolved_classes = self.resolve_super_and_interfaces_and_annotations(&parsed_class)?;
         let mut super_class = parsed_class.super_class.map(|name| resolved_classes.get(&name).unwrap().get_class());
         let interfaces = parsed_class.interfaces.iter().map(|name| resolved_classes.get(name).unwrap().get_class()).collect();
-        if let Some(extends) = parsed_class.runtime_visible_annotations.0.iter().find(|a| a.name == "Linternal/Extends;"){
+        /*if let Some(extends) = parsed_class.runtime_visible_annotations.0.iter().find(|a| a.name == "Linternal/Extends;"){
             if let Some(pair) = extends.values.iter().find(|values| values.0 == "value"){
                 if let ElementValue::String(string ) = &pair.1{
                     let new_super_class = self.get_or_resolve_class(string)?;
@@ -84,7 +95,7 @@ impl<'a> ClassManager<'a>{
                     resolved_classes.insert(string.clone(), new_super_class);
                 }
             }
-        }
+        }*/
 
         let superclass_field_count = match super_class{
             Some(class) => class.transitive_field_count,
@@ -115,37 +126,37 @@ impl<'a> ClassManager<'a>{
             array_info
         };
 
-        let class_ref = self.classes.alloc(class);
+        let mut classes_to_load: Vec<ClassRef> = Vec::new();
+        for resolved_class in resolved_classes.values() {
+            if let ResolvedClass::NewClass(new_class) = resolved_class {
+                for to_load in new_class.to_load.iter() {
+                    classes_to_load.push(to_load)
+                }
+            }
+        }
+        if class.array_info.is_some() {
+            if let ResolvedClass::NewClass(array_class) = self.get_or_resolve_class(class_to_load_name)? {
+                for to_load in array_class.to_load.iter() {
+                    classes_to_load.push(to_load)
+                }
+            }
+        }
 
+        let class_ref = self.classes.alloc(class);
 
         let class_ref = unsafe {
             let class_ptr: *const Class<'a> = class_ref;
             &*class_ptr
         };
 
-        let mut classes_to_init: Vec<ClassRef> = Vec::new();
-        for resolved_class in resolved_classes.values() {
-            if let ResolvedClass::NewClass(new_class) = resolved_class {
-                for to_initialize in new_class.to_initialize.iter() {
-                    classes_to_init.push(to_initialize)
-                }
-            }
-        }
-        if class_ref.array_info.is_some() {
-            if let ResolvedClass::NewClass(array_class) = self.get_or_resolve_class(class_to_load_name)? {
-                for to_initialize in array_class.to_initialize.iter() {
-                    classes_to_init.push(to_initialize)
-                }
-            }
-        }
-
-        classes_to_init.push(class_ref);
+        classes_to_load.push(class_ref);
 
         self.classes_by_name.borrow_mut().insert(class_name.to_string(), class_ref);
         self.classes_by_id.borrow_mut().insert(class_ref.id, class_ref);
-        Ok(ClassesToInitialize{
+        self.class_loading_states.borrow_mut().insert(class_ref.id, ClassLoadingState::LOADED);
+        Ok(ClassesToLoad {
             resolved_class: class_ref,
-            to_initialize: classes_to_init,
+            to_load: classes_to_load,
         })
     }
 
@@ -159,12 +170,37 @@ impl<'a> ClassManager<'a>{
             let resolved_class = self.get_or_resolve_class(interface_name)?;
             resolved_classes.insert(interface_name.clone(), resolved_class);
         }
-        for annotation in class_file.runtime_visible_annotations.0.iter(){
+        /*for annotation in class_file.runtime_visible_annotations.0.iter(){
             let parsed_name = FieldType::from_str(annotation.name.as_str())?.to_class_name();
             let resolved_class = self.get_or_resolve_class(parsed_name.as_str())?;
             resolved_classes.insert(parsed_name, resolved_class);
-        }
+        }*/
         Ok(resolved_classes)
+    }
+
+    pub fn get_classes_to_initialize(&self, class: ClassRef<'a>) -> VMResult<Vec<ClassRef<'a>>> {
+        let mut to_initialize = Vec::new();
+        if let Some(super_class) = class.superclass{
+            for clazz in self.get_classes_to_initialize(super_class)?{
+                if !to_initialize.contains(&clazz){
+                    to_initialize.push(clazz);
+                }
+            }
+        }
+        for interface in class.interfaces.iter(){
+            for clazz in self.get_classes_to_initialize(interface)?{
+                if !to_initialize.contains(&clazz){
+                    to_initialize.push(clazz);
+                }
+            }
+        }
+        to_initialize.push(class);
+        Ok(to_initialize.into_iter().filter(|c| self.expect_class_state(c.id, ClassLoadingState::LOADED)).collect())
+    }
+
+    pub fn update_class_state(&self, clazz: ClassRef, new_state: ClassLoadingState){
+        //TODO validate that the class existed
+        self.class_loading_states.borrow_mut().insert(clazz.id, new_state);
     }
 
     fn try_create_array_class(&self, class_name: &str) -> VMResult<(String, Option<ArrayInfo>)>{
@@ -188,5 +224,9 @@ impl<'a> ClassManager<'a>{
 
     pub fn find_class_by_id(&self, class_id: ClassId) -> Option<ClassRef<'a>>{
         self.classes_by_id.borrow().get(&class_id).cloned()
+    }
+
+    pub fn expect_class_state(&self, class_id: ClassId, state: ClassLoadingState) -> bool{
+        self.class_loading_states.borrow().get(&class_id).map(|s| s == &state).unwrap_or(false)
     }
 }
