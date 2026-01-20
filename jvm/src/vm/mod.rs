@@ -494,6 +494,10 @@ impl<'a> VM<'a>{
             Err(VmError::ClassNotLoadedError("[try_new_object]: Class not loaded".to_string()))
         }
     }
+    
+    pub fn new_class_array_1(&self, content: Vec<Value<'a>>) -> VMPartialResult<Reference<'a>>{
+        self.new_array(1, FieldType::Object("java/lang/Class".to_string()).to_array_field_type(1), RefCell::new(content))
+    }
 
     pub fn try_new_string_object(&self, string: &str) -> VMResult<Reference<'a>>{
         let result = self.new_string_object(string)?;

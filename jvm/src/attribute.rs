@@ -145,9 +145,7 @@ pub struct BootstrapMethods(pub Vec<BootstrapMethod>);
 #[derive(Clone, Debug, PartialEq)]
 pub struct BootstrapMethod{
     pub kind: BytecodeBehavior,
-    pub class_name: String,
-    pub method_name: String,
-    pub method_descriptor: String,
+    pub method_ref_index: u16,
     pub arguments_indices: Vec<u16>,
 }
 

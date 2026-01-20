@@ -408,19 +408,18 @@ pub fn parse_class_file(bytes: Vec<u8>, class_name: &str) -> VMResult<ClassFile>
                     }
                     if let ConstantPoolEntry::MethodHandle(kind, method_ref_index) = method_handle {
                         //println!("Handle: {}", kind);
+                        let method = BootstrapMethod{
+                            kind: BytecodeBehavior::from_repr(*kind).unwrap(),
+                            method_ref_index: *method_ref_index,
+                            arguments_indices: args,
+                        };
+                        bootstrap_methods_vec.push(method);
                         let method_ref = constant_pool.0.get(*method_ref_index as usize - 1).unwrap();
                         if let ConstantPoolEntry::Methodref(class_index, name_and_type_index) = method_ref{
                             //println!("{}", get_constant_printable(&constant_pool, *class_index));
                             let name_and_type = constant_pool.0.get(*name_and_type_index as usize - 1).unwrap();
                             if let ConstantPoolEntry::NameAndType(name_index, type_index) = name_and_type {
-                                let method = BootstrapMethod{
-                                    kind: BytecodeBehavior::from_repr(*kind).unwrap(),
-                                    class_name: get_constant_printable(&constant_pool, *class_index),
-                                    method_name: get_constant_printable(&constant_pool, *name_index),
-                                    method_descriptor: get_constant_printable(&constant_pool, *type_index),
-                                    arguments_indices: args,
-                                };
-                                bootstrap_methods_vec.push(method);
+                                
                             }
                         }
                     }

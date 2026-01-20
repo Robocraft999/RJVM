@@ -191,12 +191,10 @@ impl<'a> ClassAndMethod<'a>{
     }
 
     pub fn get_constant_method_info_descriptor(&self, index: u16) -> Option<(String, String, String)>{
-        let (class_index, name_and_type_index) = if let Some(ConstantPoolEntry::Methodref(class_index, name_and_type_index)) = self.class.get_constant(index){
-            (class_index, name_and_type_index)
-        } else if let Some(ConstantPoolEntry::InterfaceMethodref(class_index, name_and_type_index)) = self.class.get_constant(index){
-            (class_index, name_and_type_index)
-        } else {
-            return None;
+        let (class_index, name_and_type_index) = match self.class.get_constant(index){
+            Some(ConstantPoolEntry::Methodref(class_index, name_and_type_index)) |
+            Some(ConstantPoolEntry::InterfaceMethodref(class_index, name_and_type_index)) => {(class_index, name_and_type_index)},
+            _ => return None
         };
         if let Some(ConstantPoolEntry::NameAndType(name_index, type_index)) = self.class.get_constant(name_and_type_index){
             let class_name = self.get_constant_utf8(class_index).unwrap();
