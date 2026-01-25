@@ -336,6 +336,7 @@ pub fn register_all_natives(registry: &mut NativeMethodRegistry){
     registry.register("java/security/AccessController", "doPrivileged", "(Ljava/security/PrivilegedExceptionAction;)Ljava/lang/Object;", delegate_do_privileged);
     registry.register("java/security/AccessController", "doPrivileged", "(Ljava/security/PrivilegedExceptionAction;Ljava/security/AccessControlContext;)Ljava/lang/Object;", delegate_do_privileged);
     registry.register("java/lang/String", "intern", "()Ljava/lang/String;", delegate_string_intern);
+    registry.register("java/lang/invoke/MethodHandle", "invokeExact", "([Ljava/lang/Object;)Ljava/lang/Object;", delegate_mh_invoke_exact);
     registry.register("sun/reflect/NativeConstructorAccessorImpl", "newInstance0", "(Ljava/lang/reflect/Constructor;[Ljava/lang/Object;)Ljava/lang/Object;", delegate_new_instance0);
     registry.register("sun/reflect/NativeMethodAccessorImpl", "invoke0", "(Ljava/lang/reflect/Method;Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;", delegate_invoke0);
     registry.register("java/io/FileOutputStream", "writeBytes", "([BIIZ)V", delegate_write_bytes);
@@ -1285,6 +1286,10 @@ fn delegate_string_intern<'a>(vm: &VM<'a>, _: &JavaVM, _: ClassRef<'a>, object: 
     } else {
         Err(VmError::ValidationError("Expected a string object reference".to_owned()))
     }
+}
+
+fn delegate_mh_invoke_exact<'a>(vm: &VM<'a>, _: &JavaVM, _: ClassRef<'a>, object: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
+    unimplemented!()
 }
 
 fn delegate_new_instance0<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, object: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{

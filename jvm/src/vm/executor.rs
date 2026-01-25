@@ -692,31 +692,8 @@ pub fn execute_current_block<'a>(vm: &VM<'a>) -> Option<VMPartialResult<Option<V
                     if let Some(FastConstantPoolEntry::InvokeDynamic(bm, method_name, type_name)) = class_and_method.class.get_or_resolve_constant_fast(vm, *index){
                         let method_type_class = get_or_init_option!(vm.get_or_initialize_class("java/lang/invoke/MethodType"));
 
-                        let d = &class_and_method.class.bootstrap_methods.0[bootstrap_method_index as usize];
-                        let (b_class_name, b_method_name, b_method_descriptor) = class_and_method.get_constant_method_info_descriptor(d.method_ref_index).unwrap();
-                        let b_class_and_method = vm.resolve_class_method(b_class_name.as_str(), b_method_name.as_str(), b_method_descriptor.as_str()).unwrap();
-
-                        let mut b_args_classes = Vec::with_capacity(b_class_and_method.method.get_args_count());
-                        for ft in &b_class_and_method.method.descriptor.args{
-                            let class_ref = get_or_init_option!(vm.new_class_object_by_name(ft.to_class_name().as_str()));
-                            b_args_classes.push(Value::Reference(class_ref));
-                        }
-                        let b_ret_type_class_name = b_class_and_method.method.descriptor.return_type.clone().map(|ft| ft.to_class_name());
-                        let b_ret_type = if let Some(name) = b_ret_type_class_name{
-                            Value::Reference(get_or_init_option!(vm.new_class_object_by_name(name.as_str())))
-                        } else {
-                            vm.null()
-                        };
-                        let args_array = get_or_init_option!(vm.new_class_array_1(b_args_classes));
-                        let method_type_ref = vm.new_object_from_class(method_type_class);
-                        method_type_ref.set_field(1, b_ret_type);
-                        method_type_ref.set_field(2, Value::Reference(args_array));
-
-                        if let Some(ConstantPoolEntry::NameAndType(name_index, type_index)) = class_and_method.class.get_constant(name_and_type_index){
-                            let method_name = class_and_method.get_constant_utf8(name_index).unwrap();
-                            let method_sig = class_and_method.get_constant_utf8(type_index).unwrap();
-                            unimplemented!()
-                        }
+                        let method_handle_constant = class_and_method.class.get_or_resolve_constant_fast(vm, bm.bootstrap_method_ref_index).unwrap();
+                        let method_handle_ref = get_or_init_option!(vm.new_value_from_constant(method_handle_constant));
                         unimplemented!()
                     }
                     unimplemented!()

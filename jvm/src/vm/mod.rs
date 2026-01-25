@@ -586,6 +586,65 @@ impl<'a> VM<'a>{
         self.new_class_object(class_name, class_id)
     }
 
+    pub fn new_method_type(&self, descriptor: &MethodDescriptor) -> VMPartialResult<Reference<'a>> {
+        let method_type_class = get_or_init!(self.get_or_initialize_class("java/lang/invoke/MethodType")?);
+
+        let mut b_args_classes = Vec::new();
+        for ft in &descriptor.args{
+            let class_ref = get_or_init!(self.new_class_object_by_name(ft.to_class_name().as_str())?);
+            b_args_classes.push(Value::Reference(class_ref));
+        }
+        let b_ret_type_class_name = descriptor.return_type.clone().map(|ft| ft.to_class_name());
+        let b_ret_type = if let Some(name) = b_ret_type_class_name{
+            Value::Reference(get_or_init!(self.new_class_object_by_name(name.as_str())?))
+        } else {
+            self.null()
+        };
+        let args_array = get_or_init!(self.new_class_array_1(b_args_classes)?);
+        let method_type_ref = self.new_object_from_class(method_type_class);
+        method_type_ref.set_field(1, b_ret_type);
+        method_type_ref.set_field(2, Value::Reference(args_array));
+        successful_result(method_type_ref)
+    }
+
+    pub fn new_value_from_constant(&self, constant: FastConstantPoolEntry<'a>) -> VMPartialResult<Value<'a>> {
+        match constant {
+            FastConstantPoolEntry::Class(class) => {
+                successful_result(Value::Reference(get_or_init!(self.new_class_object_by_class(class)?)))
+            }
+            FastConstantPoolEntry::String(string) => {
+                successful_result(Value::Reference(get_or_init!(self.new_string_object(string.as_str())?)))
+            }
+            FastConstantPoolEntry::Integer(value) => {
+                Ok(VMResultType::Successful(Value::Integer(value)))
+            }
+            FastConstantPoolEntry::Float(value) => {
+                Ok(VMResultType::Successful(Value::Float(value)))
+            }
+            FastConstantPoolEntry::Long(value) => {
+                Ok(VMResultType::Successful(Value::Long(value)))
+            }
+            FastConstantPoolEntry::Double(value) => {
+                Ok(VMResultType::Successful(Value::Double(value)))
+            }
+            FastConstantPoolEntry::MethodHandleField(kind, caf) => {
+                let method_handle_class = get_or_init!(self.get_or_initialize_class("java/lang/invoke/MethodHandle")?);
+                unimplemented!()
+            }
+            FastConstantPoolEntry::MethodHandleMethod(kind, cam) => {
+                let method_handle_class = get_or_init!(self.get_or_initialize_class("java/lang/invoke/MethodHandle")?);
+                let lambda_form_class = get_or_init!(self.get_or_initialize_class("java/lang/invoke/LambdaForm")?);
+                let method_type_ref = get_or_init!(self.new_method_type(&cam.method.descriptor)?);
+                unimplemented!()
+            }
+            FastConstantPoolEntry::MethodType(descriptor) => {
+                let method_type_ref = get_or_init!(self.new_method_type(&descriptor)?);
+                successful_result(Value::Reference(method_type_ref))
+            }
+            _ => Err(VmError::ValidationError(format!( "Could not make a value out of: {:?}", constant))),
+        }
+    }
+
     pub fn extract_class_from_class_object(&self, object: Reference<'a>) -> VMResult<ClassRef<'a>>{
         let name_object = object.get_field(5);
         let name = VM::extract_string_from_object(&name_object)?;

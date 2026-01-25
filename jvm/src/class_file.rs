@@ -397,7 +397,6 @@ pub fn parse_class_file(bytes: Vec<u8>, class_name: &str) -> VMResult<ClassFile>
                 let mut bootstrap_methods_vec = Vec::new();
                 for _ in 0..num_bootstrap_methods {
                     let bootstrap_method_handle = parse_u2(&mut bytes)?;
-                    let method_handle = constant_pool.0.get(bootstrap_method_handle as usize - 1).unwrap();
                     //println!("BootstrapMethods {:?}", &method_handle);
                     let mut args = Vec::new();
 
@@ -406,23 +405,11 @@ pub fn parse_class_file(bytes: Vec<u8>, class_name: &str) -> VMResult<ClassFile>
                         let argument_index = parse_u2(&mut bytes)?;
                         args.push(argument_index);
                     }
-                    if let ConstantPoolEntry::MethodHandle(kind, method_ref_index) = method_handle {
-                        //println!("Handle: {}", kind);
-                        let method = BootstrapMethod{
-                            kind: BytecodeBehavior::from_repr(*kind).unwrap(),
-                            method_ref_index: *method_ref_index,
-                            arguments_indices: args,
-                        };
-                        bootstrap_methods_vec.push(method);
-                        let method_ref = constant_pool.0.get(*method_ref_index as usize - 1).unwrap();
-                        if let ConstantPoolEntry::Methodref(class_index, name_and_type_index) = method_ref{
-                            //println!("{}", get_constant_printable(&constant_pool, *class_index));
-                            let name_and_type = constant_pool.0.get(*name_and_type_index as usize - 1).unwrap();
-                            if let ConstantPoolEntry::NameAndType(name_index, type_index) = name_and_type {
-                                
-                            }
-                        }
-                    }
+                    let method = BootstrapMethod{
+                        bootstrap_method_ref_index: bootstrap_method_handle,
+                        arguments_indices: args,
+                    };
+                    bootstrap_methods_vec.push(method);
                 }
                 bootstrap_methods = BootstrapMethods(bootstrap_methods_vec);
             }
