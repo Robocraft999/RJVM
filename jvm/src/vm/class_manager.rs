@@ -1,18 +1,19 @@
-use crate::attribute::ElementValue;
+use crate::attribute::{BootstrapMethod, BootstrapMethods, ElementValue};
 use crate::class_file::{parse_class_file, ClassFile};
 use crate::error::ClassParseError;
 use crate::field_info::{extract_component_type_from_array_class, FieldType};
 use crate::method_info::MethodInfo;
-use crate::vm::class::{ArrayInfo, Class, ClassId, ClassRef};
+use crate::vm::class::{ArrayInfo, Class, ClassAndField, ClassAndMethod, ClassId, ClassRef};
 use crate::vm::class_path::ClassPath;
 use crate::vm::result::VMResult;
-use crate::vm::{bytecode, VmError};
+use crate::vm::{bytecode, class, VmError};
 use log::info;
 use std::cell::RefCell;
 use std::cmp::PartialEq;
 use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
 use typed_arena::Arena;
+use crate::constants::{BytecodeBehavior, ConstantPool, ConstantPoolEntry, FastConstantPool, FastConstantPoolEntry};
 
 #[derive(Debug, Clone)]
 pub(crate) enum ResolvedClass<'a> {
@@ -113,6 +114,7 @@ impl<'a> ClassManager<'a>{
             id: ClassId(next_id),
             name: class_name.to_string(),
             source_file: parsed_class.source_file,
+            fast_constants: RefCell::new(self.build_fast_constant_pool(&parsed_class.constant_pool, &parsed_class.bootstrap_methods)?),
             constants: parsed_class.constant_pool,
             flags: parsed_class.access_flags,
             superclass: super_class,
@@ -214,6 +216,18 @@ impl<'a> ClassManager<'a>{
             Ok((new_class_name, Some(array_info)))
         } else {
             Ok((class_name.to_string(), None))
+        }
+    }
+
+    fn build_fast_constant_pool(&self, constant_pool: &ConstantPool, bootstrap_methods: &BootstrapMethods) -> VMResult<FastConstantPool<'a>> {
+
+        let pool: FastConstantPool = constant_pool.0.iter().cloned().map(|old|{
+            class::try_build_fast_constant_pool_entry(self, constant_pool, bootstrap_methods, old)
+        }).flatten().collect();
+        if pool.len() == constant_pool.0.len() {
+            Ok(pool)
+        } else {
+            Err(VmError::ParseError(ClassParseError::ResolveError("Unexpected constant when building fast constant pool".to_string())))
         }
     }
 

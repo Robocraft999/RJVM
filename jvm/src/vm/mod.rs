@@ -11,7 +11,7 @@ use thiserror::Error;
 use crate::access_flags::MethodFlag;
 use crate::attribute::{BootstrapMethods, Code, ExceptionTable, ProgramCounter, VisibleRuntimeAnnotations};
 use crate::bytecode::Instruction;
-use crate::constants::ConstantPool;
+use crate::constants::{ConstantPool, FastConstantPoolEntry};
 use crate::error::ClassParseError;
 use crate::field_info::{FieldType, PrimitiveType};
 use crate::method_info::{MethodDescriptor, MethodInfo};
@@ -635,6 +635,10 @@ impl Drop for VM<'_>{
     fn drop(&mut self) {
         error!("VM drop: {:p}", self);
     }
+}
+
+fn successful_result<T>(res: T) -> VMPartialResult<T> {
+    Ok(VMResultType::Successful(res))
 }
 
 #[derive(Error, Debug, Clone)]

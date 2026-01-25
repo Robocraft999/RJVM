@@ -1,11 +1,14 @@
+use std::cell::RefCell;
 use std::fmt::{Debug, Formatter};
 use std::hash::Hash;
 use crate::access_flags::{ClassFlag, ClassFlags, MethodFlag};
 use crate::attribute::{BootstrapMethods, VisibleRuntimeAnnotations};
-use crate::constants::{ConstantPool, ConstantPoolEntry};
+use crate::constants::{BytecodeBehavior, ConstantPool, ConstantPoolEntry, FastConstantPool, FastConstantPoolEntry};
 use crate::field_info::{native_escape, native_escaped_descriptor, FieldInfo, FieldType};
-use crate::method_info::MethodInfo;
+use crate::method_info::{MethodDescriptor, MethodInfo};
+use crate::vm::class_manager::ClassManager;
 use crate::vm::value::{Reference, Value};
+use crate::vm::VM;
 
 #[derive()]
 pub struct Class<'a>{
@@ -13,6 +16,7 @@ pub struct Class<'a>{
     pub name: String,
     pub source_file: Option<String>,
     pub constants: ConstantPool,
+    pub fast_constants: RefCell<FastConstantPool<'a>>,
     pub flags: ClassFlags,
     pub superclass: Option<ClassRef<'a>>,
     pub interfaces: Vec<ClassRef<'a>>,
@@ -27,7 +31,48 @@ pub struct Class<'a>{
 
 impl<'a> Class<'a>{
     pub fn find_method(&self, method_name: &str, descriptor: &str) -> Option<&MethodInfo>{
-        self.methods.iter().find(|m| m.name == method_name && m.descriptor.matches(descriptor))
+        self.methods.iter().find(|m| self.has_method_polymorphic_signature(m) || (m.name == method_name && m.descriptor.matches(descriptor)))
+    }
+
+    //https://docs.oracle.com/javase/specs/jvms/se8/html/jvms-2.html#jvms-2.9
+    fn has_method_polymorphic_signature(&self, info: &MethodInfo) -> bool {
+        info.flags.contains(&MethodFlag::Native) && info.flags.contains(&MethodFlag::VarArgs) &&
+            info.descriptor.matches("([Ljava/lang/Object;)Ljava/lang/Object;") &&
+            self.name == "java/lang/invoke/MethodHandle"
+    }
+
+    pub fn resolve_method_virtual(&'a self, method_name: &str, descriptor: &str) -> Option<ClassAndMethod<'a>> {
+        let mut current_class = self;
+        if self.is_interface(){
+            loop {
+                if let Some(method) = current_class.find_method(method_name, descriptor){
+                    return Some(ClassAndMethod{class: current_class, method});
+                }
+                current_class = current_class.interfaces.first()?;
+            }
+        } else {
+            loop {
+                if let Some(method) = current_class.find_method(method_name, descriptor){
+                    return Some(ClassAndMethod{class: current_class, method});
+                }
+                current_class = current_class.superclass?;
+            }
+        }
+    }
+
+    pub fn resolve_interface_method_virtual(&'a self, method_name: &str, descriptor: &str) -> Option<ClassAndMethod<'a>> {
+        let mut current_class = self;
+        loop {
+            if let Some(method) = current_class.find_method(method_name, descriptor){
+                return Some(ClassAndMethod{class: current_class, method});
+            }
+            let super_class = current_class.superclass?;
+            if super_class.superclass.is_some(){
+                current_class = super_class
+            } else {
+                current_class = current_class.interfaces.first()?;
+            }
+        }
     }
 
     pub fn find_method_index(&self, method_name: &str, descriptor: &str) -> Option<usize>{
@@ -42,6 +87,7 @@ impl<'a> Class<'a>{
         }
     }
 
+    //FIXME include field type in search
     pub fn find_field_static(&self, field_name: &str) -> Option<(usize, &FieldInfo, ClassId)>{
         self.fields
             .iter()
@@ -158,6 +204,217 @@ pub struct ArrayInfo{
     pub(crate) component_type: FieldType
 }
 
+impl <'a> Class<'a>{
+    pub fn get_or_resolve_constant_fast(&self, vm: &VM<'a>, index: u16) -> Option<FastConstantPoolEntry<'a>>{
+        let fast = self.fast_constants.borrow().get(index as usize - 1)?.clone();
+        match fast{
+            FastConstantPoolEntry::Class(..) |
+            FastConstantPoolEntry::FieldRef(..) |
+            FastConstantPoolEntry::MethodRef(..) |
+            FastConstantPoolEntry::InterfaceMethodRef(..) |
+            FastConstantPoolEntry::String(..) |
+            FastConstantPoolEntry::Integer(..) |
+            FastConstantPoolEntry::Float(..) |
+            FastConstantPoolEntry::Long(..) |
+            FastConstantPoolEntry::Double(..) |
+            FastConstantPoolEntry::Utf8(..) |
+            FastConstantPoolEntry::NameAndType(..) |
+            FastConstantPoolEntry::MethodHandleField(..) |
+            FastConstantPoolEntry::MethodHandleMethod(..) |
+            FastConstantPoolEntry::MethodType(..) |
+            FastConstantPoolEntry::InvokeDynamic(..) |
+            FastConstantPoolEntry::Dummy => {}
+            FastConstantPoolEntry::RawClass(class_name) => {
+                let class = vm.get_or_resolve_class(class_name.as_str()).ok()?;
+                self.fast_constants.borrow_mut()[index as usize - 1] = FastConstantPoolEntry::Class(class);
+            }
+            FastConstantPoolEntry::RawFieldRef(class_name, field_name, field_descriptor) => {
+                let class = vm.get_or_resolve_class(class_name.as_str()).ok()?;
+                let (_, field) = class.find_field(field_name.as_str())?;
+                self.fast_constants.borrow_mut()[index as usize - 1] = FastConstantPoolEntry::FieldRef(ClassAndField{class, field});
+            }
+            FastConstantPoolEntry::RawMethodRef(class_name, method_name, method_descriptor) => {
+                let class = vm.get_or_resolve_class(class_name.as_str()).ok()?;
+                let cam = class.resolve_method_virtual(method_name.as_str(), method_descriptor.as_str())?;
+                self.fast_constants.borrow_mut()[index as usize - 1] = FastConstantPoolEntry::MethodRef(cam);
+            }
+            FastConstantPoolEntry::RawInterfaceMethodRef(class_name, method_name, method_descriptor) => {
+                let class = vm.get_or_resolve_class(class_name.as_str()).ok()?;
+                let cam = class.resolve_interface_method_virtual(method_name.as_str(), method_descriptor.as_str())?;
+                self.fast_constants.borrow_mut()[index as usize - 1] = FastConstantPoolEntry::InterfaceMethodRef(cam);
+            }
+            FastConstantPoolEntry::RawMethodHandle(kind, class_name, handle_name, handle_type) => {
+                let class = vm.get_or_resolve_class(class_name.as_str()).ok()?;
+                match kind {
+                    BytecodeBehavior::REFGetField |
+                    BytecodeBehavior::REFGetStatic |
+                    BytecodeBehavior::REFPutField |
+                    BytecodeBehavior::REFPutStatic => {
+                        let (_, field) = class.find_field(handle_name.as_str())?;
+                        self.fast_constants.borrow_mut()[index as usize - 1] = FastConstantPoolEntry::MethodHandleField(kind, ClassAndField{class, field});
+                    }
+                    _ => {
+                        let cam = class.resolve_method_virtual(handle_name.as_str(), handle_type.as_str())?;
+                        self.fast_constants.borrow_mut()[index as usize - 1] = FastConstantPoolEntry::MethodHandleMethod(kind, cam);
+                    }
+                }
+            }
+        }
+        self.fast_constants.borrow().get(index as usize - 1).cloned()
+    }
+}
+
+fn resolve_utf(constant_pool: &ConstantPool, name_index: u16) -> Option<String>{
+    match constant_pool.0.get(name_index as usize - 1){
+        Some(ConstantPoolEntry::Utf8(utf)) => Some(utf.clone()),
+        _ => None,
+    }
+}
+
+fn resolve_name_and_type(constant_pool: &ConstantPool, name_index: u16, type_index: u16) -> Option<(String, String)>{
+    match (constant_pool.0.get(name_index as usize - 1), constant_pool.0.get(type_index as usize - 1)){
+        (Some(ConstantPoolEntry::Utf8(name_utf)), Some(ConstantPoolEntry::Utf8(type_utf))) => Some((name_utf.clone(), type_utf.clone())),
+        _ => None,
+    }
+}
+
+fn resolve_class_and_field<'a>(cm: &ClassManager<'a>, constant_pool: &ConstantPool, class_index: u16, name_and_type_index: u16) -> Option<Result<ClassAndField<'a>, (String, String, String)>>{
+    let class_name = match constant_pool.0.get(class_index as usize - 1){
+        Some(ConstantPoolEntry::Class(name_index)) => resolve_utf(constant_pool, *name_index),
+        _ => return None,
+    };
+    let (field_name, field_type) = match constant_pool.0.get(name_and_type_index as usize - 1){
+        Some(ConstantPoolEntry::NameAndType(name_index, type_index)) => resolve_name_and_type(constant_pool, *name_index, *type_index)?,
+        _ => return None,
+    };
+    class_name
+        .map(|class_name| cm.find_class_by_name(&class_name).map_or(
+            Err((class_name.clone(), field_name.clone(), field_type.clone())),
+            |clazz| Ok(ClassAndField{
+                class: clazz,
+                field: clazz.find_field(&field_name).map(|(_, info)| info).unwrap()
+            }))
+        )
+}
+
+fn resolve_class_and_method<'a>(cm: &ClassManager<'a>, constant_pool: &ConstantPool, class_index: u16, name_and_type_index: u16, is_interface_method: bool) -> Option<Result<ClassAndMethod<'a>, (String, String, String)>>{
+    let class_name = match constant_pool.0.get(class_index as usize - 1){
+        Some(ConstantPoolEntry::Class(name_index)) => resolve_utf(constant_pool, *name_index),
+        _ => return None,
+    };
+    let (method_name, method_descriptor) = match constant_pool.0.get(name_and_type_index as usize - 1){
+        Some(ConstantPoolEntry::NameAndType(name_index, type_index)) => resolve_name_and_type(constant_pool, *name_index, *type_index)?,
+        _ => return None,
+    };
+    class_name
+        .map(|class_name| cm.find_class_by_name(&class_name).map_or(
+            Err((class_name.clone(), method_name.clone(), method_descriptor.clone())),
+            |clazz| Ok(if is_interface_method{
+                clazz.resolve_interface_method_virtual(method_name.as_str(), method_descriptor.as_str()).unwrap()
+            } else {
+                clazz.resolve_method_virtual(method_name.as_str(), method_descriptor.as_str()).unwrap()
+            }))
+        )
+}
+
+pub fn try_build_fast_constant_pool_entry<'a>(cm: &ClassManager<'a>, constant_pool: &ConstantPool, bootstrap_methods: &BootstrapMethods, entry: ConstantPoolEntry) -> Option<FastConstantPoolEntry<'a>>{
+    match entry{
+        ConstantPoolEntry::Class(name_index) => {
+            let name = resolve_utf(constant_pool, name_index);
+            name.map(|name| cm.find_class_by_name(name.as_str()).map_or(FastConstantPoolEntry::RawClass(name), FastConstantPoolEntry::Class))
+        }
+        ConstantPoolEntry::Fieldref(class_index, name_and_type_index) => {
+            let f = resolve_class_and_field(cm, constant_pool, class_index, name_and_type_index);
+            f.map(|res| match res {
+                Ok(caf) =>
+                    FastConstantPoolEntry::FieldRef(caf),
+                Err((class_name, field_name, field_type)) =>
+                    FastConstantPoolEntry::RawFieldRef(class_name, field_name, field_type),
+            })
+        }
+        ConstantPoolEntry::Methodref(class_index, name_and_type_index) => {
+            let m = resolve_class_and_method(cm, constant_pool, class_index, name_and_type_index, false);
+            m.map(|res| match res {
+                Ok(cam) =>
+                    FastConstantPoolEntry::MethodRef(cam),
+                Err((class_name, method_name, method_descriptor)) =>
+                    FastConstantPoolEntry::RawMethodRef(class_name, method_name, method_descriptor),
+            })
+        }
+        ConstantPoolEntry::InterfaceMethodref(class_index, name_and_type_index) => {
+            let m = resolve_class_and_method(cm, constant_pool, class_index, name_and_type_index, true);
+            m.map(|res| match res {
+                Ok(cam) =>
+                    FastConstantPoolEntry::InterfaceMethodRef(cam),
+                Err((class_name, method_name, method_descriptor)) =>
+                    FastConstantPoolEntry::RawInterfaceMethodRef(class_name, method_name, method_descriptor),
+            })
+        }
+        ConstantPoolEntry::Integer(value) => Some(FastConstantPoolEntry::Integer(value)),
+        ConstantPoolEntry::Float(value) => Some(FastConstantPoolEntry::Float(value)),
+        ConstantPoolEntry::Long(value) => Some(FastConstantPoolEntry::Long(value)),
+        ConstantPoolEntry::Double(value) => Some(FastConstantPoolEntry::Double(value)),
+
+        ConstantPoolEntry::String(value) => resolve_utf(constant_pool, value).map(FastConstantPoolEntry::String),
+
+        ConstantPoolEntry::NameAndType(name, type_index) =>
+            resolve_name_and_type(constant_pool, name, type_index).map(|(c, nat)|FastConstantPoolEntry::NameAndType(c, nat)),
+
+        ConstantPoolEntry::Utf8(value) => Some(FastConstantPoolEntry::Utf8(value)),
+
+        ConstantPoolEntry::MethodHandle(kind, reference_index) => {
+            let kind = BytecodeBehavior::from_repr(kind)?;
+            match kind{
+                BytecodeBehavior::REFGetField |
+                BytecodeBehavior::REFGetStatic |
+                BytecodeBehavior::REFPutField |
+                BytecodeBehavior::REFPutStatic => {
+                    let t = match constant_pool.0.get(reference_index as usize - 1){
+                        Some(ConstantPoolEntry::Fieldref(class_index, name_and_type_index)) => resolve_class_and_field(cm, constant_pool, *class_index, *name_and_type_index),
+                        _ => return None,
+                    };
+                    t.map(|res| match res{
+                        Ok(caf) =>
+                            FastConstantPoolEntry::MethodHandleField(kind, caf),
+                        Err((class_name, field_name, field_type)) =>
+                            FastConstantPoolEntry::RawMethodHandle(kind, class_name, field_name, field_type),
+                    })
+                }
+                BytecodeBehavior::REFInvokeVirtual |
+                BytecodeBehavior::REFNewInvokeSpecial |
+                BytecodeBehavior::REFInvokeStatic |
+                BytecodeBehavior::REFInvokeSpecial |
+                BytecodeBehavior::REFInvokeInterface => {
+                    let t = match constant_pool.0.get(reference_index as usize - 1){
+                        Some(ConstantPoolEntry::Methodref(class_index, name_and_type_index)) =>
+                            resolve_class_and_method(cm, constant_pool, *class_index, *name_and_type_index, false),
+                        Some(ConstantPoolEntry::InterfaceMethodref(class_index, name_and_type_index)) =>
+                            resolve_class_and_method(cm, constant_pool, *class_index, *name_and_type_index, true),
+                        _ => return None,
+                    };
+                    t.map(|res| match res{
+                        Ok(cam) =>
+                            FastConstantPoolEntry::MethodHandleMethod(kind, cam),
+                        Err((class_name, method_name, method_descriptor)) =>
+                            FastConstantPoolEntry::RawMethodHandle(kind, class_name, method_name, method_descriptor),
+                    })
+                }
+            }
+        }
+        ConstantPoolEntry::MethodType(descriptor) => resolve_utf(constant_pool, descriptor).map(MethodDescriptor::new).map(FastConstantPoolEntry::MethodType),
+        ConstantPoolEntry::InvokeDynamic(bootstrap_method_index, name_and_type_index) => {
+            bootstrap_methods.0.get(bootstrap_method_index as usize).map(|bm| {
+                let (handle_name, handle_type) = match constant_pool.0.get(name_and_type_index as usize - 1){
+                    Some(ConstantPoolEntry::NameAndType(name_index, type_index)) => resolve_name_and_type(constant_pool, *name_index, *type_index)?,
+                    _ => return None,
+                };
+                Some(FastConstantPoolEntry::InvokeDynamic(bm.clone(), handle_name.clone(), handle_type.clone()))
+            }).flatten()
+        }
+        ConstantPoolEntry::Dummy => Some(FastConstantPoolEntry::Dummy),
+    }
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ClassAndMethod<'a> {
     pub class: ClassRef<'a>,
@@ -208,6 +465,14 @@ impl<'a> ClassAndMethod<'a>{
         None
     }
 
+    pub fn get_constant_method_ref_fast(&self, vm: &VM<'a>, index: u16) -> Option<ClassAndMethod<'a>>{
+        match self.class.get_or_resolve_constant_fast(vm, index){
+            Some(FastConstantPoolEntry::MethodRef(cam)) |
+            Some(FastConstantPoolEntry::InterfaceMethodRef(cam)) => Some(cam),
+            _ => None
+        }
+    }
+
     pub fn get_constant_field_info_descriptor(&self, index: u16) -> Option<(String, String, String)>{
         if let Some(ConstantPoolEntry::Fieldref(class_index, name_and_type_index)) = self.class.get_constant(index){
             if let Some(ConstantPoolEntry::NameAndType(name_index, type_index)) = self.class.get_constant(name_and_type_index){
@@ -255,4 +520,10 @@ impl<'a> ClassAndMethod<'a>{
 
         (short, long)
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct ClassAndField<'a>{
+    pub class: ClassRef<'a>,
+    pub field: &'a FieldInfo,
 }

@@ -73,7 +73,7 @@ impl PartialEq for MethodInfo{
 
 impl Eq for MethodInfo{}
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MethodDescriptor{
     raw: String,
     pub args: Vec<FieldType>,

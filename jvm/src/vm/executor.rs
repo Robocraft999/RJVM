@@ -4,6 +4,7 @@ use crate::class_file::get_constant_printable;
 use crate::vm::result::{VMPartialResult, VMResultType};
 use crate::{bytecode::Instruction, constants::ConstantPoolEntry, field_info::{FieldType, PrimitiveType}, get_or_init, get_or_init_option, method_info::MethodDescriptor, vm::{bytecode::InstructionBlock, class::{ClassAndMethod, ClassRef}, java_error::JavaError, result::VMResult, value::{ReferenceType, Value}, VmError, VM}};
 use log::{debug, error, info, trace, warn};
+use crate::constants::FastConstantPoolEntry;
 use crate::vm::class_manager::ClassLoadingState;
 
 macro_rules! wrap_error {
@@ -688,7 +689,7 @@ pub fn execute_current_block<'a>(vm: &VM<'a>) -> Option<VMPartialResult<Option<V
                 Instruction::INVOKESTATIC(index) => { return Some(execute_invoke(vm, *index, InvokeKind::STATIC)) }
                 Instruction::INVOKEINTERFACE(index, _, _) => { return Some(execute_invoke(vm, *index, InvokeKind::INTERFACE)) }
                 Instruction::INVOKEDYNAMIC(index, _, _) => {
-                    if let Some(ConstantPoolEntry::InvokeDynamic(bootstrap_method_index, name_and_type_index)) = class_and_method.class.get_constant(*index){
+                    if let Some(FastConstantPoolEntry::InvokeDynamic(bm, method_name, type_name)) = class_and_method.class.get_or_resolve_constant_fast(vm, *index){
                         let method_type_class = get_or_init_option!(vm.get_or_initialize_class("java/lang/invoke/MethodType"));
 
                         let d = &class_and_method.class.bootstrap_methods.0[bootstrap_method_index as usize];
