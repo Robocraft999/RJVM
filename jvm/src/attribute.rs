@@ -12,6 +12,56 @@ pub struct Attribute{
     pub info: Vec<u8>
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct ClassFileAttributes{
+    pub inner_classes: Option<Attribute>,
+    pub enclosing_method: Option<EnclosingMethod>,
+    pub synthetic: Option<Attribute>,
+    pub signature: Option<Attribute>,
+    pub source_file: Option<SourceFile>,
+    pub source_debug_extension: Option<Attribute>,
+    pub deprecated: Option<Deprecated>,
+    pub runtime_visible_annotations: Vec<RuntimeVisibleAnnotations>,
+    pub runtime_invisible_annotations: Vec<Attribute>,
+    pub runtime_visible_type_annotations: Vec<Attribute>,
+    pub runtime_invisible_type_annotations: Vec<Attribute>,
+    pub bootstrap_methods: Option<BootstrapMethods>,
+}
+
+pub struct FieldInfoAttributes{
+    pub constant_value: Option<ConstantValue>,
+    pub synthetic: Option<Attribute>,
+    pub signature: Option<Attribute>,
+    pub deprecated: Option<Deprecated>,
+    pub runtime_visible_annotations: Vec<RuntimeVisibleAnnotations>,
+    pub runtime_invisible_annotations: Vec<Attribute>,
+    pub runtime_visible_type_annotations: Vec<Attribute>,
+    pub runtime_invisible_type_annotations: Vec<Attribute>,
+}
+
+pub struct MethodInfoAttributes{
+    pub code: Option<Code>,
+    pub exceptions: Option<Exceptions>,
+    pub synthetic: Option<Attribute>,
+    pub signature: Option<Attribute>,
+    pub deprecated: Option<Deprecated>,
+    pub runtime_visible_annotations: Vec<RuntimeVisibleAnnotations>,
+    pub runtime_invisible_annotations: Vec<Attribute>,
+    pub runtime_visible_parameter_annotations: Vec<Attribute>,
+    pub runtime_invisible_parameter_annotations: Vec<Attribute>,
+    pub runtime_visible_type_annotations: Vec<Attribute>,
+    pub runtime_invisible_type_annotations: Vec<Attribute>,
+    pub annotation_default: Option<Attribute>,
+    pub method_parameters: Option<Attribute>
+}
+
+pub struct CodeAttributes{
+    pub stack_map_table: Option<Attribute>,
+    pub line_number_tables: Vec<LineNumberTable>,
+    pub local_variable_tables: Vec<Attribute>,
+    pub local_variable_type_tables: Vec<Attribute>,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct ConstantValue{
     pub constant_index: u16
@@ -83,7 +133,7 @@ pub struct ProgramCounter(pub u16);
 pub struct LineNumber(pub u16);
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct VisibleRuntimeAnnotations(pub Vec<Annotation>);
+pub struct RuntimeVisibleAnnotations(pub Vec<Annotation>);
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Annotation{
@@ -151,3 +201,14 @@ pub struct BootstrapMethod{
 #[derive(Clone, Debug, PartialEq)]
 pub struct Exceptions(pub Vec<String>);
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct EnclosingMethod{
+    pub class_index: u16,
+    pub method_index: u16,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct SourceFile(pub String);
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Deprecated;

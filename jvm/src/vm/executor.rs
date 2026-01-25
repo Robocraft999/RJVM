@@ -1197,6 +1197,7 @@ fn get_method_interface_virtual<'a>(class: ClassRef<'a>, method_name: &str, desc
     }
 }
 
+//FIXME: Deprecated
 fn get_constant_as_value<'a>(vm: &VM<'a>, index: u16) -> VMPartialResult<Value<'a>>{
     let class_and_method = &vm.call_stack.frames.borrow().last().unwrap().class_and_method.clone();
     let constant_value = class_and_method.class.get_constant(index).unwrap();
@@ -1224,13 +1225,6 @@ fn get_constant_as_value<'a>(vm: &VM<'a>, index: u16) -> VMPartialResult<Value<'
                 warn!("expected but didnt find class object");
                 vm.null()
             }
-        }
-        ConstantPoolEntry::InvokeDynamic(bootstrap_method_index, name_and_type_index) => {
-            if let Some(ConstantPoolEntry::NameAndType(name_index, type_index)) = class_and_method.class.get_constant(name_and_type_index){
-                println!("{:?} {:?}", class_and_method.class.get_constant(name_index), class_and_method.class.get_constant(type_index))
-            }
-            println!("{:?}", class_and_method.class.bootstrap_methods.0.get(bootstrap_method_index as usize));
-            vm.null()
         }
         _ => unimplemented!("Constant of type {constant_value:?} cannot be converted to a value")
     };

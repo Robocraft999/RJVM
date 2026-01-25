@@ -9,7 +9,7 @@ use std::str::Utf8Error;
 use thiserror::Error;
 
 use crate::access_flags::MethodFlag;
-use crate::attribute::{BootstrapMethods, Code, ExceptionTable, ProgramCounter, VisibleRuntimeAnnotations};
+use crate::attribute::{BootstrapMethods, Code, ExceptionTable, ProgramCounter, RuntimeVisibleAnnotations};
 use crate::bytecode::Instruction;
 use crate::constants::{ConstantPool, FastConstantPoolEntry};
 use crate::error::ClassParseError;
@@ -390,6 +390,7 @@ impl<'a> VM<'a>{
     }
 
     pub fn define_class(&self, class_name: &str, bytes: Vec<u8>) -> VMPartialResult<Reference<'a>>{
+        println!("FIXME: define_class");
         let resolved = self.find_class_by_name(class_name);
         if resolved.is_none() {
             let to_init = self.class_manager.parse_and_load_class(class_name, class_name, None, bytes)?;
@@ -497,6 +498,10 @@ impl<'a> VM<'a>{
     
     pub fn new_class_array_1(&self, content: Vec<Value<'a>>) -> VMPartialResult<Reference<'a>>{
         self.new_array(1, FieldType::Object("java/lang/Class".to_string()).to_array_field_type(1), RefCell::new(content))
+    }
+
+    pub fn new_object_array_1(&self, content: Vec<Value<'a>>) -> VMPartialResult<Reference<'a>>{
+        self.new_array(1, FieldType::Object("java/lang/Object".to_string()).to_array_field_type(1), RefCell::new(content))
     }
 
     pub fn try_new_string_object(&self, string: &str) -> VMResult<Reference<'a>>{

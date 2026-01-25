@@ -1,5 +1,5 @@
 use super::call_frame::CallFrame;
-use crate::attribute::{Code, ExceptionTable, VisibleRuntimeAnnotations};
+use crate::attribute::{Code, ExceptionTable, RuntimeVisibleAnnotations};
 use crate::bytecode::Instruction;
 use crate::constants::ConstantPool;
 use crate::error;

@@ -113,19 +113,17 @@ impl<'a> ClassManager<'a>{
         let class = Class {
             id: ClassId(next_id),
             name: class_name.to_string(),
-            source_file: parsed_class.source_file,
-            fast_constants: RefCell::new(self.build_fast_constant_pool(&parsed_class.constant_pool, &parsed_class.bootstrap_methods)?),
+            fast_constants: RefCell::new(self.build_fast_constant_pool(&parsed_class.constant_pool, &parsed_class.attributes.bootstrap_methods)?),
             constants: parsed_class.constant_pool,
             flags: parsed_class.access_flags,
             superclass: super_class,
             interfaces,
             fields: parsed_class.fields,
             methods,
-            annotations: parsed_class.runtime_visible_annotations,
-            bootstrap_methods: parsed_class.bootstrap_methods,
             transitive_field_count: superclass_field_count + fields_count,
             first_field_index: superclass_field_count,
-            array_info
+            attributes: parsed_class.attributes,
+            array_info,
         };
 
         let mut classes_to_load: Vec<ClassRef> = Vec::new();
@@ -219,7 +217,7 @@ impl<'a> ClassManager<'a>{
         }
     }
 
-    fn build_fast_constant_pool(&self, constant_pool: &ConstantPool, bootstrap_methods: &BootstrapMethods) -> VMResult<FastConstantPool<'a>> {
+    fn build_fast_constant_pool(&self, constant_pool: &ConstantPool, bootstrap_methods: &Option<BootstrapMethods>) -> VMResult<FastConstantPool<'a>> {
 
         let pool: FastConstantPool = constant_pool.0.iter().cloned().map(|old|{
             class::try_build_fast_constant_pool_entry(self, constant_pool, bootstrap_methods, old)

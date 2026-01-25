@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::fmt::{Debug, Formatter};
 use std::hash::Hash;
 use crate::access_flags::{ClassFlag, ClassFlags, MethodFlag};
-use crate::attribute::{BootstrapMethods, VisibleRuntimeAnnotations};
+use crate::attribute::{BootstrapMethods, ClassFileAttributes};
 use crate::constants::{BytecodeBehavior, ConstantPool, ConstantPoolEntry, FastConstantPool, FastConstantPoolEntry};
 use crate::field_info::{native_escape, native_escaped_descriptor, FieldInfo, FieldType};
 use crate::method_info::{MethodDescriptor, MethodInfo};
@@ -14,7 +14,6 @@ use crate::vm::VM;
 pub struct Class<'a>{
     pub id: ClassId,
     pub name: String,
-    pub source_file: Option<String>,
     pub constants: ConstantPool,
     pub fast_constants: RefCell<FastConstantPool<'a>>,
     pub flags: ClassFlags,
@@ -22,16 +21,15 @@ pub struct Class<'a>{
     pub interfaces: Vec<ClassRef<'a>>,
     pub fields: Vec<FieldInfo>,
     pub methods: Vec<MethodInfo>,
-    pub annotations: VisibleRuntimeAnnotations,
-    pub bootstrap_methods: BootstrapMethods,
     pub transitive_field_count: usize,
     pub first_field_index: usize,
-    pub array_info: Option<ArrayInfo>
+    pub array_info: Option<ArrayInfo>,
+    pub attributes: ClassFileAttributes,
 }
 
 impl<'a> Class<'a>{
     pub fn find_method(&self, method_name: &str, descriptor: &str) -> Option<&MethodInfo>{
-        self.methods.iter().find(|m| self.has_method_polymorphic_signature(m) || (m.name == method_name && m.descriptor.matches(descriptor)))
+        self.methods.iter().find(|m|  m.name == method_name && (m.descriptor.matches(descriptor) || self.has_method_polymorphic_signature(m)))
     }
 
     //https://docs.oracle.com/javase/specs/jvms/se8/html/jvms-2.html#jvms-2.9
@@ -177,7 +175,6 @@ impl<'a> Debug for Class<'a>{
         f.debug_struct("Class")
             .field("id", &self.id)
             .field("name", &self.name)
-            .field("source_file", &self.source_file)
             .field("constants", &self.constants)
             .field("flags", &self.flags)
             .field("array_info", &self.array_info)
@@ -317,7 +314,7 @@ fn resolve_class_and_method<'a>(cm: &ClassManager<'a>, constant_pool: &ConstantP
         )
 }
 
-pub fn try_build_fast_constant_pool_entry<'a>(cm: &ClassManager<'a>, constant_pool: &ConstantPool, bootstrap_methods: &BootstrapMethods, entry: ConstantPoolEntry) -> Option<FastConstantPoolEntry<'a>>{
+pub fn try_build_fast_constant_pool_entry<'a>(cm: &ClassManager<'a>, constant_pool: &ConstantPool, bootstrap_methods: &Option<BootstrapMethods>, entry: ConstantPoolEntry) -> Option<FastConstantPoolEntry<'a>>{
     match entry{
         ConstantPoolEntry::Class(name_index) => {
             let name = resolve_utf(constant_pool, name_index);
@@ -403,13 +400,17 @@ pub fn try_build_fast_constant_pool_entry<'a>(cm: &ClassManager<'a>, constant_po
         }
         ConstantPoolEntry::MethodType(descriptor) => resolve_utf(constant_pool, descriptor).map(MethodDescriptor::new).map(FastConstantPoolEntry::MethodType),
         ConstantPoolEntry::InvokeDynamic(bootstrap_method_index, name_and_type_index) => {
-            bootstrap_methods.0.get(bootstrap_method_index as usize).map(|bm| {
-                let (handle_name, handle_type) = match constant_pool.0.get(name_and_type_index as usize - 1){
-                    Some(ConstantPoolEntry::NameAndType(name_index, type_index)) => resolve_name_and_type(constant_pool, *name_index, *type_index)?,
-                    _ => return None,
-                };
-                Some(FastConstantPoolEntry::InvokeDynamic(bm.clone(), handle_name.clone(), handle_type.clone()))
-            }).flatten()
+            if let Some(bootstrap_methods) = bootstrap_methods {
+                bootstrap_methods.0.get(bootstrap_method_index as usize).map(|bm| {
+                    let (handle_name, handle_type) = match constant_pool.0.get(name_and_type_index as usize - 1){
+                        Some(ConstantPoolEntry::NameAndType(name_index, type_index)) => resolve_name_and_type(constant_pool, *name_index, *type_index)?,
+                        _ => return None,
+                    };
+                    Some(FastConstantPoolEntry::InvokeDynamic(bm.clone(), handle_name.clone(), handle_type.clone()))
+                }).flatten()
+            } else {
+                None
+            }
         }
         ConstantPoolEntry::Dummy => Some(FastConstantPoolEntry::Dummy),
     }

@@ -19,6 +19,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use libffi::low::CodePtr;
 use libffi::middle::{Arg, Cif, Type};
 use crate::access_flags::MethodFlag;
+use crate::constants::FastConstantPoolEntry;
 use crate::vm::java_error::JavaError;
 
 macro_rules! wrap_init{
@@ -146,6 +147,7 @@ impl <'a>NativeMethodRegistry<'a>{
             if method.method_name == class_and_method.method.name && method.method_descriptor == class_and_method.method.descriptor && class_and_method.class.name == method.class_name{
                 let needed_arg_count = class_and_method.method.descriptor.args.len();
                 let provided_arg_count = args.iter().filter(|v| v != &&Value::Dummy).count();
+                info!("METHOD_NAME (custom native): {}", class_and_method.format());
                 if needed_arg_count == provided_arg_count{
                     return Some((method.delegate)(vm, java_vm, class_and_method.class, object, args))
                 }
@@ -161,6 +163,7 @@ impl <'a>NativeMethodRegistry<'a>{
                     object.unwrap()
                 };
                 println!("[try_resolve_extern_native]: {class_object_or_this:?} with args: \n{:?}", args);
+                info!("METHOD_NAME (extern native): {}", class_and_method.format());
                 let jni_result = extern_native.call(java_vm, class_and_method, class_object_or_this, args);
                 let result = if let Some(val) = jni_result{
                     unsafe {
@@ -285,6 +288,7 @@ pub fn register_all_natives(registry: &mut NativeMethodRegistry){
     registry.register("java/lang/Class", "getDeclaredMethods0", "(Z)[Ljava/lang/reflect/Method;", delegate_get_declared_methods0);
     registry.register("java/lang/Class", "getModifiers", "()I", delegate_get_class_modifiers);
     registry.register("java/lang/Class", "getSuperclass", "()Ljava/lang/Class;", delegate_get_super_class);
+    registry.register("java/lang/Class", "getEnclosingMethod0", "()[Ljava/lang/Object;", delegate_get_enclosing_method);
     registry.register("java/lang/Class", "forName0", "(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/Class;", delegate_for_name0);
     registry.register("java/lang/Class", "isInterface", "()Z", delegate_is_interface);
     registry.register("java/lang/Class", "isArray", "()Z", delegate_is_array);
@@ -694,6 +698,29 @@ fn delegate_get_super_class<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, 
             None => non_failing_some(vm.null())
         }
 
+    } else {
+        Err(VmError::ValidationError("Expected Class object".to_string()))
+    }
+}
+
+fn delegate_get_enclosing_method<'a>(vm: &VM<'a>, java_vm: &JavaVM, c: ClassRef<'a>, this: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
+    if let Some(obj) = this {
+        let class = vm.extract_class_from_class_object(obj)?;
+        if let Some(enclosing) = &class.attributes.enclosing_method{
+            let class_ref = wrap_init!(vm, java_vm, vm.new_value_from_constant(class.get_or_resolve_constant_fast(vm, enclosing.class_index).unwrap())?);
+            let (method_name, method_type) = if let Some(FastConstantPoolEntry::NameAndType(name, typ)) = class.get_or_resolve_constant_fast(vm, enclosing.class_index){
+                (
+                    Value::Reference(wrap_init!(vm, java_vm, vm.new_string_object(name.as_str())?)),
+                    Value::Reference(wrap_init!(vm, java_vm, vm.new_string_object(typ.as_str())?))
+                )
+            } else {
+                return Err(VmError::ValidationError("Expected NameAndType for EnclosingClass".to_string()))
+            };
+            let res = wrap_init!(vm, java_vm, vm.new_object_array_1(vec![class_ref.clone(), method_name.clone(), method_type.clone()])?);
+            non_failing_some(Value::Reference(res))
+        } else {
+            non_failing_some(vm.null())
+        }
     } else {
         Err(VmError::ValidationError("Expected Class object".to_string()))
     }

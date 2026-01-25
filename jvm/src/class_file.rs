@@ -1,5 +1,5 @@
 use crate::access_flags::{parse_class_flags, parse_field_flags, parse_method_flags, ClassFlags};
-use crate::attribute::{Annotation, Attribute, BootstrapMethod, BootstrapMethods, Code, ConstantValue, ExceptionTable, ExceptionTableEntry, Exceptions, LineNumber, LineNumberTable, LineNumberTableEntry, ProgramCounter, VisibleRuntimeAnnotations};
+use crate::attribute::{Annotation, Attribute, BootstrapMethod, BootstrapMethods, ClassFileAttributes, Code, ConstantValue, Deprecated, EnclosingMethod, ExceptionTable, ExceptionTableEntry, Exceptions, LineNumber, LineNumberTable, LineNumberTableEntry, ProgramCounter, RuntimeVisibleAnnotations, SourceFile};
 use crate::bytes::{parse_u1, parse_u2, parse_u4, parse_u8};
 use crate::class_file_version::ClassFileVersion;
 use crate::constants::{BytecodeBehavior, ConstantPool, ConstantPoolEntry};
@@ -24,10 +24,7 @@ pub struct ClassFile{
     pub interfaces: Vec<String>,
     pub fields: Vec<FieldInfo>,
     pub methods: Vec<MethodInfo>,
-    pub deprecated: bool,
-    pub runtime_visible_annotations: VisibleRuntimeAnnotations,
-    pub bootstrap_methods: BootstrapMethods,
-    pub source_file: Option<String>
+    pub attributes: ClassFileAttributes,
 }
 
 impl Debug for ClassFile{
@@ -42,9 +39,6 @@ impl Debug for ClassFile{
             .field("interfaces", &format_args!("{:#?}", self.interfaces))
             .field("fields", &format_args!("{:#?}", self.fields))
             .field("methods", &format_args!("{:#?}", self.methods))
-            .field("deprecated", &self.deprecated)
-            .field("annotations", &format_args!("{:#?}", self.runtime_visible_annotations))
-            .field("source_file", &self.source_file)
             .finish()
     }
 }
@@ -370,10 +364,11 @@ pub fn parse_class_file(bytes: Vec<u8>, class_name: &str) -> VMResult<ClassFile>
         });
     }
     let attributes_count = parse_u2(&mut bytes)?;
-    let mut deprecated = false;
+    let mut class_file_attributes = ClassFileAttributes::default();
+    /*let mut deprecated = None;
     let mut source_file = None;
-    let mut runtime_visible_annotations = VisibleRuntimeAnnotations(Vec::new());
-    let mut bootstrap_methods = BootstrapMethods(Vec::new());
+    let mut runtime_visible_annotations = Vec::new();
+    let mut bootstrap_methods = None;*/
 
     for _ in 0..attributes_count{
         let name = get_constant_printable(&constant_pool, parse_u2(&mut bytes)?);
@@ -381,16 +376,16 @@ pub fn parse_class_file(bytes: Vec<u8>, class_name: &str) -> VMResult<ClassFile>
 
         match name.as_str() {
             "SourceFile" => {
-                source_file = Some(get_constant_printable(&constant_pool, parse_u2(&mut bytes)?))
+                class_file_attributes.source_file = Some(SourceFile(get_constant_printable(&constant_pool, parse_u2(&mut bytes)?)));
             }
-            "Deprecated" => {deprecated = true}
+            "Deprecated" => {class_file_attributes.deprecated = Some(Deprecated)}
             "RuntimeVisibleAnnotations" => {
                 let num_annotations = parse_u2(&mut bytes)?;
                 let mut annotations = Vec::new();
                 for _ in 0..num_annotations {
                     annotations.push(Annotation::new(&constant_pool, &mut bytes)?);
                 }
-                runtime_visible_annotations = VisibleRuntimeAnnotations(annotations)
+                class_file_attributes.runtime_visible_annotations.push(RuntimeVisibleAnnotations(annotations));
             }
             "BootstrapMethods" => {
                 let num_bootstrap_methods = parse_u2(&mut bytes)?;
@@ -411,7 +406,12 @@ pub fn parse_class_file(bytes: Vec<u8>, class_name: &str) -> VMResult<ClassFile>
                     };
                     bootstrap_methods_vec.push(method);
                 }
-                bootstrap_methods = BootstrapMethods(bootstrap_methods_vec);
+                class_file_attributes.bootstrap_methods = Some(BootstrapMethods(bootstrap_methods_vec));
+            }
+            "EnclosingMethod" => {
+                let class_index = parse_u2(&mut bytes)?;
+                let method_index = parse_u2(&mut bytes)?;
+                class_file_attributes.enclosing_method = Some(EnclosingMethod{class_index, method_index});
             }
             _ => {
                 let mut info = Vec::new();
@@ -432,10 +432,7 @@ pub fn parse_class_file(bytes: Vec<u8>, class_name: &str) -> VMResult<ClassFile>
         interfaces,
         fields,
         methods,
-        deprecated,
-        runtime_visible_annotations,
-        bootstrap_methods,
-        source_file,
+        attributes: class_file_attributes,
     };
 
     info!("------------------------------------");
