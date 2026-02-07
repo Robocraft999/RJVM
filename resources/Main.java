@@ -5,7 +5,6 @@ import java.util.Properties;
 
 import java.security.AccessController;
 import java.security.PrivilegedAction;
-import sun.security.action.GetPropertyAction;
 
 public class Main{
     public static final int answer = 42;
@@ -13,8 +12,10 @@ public class Main{
 	public static void main(String[] args){
 		//String var1 = (String)AccessController.doPrivileged(new GetPropertyAction("java.awt.graphicsenv", (String)null));
 		String var1 = System.getenv("java.awt.graphicsenv");
-		System.out.println(var1);
-		//Y context = Y.getContext();
+		System.out.println(Boolean.TYPE);
+		System.out.println(Boolean.class);
+		System.out.println(boolean.class);
+	    //Y context = Y.getContext();
 
         //Car car = new Car();
 	}

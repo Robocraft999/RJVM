@@ -1,7 +1,7 @@
 use crate::attribute::{BootstrapMethod, BootstrapMethods, ElementValue};
 use crate::class_file::{parse_class_file, ClassFile};
 use crate::error::ClassParseError;
-use crate::field_info::{extract_component_type_from_array_class, FieldType};
+use crate::field_info::{extract_component_type_from_array_class, primitive_to_wrapper_name, FieldType};
 use crate::method_info::MethodInfo;
 use crate::vm::class::{ArrayInfo, Class, ClassAndField, ClassAndMethod, ClassId, ClassRef};
 use crate::vm::class_path::ClassPath;
@@ -51,6 +51,7 @@ pub struct ClassManager<'a>{
     pub classes_by_id: RefCell<HashMap<ClassId, ClassRef<'a>>>,
     pub class_loading_states: RefCell<HashMap<ClassId, ClassLoadingState>>,
     pub classes: Arena<Class<'a>>,
+    pub primitive_class_ids: RefCell<HashMap<String, ClassId>>,
     next_id: RefCell<u32>,
 }
 
@@ -62,6 +63,7 @@ impl<'a> ClassManager<'a>{
             classes_by_id: RefCell::new(HashMap::new()),
             class_loading_states: RefCell::new(HashMap::new()),
             classes: Arena::with_capacity(100),
+            primitive_class_ids: RefCell::new(HashMap::new()),
             next_id: RefCell::new(1),
         }
     }
@@ -158,6 +160,20 @@ impl<'a> ClassManager<'a>{
             resolved_class: class_ref,
             to_load: classes_to_load,
         })
+    }
+    
+    // Use this carefully! The is no ClassRef for this id
+    pub fn get_primitive_class(&self, name: &str) -> ClassId{
+        if !self.primitive_class_ids.borrow().contains_key(name){
+            let id = *self.next_id.borrow();
+            *self.next_id.borrow_mut() += 1;
+            self.primitive_class_ids.borrow_mut().insert(name.to_owned(), ClassId(id));
+            
+            let wrapper = self.get_or_resolve_class(primitive_to_wrapper_name(name).as_str()).unwrap().get_class();
+            self.classes_by_id.borrow_mut().insert(ClassId(id), wrapper);
+            self.classes_by_name.borrow_mut().insert(name.to_owned(), wrapper);
+        }
+        self.primitive_class_ids.borrow().get(name).cloned().unwrap()
     }
 
     fn resolve_super_and_interfaces_and_annotations(&self, class_file: &ClassFile) -> VMResult<HashMap<String, ResolvedClass<'a>>>{

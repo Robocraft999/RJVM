@@ -181,6 +181,21 @@ pub fn get_primitive_class(short_name: &str) -> String{
     }.to_string()
 }
 
+pub fn primitive_to_wrapper_name(prim_name: &str) -> String{
+    match prim_name {
+        "boolean" => "java/lang/Boolean",
+        "byte" => "java/lang/Byte",
+        "char" => "java/lang/Character",
+        "short" => "java/lang/Short",
+        "int" => "java/lang/Integer",
+        "long" => "java/lang/Long",
+        "float" => "java/lang/Float",
+        "double" => "java/lang/Double",
+        "void" => "java/lang/Void",
+        _ => unreachable!("Type is not primitive")
+    }.to_string()
+}
+
 pub fn primitive_type_to_class_name(primitive_type: &PrimitiveType) -> String {
     match primitive_type {
         PrimitiveType::Integer => "java/lang/Integer".to_string(),

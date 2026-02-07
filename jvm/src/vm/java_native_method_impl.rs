@@ -503,16 +503,17 @@ fn delegate_system_map_library_name<'a>(vm: &VM<'a>, java_vm: &JavaVM, _ : Class
 
 fn delegate_get_primitive_class<'a>(vm: &VM<'a>, java_vm: &JavaVM, _ : ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
     let string = VM::extract_string_from_object(args.get(0).unwrap())?;
+    let class_id = vm.class_manager.get_primitive_class(string.as_str());
     match string.as_str() {
-        "int"     => non_failing_some(Value::Reference(wrap_init!(vm, java_vm, vm.new_class_object_by_name(  "java/lang/Integer")?))),
-        "long"    => non_failing_some(Value::Reference(wrap_init!(vm, java_vm, vm.new_class_object_by_name(     "java/lang/Long")?))),
-        "short"   => non_failing_some(Value::Reference(wrap_init!(vm, java_vm, vm.new_class_object_by_name(    "java/lang/Short")?))),
-        "char"    => non_failing_some(Value::Reference(wrap_init!(vm, java_vm, vm.new_class_object_by_name("java/lang/Character")?))),
-        "byte"    => non_failing_some(Value::Reference(wrap_init!(vm, java_vm, vm.new_class_object_by_name(     "java/lang/Byte")?))),
-        "float"   => non_failing_some(Value::Reference(wrap_init!(vm, java_vm, vm.new_class_object_by_name(    "java/lang/Float")?))),
-        "double"  => non_failing_some(Value::Reference(wrap_init!(vm, java_vm, vm.new_class_object_by_name(   "java/lang/Double")?))),
-        "boolean" => non_failing_some(Value::Reference(wrap_init!(vm, java_vm, vm.new_class_object_by_name(  "java/lang/Boolean")?))),
-        "void"    => non_failing_some(Value::Reference(wrap_init!(vm, java_vm, vm.new_class_object_by_name(     "java/lang/Void")?))),
+        "int"     |
+        "long"    |
+        "short"   |
+        "char"    |
+        "byte"    |
+        "float"   |
+        "double"  |
+        "boolean" |
+        "void"    => non_failing_some(Value::Reference(wrap_init!(vm, java_vm, vm.new_class_object(string.as_str(), class_id)?))),
         _ => Err(VmError::ValidationError(format!("Expected extractable string")))
     }
 }
@@ -809,9 +810,7 @@ fn delegate_is_primitive<'a>(vm: &VM<'a>, _: &JavaVM,  _: ClassRef<'a>, obj: Opt
     if let Some(obj) = obj {
         let name = VM::extract_class_name_from_class_object(obj)?;
         non_failing_some(Value::Integer(match name.as_str() {
-            "java/lang/Boolean" | "java/lang/Character" | "java/lang/Byte"  | "java/lang/Short"  |
-            "java/lang/Integer" | "java/lang/Long"      | "java/lang/Float" | "java/lang/Double" |
-            "java/lang/Void" => 1,
+            "boolean" | "char" | "byte" | "short" | "int" | "long" | "float" | "double" | "void" => 1,
             _ => 0,
         }))
         //Ok(Some(Value::Integer(if PrimitiveType::from_str(name.as_str()).is_ok() { 1 } else { 0 })))
