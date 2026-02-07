@@ -324,7 +324,7 @@ impl JNINativeInterface_ {
         unimplemented!()
     }
     pub unsafe extern "C-unwind" fn NewObject(env: *mut JNIEnv, clazz: jclass, methodID: jmethodID, mut args: ...) -> jobject{
-        unsafe{Self::NewObjectV(env, clazz, methodID, args.as_va_list())}
+        unsafe{Self::NewObjectV(env, clazz, methodID, args)}
     }
     pub unsafe extern "system-unwind" fn NewObjectV(env: *mut JNIEnv, clazz: jclass, methodID: jmethodID, args: VaList) -> jobject{
         let vm = unsafe{&*(*env).vm};
@@ -376,7 +376,7 @@ impl JNINativeInterface_ {
     }
 
     pub unsafe extern "C-unwind" fn CallObjectMethod(env: *mut JNIEnv, obj: jobject, methodID: jmethodID, mut params: ...) -> jobject{
-        unsafe{Self::CallObjectMethodV(env, obj, methodID, params.as_va_list())}
+        unsafe{Self::CallObjectMethodV(env, obj, methodID, params)}
     }
 
     pub unsafe extern "system-unwind" fn CallObjectMethodV(env: *mut JNIEnv, obj: jobject, methodID: jmethodID, args: VaList) -> jobject{
@@ -427,7 +427,7 @@ impl JNINativeInterface_ {
     }
 
     pub unsafe extern "C-unwind" fn CallVoidMethod(env: *mut JNIEnv, obj: jobject, methodID: jmethodID, mut params: ...){
-        unsafe{Self::CallVoidMethodV(env, obj, methodID, params.as_va_list())}
+        unsafe{Self::CallVoidMethodV(env, obj, methodID, params)}
     }
 
     pub unsafe extern "system-unwind" fn CallVoidMethodV(env: *mut JNIEnv, obj: jobject, methodID: jmethodID, args: VaList){
