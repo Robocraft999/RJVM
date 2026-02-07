@@ -92,6 +92,15 @@ impl <'a> Application<'a>{
                 panic!();
             }
         }
+        if let VMResultType::Interrupted(..) = self.vm.get_or_initialize_class("java/lang/invoke/MethodType").unwrap(){
+            self.vm.invoke_frames_until(&self.java_vm, -1).unwrap();
+        }
+        if let VMResultType::Interrupted(..) = self.vm.get_or_initialize_class("java/lang/invoke/MethodHandle").unwrap(){
+            self.vm.invoke_frames_until(&self.java_vm, -1).unwrap();
+        }
+        if let VMResultType::Interrupted(..) = self.vm.get_or_initialize_class("java/lang/invoke/MethodHandleNatives").unwrap(){
+            self.vm.invoke_frames_until(&self.java_vm, -1).unwrap();
+        }
         /*#[cfg(feature = "debug")]
         {
             self.vm.debug_helper.exception_helper.print();
