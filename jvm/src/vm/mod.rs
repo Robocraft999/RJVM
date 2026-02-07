@@ -11,7 +11,7 @@ use thiserror::Error;
 use crate::access_flags::MethodFlag;
 use crate::attribute::{BootstrapMethods, Code, ExceptionTable, ProgramCounter, RuntimeVisibleAnnotations};
 use crate::bytecode::Instruction;
-use crate::constants::{ConstantPool, FastConstantPoolEntry};
+use crate::constants::{BytecodeBehavior, ConstantPool, FastConstantPoolEntry};
 use crate::error::ClassParseError;
 use crate::field_info::{FieldType, PrimitiveType};
 use crate::method_info::{MethodDescriptor, MethodInfo};
@@ -143,7 +143,7 @@ impl<'a> VM<'a>{
             let call_result = if class_and_method.method.is_native(){
                 self.execute_native(java_vm, class_and_method)?
             } else {
-                executor::execute(self)?
+                executor::execute(self, java_vm)?
             };
 
             match call_result {
@@ -172,133 +172,12 @@ impl<'a> VM<'a>{
                         let last_frame_index = self.call_stack.pcs.borrow().len() - frame_amount - 1;
                         let current_pc = self.call_stack.pcs.borrow()[last_frame_index];
                         let previous_pc = self.call_stack.frames.borrow()[last_frame_index].class_and_method.method.previous_pc(current_pc);
-                        *self.call_stack.pcs.borrow_mut().get_mut(last_frame_index).unwrap() = ProgramCounter(previous_pc)
+                        *self.call_stack.pcs.borrow_mut().get_mut(last_frame_index).unwrap() = ProgramCounter(previous_pc);
                     }
                 }
             }
         }
     }
-
-    /*
-    main_frame
-        func1
-            func2
-            func3
-                try
-                    func4
-                catch
-        func5
-
-    push main_frame
-    last_result = exe main_frame = CallPaused(func1)
-            push func1
-    cs = [main_frame, func1]
-
-    last_result = exe func1 = CallPaused(func2)
-            push func2
-    cs = [main_frame, func1, func2]
-
-    last_result = exe func2 = Ok(f2res)
-            add f2res top (func1)
-    cs = [main_frame, func1]
-
-    last_result = exe func1 = CallPaused(func3)
-            push func3
-    cs = [main_frame, func1, func3]
-
-    last_result = exe func3 = CallPaused(func4)
-            push func4
-    cs = [main_frame, func1, func3, func4]
-
-    last_result = exe func4 = ExceptionThrown
-            try_resolve_handler
-                    found
-                            last_frame.pc = handler_pc //func4
-                    not found
-                            pop func4
-                            continue (cs=[main_frame, func1, func3])
-    cs = [main_frame, func1, func3, func4]
-
-    last_result = exe func4 = Ok(f4res)
-            add f4res top (func3)
-    cs = [main_frame, func1, func3]
-
-    last_result = exe func3 = Ok(f2res)
-            add f3res top (func1)
-    cs = [main_frame, func1]
-
-    last_result = exe func1 = Ok(f1res)
-            add f1res top (main_frame)
-    cs = [main_frame]
-
-    last_result = exe main_frame = CallPaused(func5)
-            push func5
-    cs = [main_frame, func5]
-
-    last_result = exe func5 = Ok(f5res)
-            add f5res top (main_frame)
-    cs = [main_frame]
-
-    last_result = exe main_frame = Ok(main_res)
-        return main_res
-     */
-
-    /*pub fn invoke_frame(&mut self, main_frame: CallFrame<'a>) -> VMPartialResult<'a, Option<Value<'a>>> {
-        self.call_stack.push_call_frame(main_frame);
-        let vm_ptr: *mut VM = self;
-        let mut last_result: Option<VMResultType<Option<Value>>> = None;
-        loop{
-            let current_result = if let Some(VMResultType::ExceptionThrown(error, ref throwable)) = last_result{
-                VMResultType::ExceptionThrown(error, throwable.clone())
-            } else {
-                let class_and_method = self.call_stack.frames.last().unwrap().class_and_method.clone();
-                if class_and_method.method.is_native(){
-                    self.execute_native(class_and_method)?
-                } else {
-                    self.call_stack.execute_top(vm_ptr)?
-                }
-            };
-            last_result = None;
-            match current_result {
-                VMResultType::Ok(result) => {
-                    if self.call_stack.frames.is_empty(){
-                        return Ok(VMResultType::Ok(result));
-                    }
-                    self.call_stack.add_to_top_stack(result);
-                }
-                VMResultType::CallPaused(new_frame) => self.call_stack.push_call_frame(new_frame),
-                VMResultType::NeedsClassInit(classes, _) => {
-                    for new_frame in classes {
-                        self.call_stack.push_call_frame(new_frame);
-                    }
-                }
-                VMResultType::ExceptionThrown(error, throwable) => {
-                    if let VmError::JavaException(JavaError::JavaExceptionThrown(thrown_class_name, message)) = error {
-                        if let Some(error_frame) = self.call_stack.frames.last(){
-                            let class_and_method = error_frame.class_and_method.clone();
-                            let exception_table = class_and_method.method.get_exception_handlers().clone();
-                            let current_pc = error_frame.pc.clone();
-                            if let Some(handler_pc) = get_or_init!(self.try_resolve_exception_handler(exception_table, current_pc, thrown_class_name.as_str())?){
-                                let error_frame = self.call_stack.frames.last_mut().unwrap();
-                                error_frame.pc = handler_pc;
-                                error_frame.stack.push(throwable.clone());
-                                debug!("Exception thrown handled by {}", class_and_method.format());
-                            } else {
-                                self.call_stack.pop_call_frame();
-                                last_result = Some(VMResultType::ExceptionThrown(VmError::JavaException(JavaError::JavaExceptionThrown(thrown_class_name, message)), throwable));
-                                debug!("Exception handler not in this function {}", class_and_method.format());
-                            }
-                        } else {
-                            panic!("Could not handle {} thrown by a function with message: {}", thrown_class_name, message)
-                        }
-                    } else {
-                        unreachable!("Could not handle {} thrown by a function", error);
-                    }
-                }
-            }
-            self.call_stack.print_call_stack();
-        }
-    }*/
 
     fn execute_native(&self, java_vm: &JavaVM, class_and_method: ClassAndMethod<'a>) -> VMPartialResult<Option<Value<'a>>> {
         //let call_frame = self.call_stack.pop_call_frame();
@@ -591,7 +470,7 @@ impl<'a> VM<'a>{
         self.new_class_object(class_name, class_id)
     }
 
-    pub fn new_method_type(&self, descriptor: &MethodDescriptor) -> VMPartialResult<Reference<'a>> {
+    pub fn new_method_type(&self, java_vm: &JavaVM, descriptor: &MethodDescriptor) -> VMPartialResult<Option<Value<'a>>> {
         let method_type_class = get_or_init!(self.get_or_initialize_class("java/lang/invoke/MethodType")?);
 
         let mut b_args_classes = Vec::new();
@@ -605,49 +484,34 @@ impl<'a> VM<'a>{
         } else {
             self.null()
         };
-        let args_array = get_or_init!(self.new_class_array_1(b_args_classes)?);
-        let method_type_ref = self.new_object_from_class(method_type_class);
-        method_type_ref.set_field(1, b_ret_type);
-        method_type_ref.set_field(2, Value::Reference(args_array));
-        successful_result(method_type_ref)
+        let b_args_arr = Value::Reference(get_or_init!(self.new_class_array_1(b_args_classes)?));
+        let helper = self.resolve_class_method(
+            "java/lang/invoke/MethodHandleNatives",
+            "findMethodHandleType",
+            "(Ljava/lang/Class;[Ljava/lang/Class;)Ljava/lang/invoke/MethodType;"
+        ).unwrap();
+        let frame_index = self.call_stack.len() as isize - 1;
+        self.call_stack.create_and_push_call_frame(helper, None, vec![b_ret_type, b_args_arr], false);
+        self.invoke_frames_until(java_vm, frame_index)
     }
-
-    pub fn new_value_from_constant(&self, constant: FastConstantPoolEntry<'a>) -> VMPartialResult<Value<'a>> {
-        match constant {
-            FastConstantPoolEntry::Class(class) => {
-                successful_result(Value::Reference(get_or_init!(self.new_class_object_by_class(class)?)))
-            }
-            FastConstantPoolEntry::String(string) => {
-                successful_result(Value::Reference(get_or_init!(self.new_string_object(string.as_str())?)))
-            }
-            FastConstantPoolEntry::Integer(value) => {
-                Ok(VMResultType::Successful(Value::Integer(value)))
-            }
-            FastConstantPoolEntry::Float(value) => {
-                Ok(VMResultType::Successful(Value::Float(value)))
-            }
-            FastConstantPoolEntry::Long(value) => {
-                Ok(VMResultType::Successful(Value::Long(value)))
-            }
-            FastConstantPoolEntry::Double(value) => {
-                Ok(VMResultType::Successful(Value::Double(value)))
-            }
-            FastConstantPoolEntry::MethodHandleField(kind, caf) => {
-                let method_handle_class = get_or_init!(self.get_or_initialize_class("java/lang/invoke/MethodHandle")?);
-                unimplemented!()
-            }
-            FastConstantPoolEntry::MethodHandleMethod(kind, cam) => {
-                let method_handle_class = get_or_init!(self.get_or_initialize_class("java/lang/invoke/MethodHandle")?);
-                let lambda_form_class = get_or_init!(self.get_or_initialize_class("java/lang/invoke/LambdaForm")?);
-                let method_type_ref = get_or_init!(self.new_method_type(&cam.method.descriptor)?);
-                unimplemented!()
-            }
-            FastConstantPoolEntry::MethodType(descriptor) => {
-                let method_type_ref = get_or_init!(self.new_method_type(&descriptor)?);
-                successful_result(Value::Reference(method_type_ref))
-            }
-            _ => Err(VmError::ValidationError(format!( "Could not make a value out of: {:?}", constant))),
-        }
+    
+    /// does call a function which places the result in the current frame
+    pub fn new_method_handle(&self, java_vm: &JavaVM, pool_holder: ClassRef<'a>, kind: BytecodeBehavior, cam: ClassAndMethod, method_type_ref: Reference<'a>) -> VMPartialResult<Option<Value<'a>>>{
+        let callee = get_or_init!(self.get_or_initialize_class(cam.class.name.as_str())?);
+        let callee = Value::Reference(get_or_init!(self.new_class_object_by_class(callee)?));
+        let caller = Value::Reference(get_or_init!(self.new_class_object_by_class(pool_holder)?));
+        let ref_kind = Value::Integer(kind as u8 as i32);
+        let name = Value::Reference(get_or_init!(self.new_string_object(cam.method.name.as_str())?));
+        let typ = Value::Reference(method_type_ref);
+        let helper = self.resolve_class_method(
+            "java/lang/invoke/MethodHandleNatives",
+            "linkMethodHandleConstant",
+            "(Ljava/lang/Class;ILjava/lang/Class;Ljava/lang/String;Ljava/lang/Object;)Ljava/lang/invoke/MethodHandle;"
+        ).unwrap();
+        println!("NMH e");
+        let frame_index = self.call_stack.len() as isize - 1;
+        self.call_stack.create_and_push_call_frame(helper, None, vec![caller, ref_kind, callee, name, typ], false);
+        self.invoke_frames_until(java_vm, frame_index)
     }
 
     pub fn extract_class_from_class_object(&self, object: Reference<'a>) -> VMResult<ClassRef<'a>>{

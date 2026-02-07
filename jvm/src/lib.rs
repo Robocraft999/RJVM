@@ -112,7 +112,7 @@ pub fn run() {
     let args_array = app.vm.try_new_array(1, FieldType::Object("java/lang/String".to_string()).to_array_field_type(1), RefCell::new(args)).unwrap();
     let p_args = vec![Value::Reference(args_array)];
     //run_and_catch_method(&mut vm, "de/klassenserver7b/k7bot/Main", "main", "([Ljava/lang/String;)V", p_args);
-    //run_and_catch_method(&mut vm, "Hello", "main", "([Ljava/lang/String;)V", p_args);
+    //app.run_and_catch_method("Main", "main", "([Ljava/lang/String;)V", p_args);
     app.run_and_catch_method("logicsim/App", "main", "([Ljava/lang/String;)V", p_args);
 
     //parse_class_file(&class_path, "java/lang/Exception");

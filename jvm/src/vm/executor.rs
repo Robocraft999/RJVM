@@ -6,6 +6,7 @@ use crate::{bytecode::Instruction, constants::ConstantPoolEntry, field_info::{Fi
 use log::{debug, error, info, trace, warn};
 use crate::constants::FastConstantPoolEntry;
 use crate::vm::class_manager::ClassLoadingState;
+use crate::vm::jni::types::JavaVM;
 
 macro_rules! wrap_error {
     ($res:expr) => {
@@ -16,7 +17,7 @@ macro_rules! wrap_error {
     };
 }
 
-pub fn execute<'a>(vm: &VM<'a>) -> VMPartialResult<Option<Value<'a>>>{
+pub fn execute<'a>(vm: &VM<'a>, java_vm: &JavaVM) -> VMPartialResult<Option<Value<'a>>>{
     let class_and_method = &vm.call_stack.frames.borrow().last().unwrap().class_and_method.clone();
     if vm.class_manager.expect_class_state(class_and_method.class.id, ClassLoadingState::LOADED){
         unreachable!("Class {} has to be initialized to call {} upon", class_and_method.class.name, class_and_method.format());
@@ -25,16 +26,16 @@ pub fn execute<'a>(vm: &VM<'a>) -> VMPartialResult<Option<Value<'a>>>{
     info!("METHOD_NAME: {} at {}", class_and_method.format(), vm.call_stack.get_pc().0);
     debug!("{:?}", class_and_method.method.code_blocks);
     if let Some(_) = &class_and_method.method.code{
-        let mut result = execute_current_block(vm);
+        let mut result = execute_current_block(vm, java_vm);
         while let None = result{
-            result = execute_current_block(vm);
+            result = execute_current_block(vm, java_vm);
         }
         return result.unwrap();
     }
     Err(VmError::MethodCallError(format!("Method: {} is not executeable, because it has no code", class_and_method.format())))
 }
 
-pub fn execute_current_block<'a>(vm: &VM<'a>) -> Option<VMPartialResult<Option<Value<'a>>>>{
+pub fn execute_current_block<'a>(vm: &VM<'a>, java_vm: &JavaVM) -> Option<VMPartialResult<Option<Value<'a>>>>{
     let class_and_method = &vm.call_stack.frames.borrow().last().unwrap().class_and_method.clone();
     let block = class_and_method.method.get_code_block_at(vm.call_stack.get_pc());
     let current_pc = vm.call_stack.get_pc();
@@ -690,11 +691,14 @@ pub fn execute_current_block<'a>(vm: &VM<'a>) -> Option<VMPartialResult<Option<V
                 Instruction::INVOKEINTERFACE(index, _, _) => { return Some(execute_invoke(vm, *index, InvokeKind::INTERFACE)) }
                 Instruction::INVOKEDYNAMIC(index, _, _) => {
                     if let Some(FastConstantPoolEntry::InvokeDynamic(bm, method_name, type_name)) = class_and_method.class.get_or_resolve_constant_fast(vm, *index){
-                        let method_type_class = get_or_init_option!(vm.get_or_initialize_class("java/lang/invoke/MethodType"));
+                        if let Some(FastConstantPoolEntry::MethodHandleMethod(kind, cam)) = class_and_method.class.get_or_resolve_constant_fast(vm, bm.bootstrap_method_ref_index){
+                            let method_type_ref_option = get_or_init_option!(vm.new_method_type(java_vm, &cam.method.descriptor));
 
-                        let method_handle_constant = class_and_method.class.get_or_resolve_constant_fast(vm, bm.bootstrap_method_ref_index).unwrap();
-                        let method_handle_ref = get_or_init_option!(vm.new_value_from_constant(method_handle_constant));
-                        unimplemented!()
+                            if let Some(Value::Reference(method_type_ref)) = method_type_ref_option{
+                                let method_handle_option = get_or_init_option!(vm.new_method_handle(java_vm, class_and_method.class, kind, cam, method_type_ref));
+                                unimplemented!()
+                            }
+                        }
                     }
                     unimplemented!()
                 }

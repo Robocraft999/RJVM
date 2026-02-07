@@ -158,6 +158,22 @@ macro_rules! wrap_init{
     }
 }
 
+macro_rules! native_wrap {
+    ($code:block, $ret:ty) => {
+        fn t() -> VMResult<$ret> {
+            $code
+        }
+        match t(){
+            Ok(v) => v,
+            Err(e) => {
+                let vm = unsafe{&*(*env).vm};
+                vm.native_method_registry.mark_exception();
+                panic!("this should be able to break out of here");
+            }
+        }
+    };
+}
+
 unsafe fn resolve_static_class_and_method(env: *mut JNIEnv, clazz: jclass, method_id: jmethodID) -> ClassAndMethod{
     let vm = unsafe{&*(*env).vm};
 
