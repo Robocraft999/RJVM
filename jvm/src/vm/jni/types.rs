@@ -6,14 +6,14 @@
 
 use std::cell::RefCell;
 use crate::vm::{jni::{env_function_table::JNINativeInterface, vm_function_table::JNIInvokeInterface}, VmError, VM};
-use log::{debug, error};
+use log::{debug, error, warn};
 use std::ffi::{c_char, c_double, c_float, c_int, c_long, c_schar, c_short, c_uchar, c_ushort, c_void, CStr, CString, OsStr, VaList};
 use std::fmt::Debug;
 use std::os::unix::ffi::OsStrExt;
 use std::slice;
 use crate::field_info::{FieldType, PrimitiveType};
 use crate::vm::class::{ClassAndMethod, ClassId};
-use crate::vm::result::{VMPartialResult, VMResultType};
+use crate::vm::result::{VMPartialResult, VMResult, VMResultType};
 use crate::vm::value::{ReferenceType, Value};
 
 //Platform dependent
@@ -220,7 +220,7 @@ impl JNINativeInterface_ {
     }
     pub unsafe extern "system-unwind" fn FindClass(env: *mut JNIEnv, name: *const c_char) -> jclass {
         let name = unsafe{CStr::from_ptr(name)}.to_str().map_err(|e| VmError::Native(e.to_string())).unwrap();
-        println!("NATIVE: FindClass: '{}'", name);
+        debug!(target: "native", "NATIVE: FindClass: '{}'", name);
         if name == ""{
             0 as jclass
         } else {
@@ -259,6 +259,7 @@ impl JNINativeInterface_ {
 
     pub unsafe extern "system-unwind" fn Throw(env: *mut JNIEnv, obj: jthrowable) -> jint{
         let vm: &VM = unsafe{&*(*env).vm};
+        debug!(target: "native", "NATIVE: Throw");
         if let Some(object) = vm.objects_by_id.borrow().get(&obj).copied() {
             let prev = vm.caught_exception.replace(Some(("NativeException".to_string(), "Unknown".to_string(), Value::Reference(object))));
             assert!(prev.is_none());
@@ -282,7 +283,11 @@ impl JNINativeInterface_ {
         unimplemented!()
     }
     pub fn ExceptionClear(env: *mut JNIEnv){
-        unimplemented!()
+        let vm: &VM = unsafe{&*(*env).vm};
+        let old = vm.caught_exception.replace(None);
+        if let Some(e) = old{
+            warn!(target: "native", "an Exception was cleared: {:?}", e)
+        }
     }
     pub fn FatalError(env: *mut JNIEnv, msg: *const c_char){
         error!("Fatal Error: '{:?}'", unsafe {CStr::from_ptr(msg)});
@@ -338,7 +343,14 @@ impl JNINativeInterface_ {
         let obj_ref = vm.new_object_from_class(class_and_method.class);
         debug!("NewObjectV: {} ({:?})", class_and_method.format(), args);
         vm.call_stack.create_and_push_call_frame(class_and_method, Some(obj_ref), args, false);
-        let res = vm.invoke_frames_until(javavm, stop_index).unwrap();
+        let res = match vm.invoke_frames_until(javavm, stop_index) {
+            Ok(result) => result,
+            Err(e) => {
+                error!(target: "native", "Java error: {:?}", e);
+                vm.native_method_registry.mark_exception();
+                return 0;
+            }
+        };
         if let VMResultType::Successful(None) = res{
             obj_ref.id as jobject
         } else {
@@ -390,7 +402,14 @@ impl JNINativeInterface_ {
         let obj_ref = vm.objects_by_id.borrow().get(&obj).copied().unwrap();
         debug!("CallObjectMethodV: {} ({:?})", class_and_method.format(), args);
         vm.call_stack.create_and_push_call_frame(class_and_method, Some(obj_ref), args, false);
-        let res = vm.invoke_frames_until(javavm, stop_index).unwrap();
+        let res = match vm.invoke_frames_until(javavm, stop_index) {
+            Ok(result) => result,
+            Err(e) => {
+                error!(target: "native", "Java error: {:?}", e);
+                vm.native_method_registry.mark_exception();
+                return 0;
+            }
+        };
         if let VMResultType::Successful(Some(Value::Reference(reference))) = res{
             reference.id as jobject
         } else {
@@ -441,7 +460,14 @@ impl JNINativeInterface_ {
         let obj_ref = vm.objects_by_id.borrow().get(&obj).copied().unwrap();
         debug!("CallVoidMethodV: {} ({:?})", class_and_method.format(), args);
         vm.call_stack.create_and_push_call_frame(class_and_method, Some(obj_ref), args, false);
-        let res = vm.invoke_frames_until(javavm, stop_index).unwrap();
+        let res = match vm.invoke_frames_until(javavm, stop_index) {
+            Ok(result) => result,
+            Err(e) => {
+                error!(target: "native", "Java error: {:?}", e);
+                vm.native_method_registry.mark_exception();
+                return;
+            }
+        };
         if let VMResultType::Successful(None) = res{
             //works
         } else {
@@ -582,7 +608,14 @@ impl JNINativeInterface_ {
 
         debug!("CallStaticObjectMethodV: {} ({:?})", class_and_method.format(), args);
         vm.call_stack.create_and_push_call_frame(class_and_method, None, args, false);
-        let res = vm.invoke_frames_until(javavm, stop_index).unwrap();
+        let res = match vm.invoke_frames_until(javavm, stop_index) {
+            Ok(result) => result,
+            Err(e) => {
+                error!(target: "native", "Java error: {:?}", e);
+                vm.native_method_registry.mark_exception();
+                return 0;
+            }
+        };
         if let VMResultType::Successful(Some(result)) = res{
             if let Value::Reference(r) = result{
                 r.id as jobject
@@ -608,7 +641,14 @@ impl JNINativeInterface_ {
 
         debug!("CallStaticBooleanMethod: {} ({:?})", class_and_method.format(), args);
         vm.call_stack.create_and_push_call_frame(class_and_method, None, args, false);
-        let res = vm.invoke_frames_until(javavm, stop_index).unwrap();
+        let res = match vm.invoke_frames_until(javavm, stop_index) {
+            Ok(result) => result,
+            Err(e) => {
+                error!(target: "native", "Java error: {:?}", e);
+                vm.native_method_registry.mark_exception();
+                return 0;
+            }
+        };
         if let VMResultType::Successful(Some(result)) = res{
             if let Value::Integer(val) = result{
                 assert!(val == 0 || val == 1);
@@ -655,7 +695,14 @@ impl JNINativeInterface_ {
 
         debug!("CallStaticVoidMethod: {} ({:?})", class_and_method.format(), args);
         vm.call_stack.create_and_push_call_frame(class_and_method, None, args, false);
-        let res = vm.invoke_frames_until(javavm, stop_index).unwrap();
+        let res = match vm.invoke_frames_until(javavm, stop_index) {
+            Ok(result) => result,
+            Err(e) => {
+                error!(target: "native", "Java error: {:?}", e);
+                vm.native_method_registry.mark_exception();
+                return;
+            }
+        };
         if let VMResultType::Successful(None) = res{
             //works
         } else {

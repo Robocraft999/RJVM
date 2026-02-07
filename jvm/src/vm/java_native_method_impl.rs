@@ -99,6 +99,7 @@ pub struct NativeMethodRegistry<'a>{
     methods: Vec<NativeMethod<'a>>,
     loaded_libraries: RefCell<Vec<Library>>,
     extern_methods: RefCell<HashMap<ClassAndMethod<'a>, ExternNativeMethod>>, //FIXME consider saving native as option to prevent duplicate lookup
+    exception_in_native: RefCell<bool>,
 }
 
 impl <'a>NativeMethodRegistry<'a>{
@@ -106,7 +107,8 @@ impl <'a>NativeMethodRegistry<'a>{
         Self{
             methods: Vec::new(),
             loaded_libraries: RefCell::new(Vec::new()),
-            extern_methods: RefCell::new(HashMap::new())
+            extern_methods: RefCell::new(HashMap::new()),
+            exception_in_native: RefCell::new(false),
         }
     }
 
@@ -140,6 +142,11 @@ impl <'a>NativeMethodRegistry<'a>{
             }
         }
         false
+    }
+    
+    pub fn mark_exception(&self){
+        warn!(target: "native", "Some native function marked as failed");
+        self.exception_in_native.replace(true);
     }
 
     pub fn invoke(vm: &VM<'a>, java_vm: &JavaVM, class_and_method: &ClassAndMethod<'a>, object: Option<Reference<'a>>, args: Vec<Value<'a>>) -> Option<VMPartialResult<Option<Value<'a>>>>{
@@ -190,7 +197,11 @@ impl <'a>NativeMethodRegistry<'a>{
                 } else {
                     None
                 };
-                return Some(Ok(VMResultType::Successful(result)));
+                return if vm.native_method_registry.exception_in_native.replace(false){
+                    Some(Ok(VMResultType::ExceptionThrown))
+                } else {
+                    Some(Ok(VMResultType::Successful(result)))
+                };
             }
         }
         None
@@ -362,7 +373,10 @@ pub fn register_all_natives(registry: &mut NativeMethodRegistry){
     registry.register("sun/misc/Signal", "findSignal", "(Ljava/lang/String;)I", delegate_find_signal);
     registry.register("sun/misc/Signal", "handle0", "(IJ)J", delegate_handle0);
     registry.register("sun/misc/URLClassPath", "getLookupCacheURLs", "(Ljava/lang/ClassLoader;)[Ljava/net/URL;", delegate_lookup_cache_urls);
-    registry.register("sun/misc/Perf", "createLong", "(Ljava/lang/String;IIJ)Ljava/nio/ByteBuffer;", delegate_perf_create_long)
+    registry.register("sun/misc/Perf", "createLong", "(Ljava/lang/String;IIJ)Ljava/nio/ByteBuffer;", delegate_perf_create_long);
+    registry.register("java/lang/invoke/MethodHandleNatives", "getConstant", "(I)I", delegate_mhn_get_constant);
+    registry.register("java/lang/invoke/MethodHandleNatives", "getNamedCon", "(I[Ljava/lang/Object;)I", delegate_mhn_get_named_con);
+    registry.register("java/lang/invoke/MethodHandleNatives", "resolve", "(Ljava/lang/invoke/MemberName;Ljava/lang/Class;)Ljava/lang/invoke/MemberName;", delegate_mhn_resolve);
 }
 
 fn non_failing_some<'a>(value: Value<'a>) -> VMPartialResult<Option<Value<'a>>>{
@@ -709,7 +723,11 @@ fn delegate_get_enclosing_method<'a>(vm: &VM<'a>, java_vm: &JavaVM, c: ClassRef<
     if let Some(obj) = this {
         let class = vm.extract_class_from_class_object(obj)?;
         if let Some(enclosing) = &class.attributes.enclosing_method{
-            let class_ref = wrap_init!(vm, java_vm, vm.new_value_from_constant(class.get_or_resolve_constant_fast(vm, enclosing.class_index).unwrap())?);
+            let class_ref = if let Some(FastConstantPoolEntry::Class(class_ref)) = class.get_or_resolve_constant_fast(vm, enclosing.class_index){
+                Value::Reference(wrap_init!(vm, java_vm, vm.new_class_object_by_class(class_ref)?))
+            } else {
+                return Err(VmError::ValidationError("expected a class constant".to_string()));
+            };
             let (method_name, method_type) = if let Some(FastConstantPoolEntry::NameAndType(name, typ)) = class.get_or_resolve_constant_fast(vm, enclosing.class_index){
                 (
                     Value::Reference(wrap_init!(vm, java_vm, vm.new_string_object(name.as_str())?)),
@@ -1722,14 +1740,49 @@ fn delegate_perf_create_long<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>,
     let class_name = "java/nio/DirectByteBuffer";
     let byte_buffer = wrap_init!(vm, java_vm, vm.new_object(class_name)?);
     let constructor = vm.resolve_class_method(class_name, "<init>", "(JI)V")?;
-    let frame_index = vm.call_stack.frames.borrow().len() - 1;
+    let frame_index = vm.call_stack.frames.borrow().len() as isize - 1;
     let addr = vm.unsafe_allocator.allocate_memory(8);
     vm.call_stack.create_and_push_call_frame(constructor, Some(byte_buffer), vec![Value::Long(addr), Value::Dummy, Value::Integer(8)], false);
-    let res = vm.invoke_frames_until(java_vm, frame_index as isize)?;
+    let res = vm.invoke_frames_until(java_vm, frame_index)?;
     if let VMResultType::Successful(None) = res{
         non_failing_some(Value::Reference(byte_buffer))
     } else {
         Err(VmError::ValidationError("Error when calling constructor".to_string()))
+    }
+}
+
+const GC_COUNT_GWT: i32 = 4;
+const GC_LAMBDA_SUPPORT: i32 = 5;
+
+fn delegate_mhn_get_constant<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
+    if let Some(Value::Integer(val)) = args.get(0){
+        match *val{
+            GC_COUNT_GWT => non_failing_some(Value::Integer(0)),
+            _ => non_failing_some(Value::Integer(0))
+        }
+    } else {
+        Err(VmError::ValidationError("Expected integer argument".to_string()))
+    }
+}
+
+fn delegate_mhn_get_named_con<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
+    if let (Some(Value::Integer(which)), Some(Value::Reference(object_arr_ref))) = (args.get(0), args.get(1)){
+        //TODO see https://github.com/openjdk/jdk8u/blob/master/hotspot/src/share/vm/prims/methodHandles.cpp#L1115
+        non_failing_some(Value::Integer(0))
+    } else {
+        Err(VmError::ValidationError("Expected integer and object arr argument".to_string()))
+    }
+}
+
+fn delegate_mhn_resolve<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
+    if let (Some(Value::Reference(selff)), Some(Value::Reference(caller))) = (args.get(0), args.get(1)){
+        let clazz = vm.extract_class_from_class_object(selff.get_field(0).expect_reference().unwrap())?;
+        let caller_clazz = vm.extract_class_from_class_object(caller)?;
+        let name = VM::extract_string_from_object(&selff.get_field(1))?;
+        //TODO see: https://github.com/openjdk/jdk8u/blob/master/hotspot/src/share/vm/prims/methodHandles.cpp#L609
+        non_failing_some(Value::Reference(selff))
+    } else {
+        Err(VmError::ValidationError("Expected two references".to_string()))
     }
 }
 
