@@ -289,6 +289,7 @@ pub fn register_all_natives(registry: &mut NativeMethodRegistry){
     registry.register("java/lang/Class", "getModifiers", "()I", delegate_get_class_modifiers);
     registry.register("java/lang/Class", "getSuperclass", "()Ljava/lang/Class;", delegate_get_super_class);
     registry.register("java/lang/Class", "getEnclosingMethod0", "()[Ljava/lang/Object;", delegate_get_enclosing_method);
+    registry.register("java/lang/Class", "getDeclaringClass0", "()Ljava/lang/Class;", delegate_get_declaring_class);
     registry.register("java/lang/Class", "forName0", "(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/Class;", delegate_for_name0);
     registry.register("java/lang/Class", "isInterface", "()Z", delegate_is_interface);
     registry.register("java/lang/Class", "isArray", "()Z", delegate_is_array);
@@ -721,6 +722,23 @@ fn delegate_get_enclosing_method<'a>(vm: &VM<'a>, java_vm: &JavaVM, c: ClassRef<
         } else {
             non_failing_some(vm.null())
         }
+    } else {
+        Err(VmError::ValidationError("Expected Class object".to_string()))
+    }
+}
+
+fn delegate_get_declaring_class<'a>(vm: &VM<'a>, java_vm: &JavaVM, c: ClassRef<'a>, this: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
+    if let Some(obj) = this {
+        let class = vm.extract_class_from_class_object(obj)?;
+        if let Some(inner_classes) = &class.attributes.inner_classes{
+            for inner_class in inner_classes {
+                if let Some(FastConstantPoolEntry::Class(inner_class_ref)) = class.get_or_resolve_constant_fast(vm, inner_class.inner_class_info_index) && class.name == inner_class_ref.name{
+                    let inner_class_obj = wrap_init!(vm, java_vm, vm.new_class_object_by_class(inner_class_ref)?);
+                    return non_failing_some(Value::Reference(inner_class_obj));
+                }
+            }
+        }
+        non_failing_some(vm.null())
     } else {
         Err(VmError::ValidationError("Expected Class object".to_string()))
     }

@@ -178,6 +178,7 @@ impl<'a> Debug for Class<'a>{
             .field("constants", &self.constants)
             .field("flags", &self.flags)
             .field("array_info", &self.array_info)
+            .field("attributes", &self.attributes)
             .finish()
     }
 }

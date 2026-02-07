@@ -1,5 +1,5 @@
 use crate::access_flags::{parse_class_flags, parse_field_flags, parse_method_flags, ClassFlags};
-use crate::attribute::{Annotation, Attribute, BootstrapMethod, BootstrapMethods, ClassFileAttributes, Code, ConstantValue, Deprecated, EnclosingMethod, ExceptionTable, ExceptionTableEntry, Exceptions, LineNumber, LineNumberTable, LineNumberTableEntry, ProgramCounter, RuntimeVisibleAnnotations, SourceFile};
+use crate::attribute::{Annotation, Attribute, BootstrapMethod, BootstrapMethods, ClassFileAttributes, Code, ConstantValue, Deprecated, EnclosingMethod, ExceptionTable, ExceptionTableEntry, Exceptions, InnerClass, InnerClasses, LineNumber, LineNumberTable, LineNumberTableEntry, ProgramCounter, RuntimeVisibleAnnotations, SourceFile};
 use crate::bytes::{parse_u1, parse_u2, parse_u4, parse_u8};
 use crate::class_file_version::ClassFileVersion;
 use crate::constants::{BytecodeBehavior, ConstantPool, ConstantPoolEntry};
@@ -412,6 +412,19 @@ pub fn parse_class_file(bytes: Vec<u8>, class_name: &str) -> VMResult<ClassFile>
                 let class_index = parse_u2(&mut bytes)?;
                 let method_index = parse_u2(&mut bytes)?;
                 class_file_attributes.enclosing_method = Some(EnclosingMethod{class_index, method_index});
+            }
+            "InnerClasses" => {
+                let number_of_classes = parse_u2(&mut bytes)?;
+                let mut classes = Vec::new();
+                for _ in 0..number_of_classes {
+                    classes.push(InnerClass{
+                        inner_class_info_index: parse_u2(&mut bytes)?,
+                        outer_class_info_index: parse_u2(&mut bytes)?,
+                        inner_name_index: parse_u2(&mut bytes)?,
+                        inner_class_access_flags: parse_u2(&mut bytes)?,
+                    });
+                }
+                class_file_attributes.inner_classes = Some(classes);
             }
             _ => {
                 let mut info = Vec::new();

@@ -14,7 +14,7 @@ pub struct Attribute{
 
 #[derive(Debug, Clone, Default)]
 pub struct ClassFileAttributes{
-    pub inner_classes: Option<Attribute>,
+    pub inner_classes: Option<InnerClasses>,
     pub enclosing_method: Option<EnclosingMethod>,
     pub synthetic: Option<Attribute>,
     pub signature: Option<Attribute>,
@@ -205,6 +205,16 @@ pub struct Exceptions(pub Vec<String>);
 pub struct EnclosingMethod{
     pub class_index: u16,
     pub method_index: u16,
+}
+
+pub type InnerClasses = Vec<InnerClass>;
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct InnerClass{
+    pub inner_class_info_index: u16,
+    pub outer_class_info_index: u16,
+    pub inner_name_index: u16,
+    pub inner_class_access_flags: u16,
 }
 
 #[derive(Clone, Debug, PartialEq)]
