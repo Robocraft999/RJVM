@@ -58,6 +58,7 @@ pub struct VM<'a>{
     pub static_class_objects: RefCell<HashMap<ClassId, Reference<'a>>>,
     pub string_objects: RefCell<HashMap<String, Reference<'a>>>,
     pub class_objects: RefCell<HashMap<ClassId, Reference<'a>>>,
+    pub object_payloads: RefCell<HashMap<u32, Vec<Value<'a>>>>,
     pub native_method_registry: NativeMethodRegistry<'a>,
     pub currently_open_files: RefCell<HashMap<String, (Vec<u8>, usize)>>,
     pub current_thread: RefCell<Option<Reference<'a>>>,
@@ -80,6 +81,7 @@ impl<'a> VM<'a>{
             static_class_objects: RefCell::new(HashMap::new()),
             string_objects: RefCell::new(HashMap::new()),
             class_objects: RefCell::new(HashMap::new()),
+            object_payloads: RefCell::new(HashMap::new()),
             native_method_registry,
             currently_open_files: RefCell::new(HashMap::new()),
             current_thread: RefCell::new(None),
@@ -514,6 +516,13 @@ impl<'a> VM<'a>{
         self.invoke_frames_until(java_vm, frame_index)
     }
 
+    pub fn new_java_lang_long(&self, value: Value<'a>) -> VMPartialResult<Value<'a>> {
+        let long = get_or_init!(self.new_object("java/lang/Long")?);
+        //value
+        long.set_field(4, value);
+        Ok(VMResultType::Successful(Value::Reference(long)))
+    }
+
     pub fn extract_class_from_class_object(&self, object: Reference<'a>) -> VMResult<ClassRef<'a>>{
         let name_object = object.get_field(5);
         let name = VM::extract_string_from_object(&name_object)?;
@@ -542,6 +551,22 @@ impl<'a> VM<'a>{
                 return Ok(false);
             }
         }
+    }
+
+    pub fn is_instance_of(&self, class: ClassRef<'a>, of_class: ClassRef<'a>) -> bool{
+        let mut instance_of = false;
+        let mut to_check = vec![class];
+        while let Some(next_class) = to_check.pop() {
+            if next_class.id == of_class.id{
+                instance_of = true;
+                break;
+            }
+            if let Some(super_class) = next_class.superclass{
+                to_check.push(super_class);
+            }
+            to_check.extend(next_class.interfaces.iter());
+        }
+        instance_of
     }
 
     pub fn find_class_by_id(&self, class_id: ClassId) -> Option<ClassRef<'a>>{

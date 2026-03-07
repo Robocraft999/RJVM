@@ -773,9 +773,9 @@ pub fn execute_current_block<'a>(vm: &VM<'a>, java_vm: &JavaVM) -> Option<VMPart
                     debug!("CHECKCAST {}", get_constant_printable(&class_and_method.class.constants, *constant_index));
                 }
                 Instruction::INSTANCEOF(constant_index) => {
-                    let of_class = match vm.get_or_resolve_class(get_constant_printable(&class_and_method.class.constants, *constant_index).as_str()){
-                        Ok(clazz) => clazz,
-                        Err(e) => return Some(Err(e)),
+                    let of_class = match class_and_method.class.get_or_resolve_constant_fast(vm, *constant_index){
+                        Some(FastConstantPoolEntry::Class(class_ref)) => class_ref,
+                        _ => return Some(Err(VmError::ValidationError("Expected a resolvable class entry".to_string()))),
                     };
 
                     let object = vm.call_stack.pop_operand_value().unwrap();
@@ -785,18 +785,7 @@ pub fn execute_current_block<'a>(vm: &VM<'a>, java_vm: &JavaVM) -> Option<VMPart
                     }
                     let object = object.expect_reference().unwrap();
                     let object_class = vm.find_class_by_id(object.class_id).unwrap();
-                    let mut instance_of = false;
-                    let mut to_check = vec![object_class];
-                    while let Some(next_class) = to_check.pop() {
-                        if next_class.id == of_class.id{
-                            instance_of = true;
-                            break;
-                        }
-                        if let Some(super_class) = next_class.superclass{
-                            to_check.push(super_class);
-                        }
-                        next_class.interfaces.iter().for_each(|class| to_check.push(class));
-                    }
+                    let instance_of = vm.is_instance_of(object_class, of_class);
 
                     debug!("INSTANCEOF {} = {}", get_constant_printable(&class_and_method.class.constants, *constant_index), instance_of);
 

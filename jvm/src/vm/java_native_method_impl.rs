@@ -377,6 +377,7 @@ pub fn register_all_natives(registry: &mut NativeMethodRegistry){
     registry.register("java/lang/invoke/MethodHandleNatives", "getConstant", "(I)I", delegate_mhn_get_constant);
     registry.register("java/lang/invoke/MethodHandleNatives", "getNamedCon", "(I[Ljava/lang/Object;)I", delegate_mhn_get_named_con);
     registry.register("java/lang/invoke/MethodHandleNatives", "resolve", "(Ljava/lang/invoke/MemberName;Ljava/lang/Class;)Ljava/lang/invoke/MemberName;", delegate_mhn_resolve);
+    registry.register("java/lang/invoke/MethodHandleNatives", "getMemberVMInfo", "(Ljava/lang/invoke/MemberName;)Ljava/lang/Object;", delegate_mhn_member_vminfo);
 }
 
 fn non_failing_some<'a>(value: Value<'a>) -> VMPartialResult<Option<Value<'a>>>{
@@ -752,8 +753,10 @@ fn delegate_get_declaring_class<'a>(vm: &VM<'a>, java_vm: &JavaVM, c: ClassRef<'
         if let Some(inner_classes) = &class.attributes.inner_classes{
             for inner_class in inner_classes {
                 if let Some(FastConstantPoolEntry::Class(inner_class_ref)) = class.get_or_resolve_constant_fast(vm, inner_class.inner_class_info_index) && class.name == inner_class_ref.name{
-                    let inner_class_obj = wrap_init!(vm, java_vm, vm.new_class_object_by_class(inner_class_ref)?);
-                    return non_failing_some(Value::Reference(inner_class_obj));
+                    if let Some(FastConstantPoolEntry::Class(outer_class_ref)) = class.get_or_resolve_constant_fast(vm, inner_class.outer_class_info_index){
+                        let outer_class_obj = wrap_init!(vm, java_vm, vm.new_class_object_by_class(outer_class_ref)?);
+                        return non_failing_some(Value::Reference(outer_class_obj));
+                    }
                 }
             }
         }
@@ -1774,15 +1777,68 @@ fn delegate_mhn_get_named_con<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>
     }
 }
 
+fn resolve_signature<'a>(sig: Reference<'a>) -> VMResult<String>{
+    if sig.class_name == "java/lang/invoke/MethodType"{
+        let args_ref = sig.get_field(2).expect_reference()?;
+        let rtype_ref = sig.get_field(1).expect_reference()?;
+        if let ReferenceType::Array(_, _, content) = &args_ref.reference_type{
+            let mut signature = String::from("(");
+            for class_obj in content.borrow().iter(){
+                let class_obj = class_obj.expect_reference()?;
+                let class_name = VM::extract_class_name_from_class_object(class_obj)?;
+                signature.push_str(get_class_descriptor(class_name.as_str()).as_str());
+            }
+            signature.push_str(")");
+            if rtype_ref.is_null(){
+                signature.push_str("V");
+            } else {
+                let class_name = VM::extract_class_name_from_class_object(rtype_ref)?;
+                signature.push_str(get_class_descriptor(class_name.as_str()).as_str())
+            }
+            Ok(signature)
+        } else {
+            Err(VmError::ValidationError("Invalid signature (args is not an array)".to_string()))
+        }
+    } else if sig.class_name == "java/lang/Class"{
+        todo!()
+    } else if sig.class_name == "java/lang/String"{
+        todo!()
+    } else {
+        Err(VmError::ValidationError("Invalid signature type".to_string()))
+    }
+}
+
 fn delegate_mhn_resolve<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
     if let (Some(Value::Reference(selff)), Some(Value::Reference(caller))) = (args.get(0), args.get(1)){
         let clazz = vm.extract_class_from_class_object(selff.get_field(0).expect_reference().unwrap())?;
         let caller_clazz = vm.extract_class_from_class_object(caller)?;
         let name = VM::extract_string_from_object(&selff.get_field(1))?;
+        let typ = selff.get_field(2).expect_reference()?;
+        let sig = resolve_signature(typ)?;
+        let flags = &selff.get_field(3).expect_int()?;
+        let method_info = clazz.find_method(name.as_str(), sig.as_str()).unwrap();
+        let full_flags = *flags | method_info.flags.iter().fold(0, |a, f| a | f.clone() as u8) as i32;
+        selff.set_field(3, Value::Integer(full_flags));
         //TODO see: https://github.com/openjdk/jdk8u/blob/master/hotspot/src/share/vm/prims/methodHandles.cpp#L609
+        let vmindex = wrap_init!(vm, java_vm, vm.new_java_lang_long(Value::Long(-69420))?);
+        let prev = vm.object_payloads.borrow_mut().insert(selff.id, vec![vmindex, Value::Reference(selff)]);
+        assert!(prev.is_none());
         non_failing_some(Value::Reference(selff))
     } else {
         Err(VmError::ValidationError("Expected two references".to_string()))
+    }
+}
+
+fn delegate_mhn_member_vminfo<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
+    if let Some(Value::Reference(selff)) = args.get(0){
+        if let Some(vals) = vm.object_payloads.borrow().get(&selff.id){
+            let array = wrap_init!(vm, java_vm, vm.new_object_array_1(vals.clone())?);
+            non_failing_some(Value::Reference(array))
+        } else {
+            Err(VmError::ValidationError("No vminfo payload found".to_string()))
+        }
+    } else {
+        Err(VmError::ValidationError("Expected MemberName reference".to_string()))
     }
 }
 

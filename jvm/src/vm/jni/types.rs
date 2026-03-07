@@ -387,8 +387,19 @@ impl JNINativeInterface_ {
         }
 
     }
-    pub fn IsInstanceOf(obj: jobject, clazz: jclass){
-        unimplemented!()
+    pub unsafe extern "system-unwind" fn IsInstanceOf(env: *mut JNIEnv, obj: jobject, clazz: jclass) -> jboolean{
+        let vm = unsafe{&*(*env).vm};
+        if obj == 0{
+            // FIXME this is opposite of what is stated here: https://docs.oracle.com/en/java/javase/23/docs/specs/jni/functions.html#isinstanceof
+            // but allowing true breaks stuff
+            return JNI_FALSE;
+        }
+        let obj_ref = vm.objects_by_id.borrow().get(&obj).copied().unwrap();
+        let obj_class = vm.find_class_by_id(obj_ref.class_id).unwrap();
+        let class_obj = vm.objects_by_id.borrow().get(&clazz).copied().unwrap();
+        let class_ref = vm.extract_class_from_class_object(&class_obj).unwrap();
+        let instance_of = vm.is_instance_of(obj_class, class_ref);
+        if instance_of {JNI_TRUE} else {JNI_FALSE}
     }
 
     pub unsafe extern "system-unwind" fn GetMethodID(env: *mut JNIEnv, clazz: jclass, name: *const c_char, sig: *const c_char) -> jmethodID{

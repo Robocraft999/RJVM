@@ -235,7 +235,13 @@ pub fn get_class_descriptor(class_name: &str) -> String{
         "java/lang/Long" => "J".to_string(),
         "java/lang/Float" => "F".to_string(),
         "java/lang/Double" => "D".to_string(),
-        _ => "L".to_string() + class_name + ";"
+        _ => {
+            if class_name.starts_with("[") {
+                class_name.to_string()
+            } else {
+                "L".to_string() + class_name + ";"
+            }
+        }
     }
 }
 
