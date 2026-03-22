@@ -1,6 +1,8 @@
 #![allow(unused_variables)]
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
+
+use std::cell::RefCell;
 use crate::vm::jni::types::*;
 use std::ffi::{c_char, c_int, c_long, c_uchar, c_ushort, c_void, CStr, CString};
 use std::fs::{File, OpenOptions};
@@ -8,6 +10,9 @@ use std::os::fd::{AsFd, AsRawFd, FromRawFd, IntoRawFd, OwnedFd, RawFd};
 use std::path::Path;
 use std::str::FromStr;
 use log::debug;
+use crate::field_info::FieldType;
+use crate::vm::{VM, VMResultType};
+use crate::native_init_wrap;
 
 pub const JVM_INTERFACE_VERSION: jint = 4;
 
@@ -410,7 +415,19 @@ pub unsafe extern "system-unwind" fn JVM_SetPrimitiveArrayElement(env: *mut JNIE
 
 #[unsafe(no_mangle)]
 pub unsafe extern "system-unwind" fn JVM_NewArray(env: *mut JNIEnv, eltClass: jclass, length: jint) -> jobject{
-    unimplemented!();
+    let vm = unsafe{&*(*env).vm};
+    let class_obj = vm.objects_by_id.borrow().get(&eltClass).copied().unwrap();
+    let class_name = VM::extract_class_name_from_class_object(class_obj).unwrap();
+    // FIXME check if we only have objects or primitives too (and if its always 1 dimensional)
+    // one could use FieldType::from_str to fix, but then the prefilled values are wrong
+    // maybe there is function somewhere which creates null values per fieldtype idk anymore
+    let content = vec![vm.null(); length as usize];
+    let arr = native_init_wrap!(env, vm.new_array(
+        1,
+        FieldType::Object(class_name.clone()).to_array_field_type(1),
+        RefCell::new(content.clone())
+    ));
+    arr.id as jobject
 }
 
 #[unsafe(no_mangle)]

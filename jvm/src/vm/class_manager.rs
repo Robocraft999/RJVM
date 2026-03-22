@@ -196,7 +196,7 @@ impl<'a> ClassManager<'a>{
 
     pub fn get_classes_to_initialize(&self, class: ClassRef<'a>) -> VMResult<Vec<ClassRef<'a>>> {
         let mut to_initialize = Vec::new();
-        if let Some(super_class) = class.superclass{
+        /*if let Some(super_class) = class.superclass{
             for clazz in self.get_classes_to_initialize(super_class)?{
                 if !to_initialize.contains(&clazz){
                     to_initialize.push(clazz);
@@ -209,7 +209,7 @@ impl<'a> ClassManager<'a>{
                     to_initialize.push(clazz);
                 }
             }
-        }
+        }*/ // FIXME check if we can do that (background is, that we want to be able to initialize a class as far as possible before having to load necessary classes)
         to_initialize.push(class);
         Ok(to_initialize.into_iter().filter(|c| self.expect_class_state(c.id, ClassLoadingState::LOADED)).collect())
     }

@@ -12,6 +12,7 @@ use std::fmt::Debug;
 use std::os::unix::ffi::OsStrExt;
 use std::slice;
 use crate::field_info::{FieldType, PrimitiveType};
+use crate::native_init_wrap;
 use crate::vm::class::{ClassAndMethod, ClassId};
 use crate::vm::result::{VMPartialResult, VMResult, VMResultType};
 use crate::vm::value::{ReferenceType, Value};
@@ -131,33 +132,6 @@ impl !Unpin for JavaVM<'_>{}
 #[repr(C)]
 pub struct JNINativeInterface_{}
 
-macro_rules! wrap_init{
-    ($env:expr, $x:expr) => {
-        {
-            let macro_vm: &VM = unsafe{&*(*$env).vm};
-            let macro_javavm: &JavaVM = unsafe{&*(*$env).pvm};
-            let macro_current_frame_index: isize = macro_vm.call_stack.len() as isize -1;
-            let macro_res = $x;
-            match macro_res.unwrap(){
-                VMResultType::Successful(v) => v,
-                VMResultType::Interrupted(..) => {
-                    let init_res = macro_vm.invoke_frames_until(macro_javavm, macro_current_frame_index).unwrap();
-                    if let VMResultType::Successful(None) = init_res{
-                        if let VMResultType::Successful(v) = ($x).unwrap(){
-                            v
-                        } else {
-                            unreachable!("[wrap_init] still needs classes even after loading them")
-                        }
-                    } else {
-                        unreachable!("[wrap_init] still classes to init after initting them")
-                    }
-                }
-                other => unreachable!("[wrap_init] got unexpected: {:?}", other),
-            }
-        }
-    }
-}
-
 macro_rules! native_wrap {
     ($code:block, $ret:ty) => {
         fn t() -> VMResult<$ret> {
@@ -236,17 +210,18 @@ impl JNINativeInterface_ {
     }
     pub unsafe extern "system-unwind" fn FindClass(env: *mut JNIEnv, name: *const c_char) -> jclass {
         let name = unsafe{CStr::from_ptr(name)}.to_str().map_err(|e| VmError::Native(e.to_string())).unwrap();
+        let name = name.replace(".", "/");
         debug!(target: "native", "NATIVE: FindClass: '{}'", name);
         if name == ""{
             0 as jclass
         } else {
             let vm = unsafe{&*(*env).vm};
-            let class = if let Some(class) = vm.find_class_by_name(name){
+            let class = if let Some(class) = vm.find_class_by_name(name.as_str()){
                 class
             } else {
-                vm.get_or_resolve_class(name).unwrap()
+                vm.get_or_resolve_class(name.as_str()).unwrap()
             };
-            let class_obj = wrap_init!(env, vm.new_class_object_by_class(class));
+            let class_obj = native_init_wrap!(env, vm.new_class_object_by_class(class));
             class_obj.id
         }
     }
@@ -355,7 +330,7 @@ impl JNINativeInterface_ {
         let stop_index = vm.call_stack.len() as isize -1;
         let javavm = unsafe{&*(*env).pvm};
 
-        let _ = wrap_init!(env, vm.get_or_initialize_class(class_and_method.class.name.as_str()));
+        let _ = native_init_wrap!(env, vm.get_or_initialize_class(class_and_method.class.name.as_str()));
         let obj_ref = vm.new_object_from_class(class_and_method.class);
         debug!("NewObjectV: {} ({:?})", class_and_method.format(), args);
         vm.call_stack.create_and_push_call_frame(class_and_method, Some(obj_ref), args, false);
@@ -380,7 +355,7 @@ impl JNINativeInterface_ {
     pub unsafe extern "system-unwind" fn GetObjectClass(env: *mut JNIEnv, obj: jobject) -> jclass{
         let vm: &VM = unsafe{&*(*env).vm};
         if let Some(object) = vm.objects_by_id.borrow().get(&obj){
-            let class_obj = wrap_init!(env, vm.new_class_object(object.class_name.as_str(), object.class_id));
+            let class_obj = native_init_wrap!(env, vm.new_class_object(object.class_name.as_str(), object.class_id));
             class_obj.id as jclass
         } else {
             0 as jclass
@@ -618,7 +593,7 @@ impl JNINativeInterface_ {
 
         let class_obj = vm.objects_by_id.borrow().get(&clazz).copied().unwrap();
         let class_ref = vm.extract_class_from_class_object(&class_obj).unwrap();
-        let class_ref = wrap_init!(env, vm.get_or_initialize_class(class_ref.name.as_str()));
+        let class_ref = native_init_wrap!(env, vm.get_or_initialize_class(class_ref.name.as_str()));
         println!("NATIVE: GetStaticMethodID: {}::{}{}", class_ref.name, method_name, signature);
         //FIXME zero index results in NULL
         class_ref.find_method_index(method_name, signature).ok_or(VmError::Native(format!("GetStaticMethodID: {}::{}{} not found", class_ref.name, method_name, signature))).unwrap()
@@ -861,7 +836,7 @@ impl JNINativeInterface_ {
     pub unsafe extern "system-unwind" fn NewByteArray(env: *mut JNIEnv, length: jsize) -> jbyteArray{
         let vm: &VM = unsafe{&*(*env).vm};
         let content = vec![Value::Integer(0); length as usize];
-        let array_ref = wrap_init!(env, vm.new_array(
+        let array_ref = native_init_wrap!(env, vm.new_array(
             1,
             FieldType::Primitive(PrimitiveType::Byte).to_array_field_type(1),
             RefCell::new(content.clone())

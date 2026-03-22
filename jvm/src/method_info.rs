@@ -15,6 +15,7 @@ pub struct MethodInfo{
     pub name: String,
     pub descriptor: MethodDescriptor,
     pub deprecated: bool,
+    pub slot: usize,
     pub code: Option<Code>,
     pub code_blocks: Option<BTreeMap<u16, InstructionBlock>>,
     pub exceptions: Option<Exceptions>,

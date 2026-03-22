@@ -227,6 +227,7 @@ pub fn primitive_type_to_descriptor(primitive_type: &PrimitiveType) -> String {
 */
 pub fn get_class_descriptor(class_name: &str) -> String{
     match class_name {
+        // idk if these even appear here
         "java/lang/Boolean" => "Z".to_string(),
         "java/lang/Byte" => "B".to_string(),
         "java/lang/Character" => "C".to_string(),
@@ -235,6 +236,17 @@ pub fn get_class_descriptor(class_name: &str) -> String{
         "java/lang/Long" => "J".to_string(),
         "java/lang/Float" => "F".to_string(),
         "java/lang/Double" => "D".to_string(),
+        // primitive classes
+        "boolean" => "Z".to_string(),
+        "byte" => "B".to_string(),
+        "char" => "C".to_string(),
+        "short" => "S".to_string(),
+        "int" => "I".to_string(),
+        "long" => "J".to_string(),
+        "float" => "F".to_string(),
+        "double" => "D".to_string(),
+        "void" => "V".to_string(),
+        // already class / array
         _ => {
             if class_name.starts_with("[") {
                 class_name.to_string()

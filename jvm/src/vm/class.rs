@@ -77,6 +77,10 @@ impl<'a> Class<'a>{
         self.methods.iter().enumerate().find(|(_, m)| m.name == method_name && m.descriptor.matches(descriptor)).map(|(i, _)| i)
     }
 
+    pub fn get_method_in_slot(&self, slot: usize) -> Option<&MethodInfo> {
+        self.methods.iter().find(|m| m.slot == slot)
+    }
+
     pub fn find_field(&self, field_name: &str) -> Option<(usize, &FieldInfo)>{
         if let Some((index, info, _)) = self.find_field_static(field_name){
             Some((index, info))

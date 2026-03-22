@@ -241,7 +241,7 @@ pub fn parse_class_file(bytes: Vec<u8>, class_name: &str) -> VMResult<ClassFile>
 
     let method_count = parse_u2(&mut bytes)?;
     let mut methods = Vec::new();
-    for _ in 0..method_count{
+    for slot in 0..method_count{
         let flags = parse_method_flags(parse_u2(&mut bytes)?);
         let name = get_constant_printable(&constant_pool, parse_u2(&mut bytes)?);
         let descriptor_str = get_constant_printable(&constant_pool, parse_u2(&mut bytes)?);
@@ -357,6 +357,7 @@ pub fn parse_class_file(bytes: Vec<u8>, class_name: &str) -> VMResult<ClassFile>
             name,
             descriptor,
             deprecated,
+            slot: slot as usize + 1,
             attributes,
             code,
             code_blocks: None,

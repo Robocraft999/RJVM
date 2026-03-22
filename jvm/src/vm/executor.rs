@@ -338,6 +338,7 @@ pub fn execute_current_block<'a>(vm: &VM<'a>, java_vm: &JavaVM) -> Option<VMPart
                 Instruction::ISHL => wrap_error!(execute_i_arithmetic(vm, |val1, val2| Ok(val1 << (val2 & 0x1f)))),
                 Instruction::LSHL => wrap_error!(execute_ji_arithmetic(vm, |val1, val2| Ok(val1 << (val2 & 0x3f)))),
                 Instruction::ISHR => wrap_error!(execute_i_arithmetic(vm, |val1, val2| Ok(val1 >> (val2 & 0x1f)))),
+                Instruction::LSHR => wrap_error!(execute_ji_arithmetic(vm, |val1, val2| Ok(val1 >> (val2 & 0x3f)))),
                 Instruction::IUSHR => wrap_error!(execute_i_arithmetic(vm, |val1, val2| {
                     if val1 > 0{
                         Ok(val1 >> (val2 & 0x1f))
@@ -812,6 +813,15 @@ pub fn execute_current_block<'a>(vm: &VM<'a>, java_vm: &JavaVM) -> Option<VMPart
                         unknown => unreachable!("WIDE with op: {:?} not executable", unknown)
                     }
                 }
+                Instruction::MULTIANEWARRAY(index, dimensions ) => {
+                    if let Some(FastConstantPoolEntry::Class(clazz)) = class_and_method.class.get_or_resolve_constant_fast(vm, *index){
+                        let class_name = clazz.name.as_str();
+                        let array_field_type = FieldType::from_str(class_name).unwrap();
+                        let array = get_or_init_option!(execute_create_array(vm, array_field_type, *dimensions as usize));
+                        debug!("MULTIANEWARRAY {}", class_name);
+                        vm.call_stack.push_operand_value(array);
+                    }
+                }
 
                 Instruction::IFNULL(target) => {
                     let reference = vm.call_stack.pop_operand_value().unwrap();
@@ -1052,6 +1062,7 @@ fn execute_invoke<'a>(vm: &VM<'a>, index: u16, kind: InvokeKind) -> VMPartialRes
     if vm.class_manager.expect_class_state(class.id, ClassLoadingState::LOADED){
         unimplemented!()
     }
+    trace!("loading state is: {:?}", vm.class_manager.class_loading_states.borrow().get(&class.id));
     trace!("finished loading class to execute on: '{}'", class_name.as_str());
     let args_count = MethodDescriptor::new(descriptor.clone()).args.len();
     trace!("args_count: {}", args_count);
@@ -1083,6 +1094,7 @@ fn execute_invoke<'a>(vm: &VM<'a>, index: u16, kind: InvokeKind) -> VMPartialRes
         if let Some(Value::Reference(reference)) = popped && !reference.is_null(){
             Some(reference)
         } else {
+            println!("XXXX: {} {:?}", class_and_method.class.name, vm.class_manager.class_loading_states.borrow().get(&class_and_method.class.id));
             return Err(VmError::ValidationError(format!("Expected object or array as receiver for {} but found: {:?}", class_and_method.format(), popped)));
         }
     };
