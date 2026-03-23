@@ -11,7 +11,7 @@ use thiserror::Error;
 use crate::access_flags::MethodFlag;
 use crate::attribute::{BootstrapMethods, Code, ExceptionTable, ProgramCounter, RuntimeVisibleAnnotations};
 use crate::bytecode::Instruction;
-use crate::constants::{BytecodeBehavior, ConstantPool, FastConstantPoolEntry};
+use crate::class_file::constant_pool::{BytecodeBehavior, ConstantPool, FastConstantPoolEntry};
 use crate::error::ClassParseError;
 use crate::field_info::{FieldType, PrimitiveType};
 use crate::method_info::{MethodDescriptor, MethodInfo};

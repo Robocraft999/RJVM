@@ -14,20 +14,6 @@ pub enum ClassFlag{
     Module     = 0x8000,
 }
 
-pub type ClassFlags = Vec<ClassFlag>;
-
-pub fn parse_class_flags(flags: u16) -> ClassFlags{
-    let mut flags_parsed = Vec::new();
-    for i in 0..16{
-        if let Some(flag) = ClassFlag::from_repr(1 << i){
-            if flags & (1 << i) != 0{
-                flags_parsed.push(flag)
-            }
-        }
-    }
-    flags_parsed
-}
-
 #[derive(Debug, PartialEq, FromRepr, Clone)]
 #[repr(u16)]
 pub enum FieldFlag{

@@ -13,11 +13,9 @@ use crate::vm::value::Value;
 use crate::vm::{VmError, VM};
 
 mod application;
-mod constants;
 mod bytes;
 mod access_flags;
 mod attribute;
-mod class_file_version;
 mod field_info;
 mod method_info;
 mod vm;

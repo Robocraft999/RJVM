@@ -1,9 +1,9 @@
 use std::cell::RefCell;
 use std::fmt::{Debug, Formatter};
 use std::hash::Hash;
-use crate::access_flags::{ClassFlag, ClassFlags, MethodFlag};
+use crate::access_flags::{ClassFlag, MethodFlag};
 use crate::attribute::{BootstrapMethods, ClassFileAttributes};
-use crate::constants::{BytecodeBehavior, ConstantPool, ConstantPoolEntry, FastConstantPool, FastConstantPoolEntry};
+use crate::class_file::constant_pool::{BytecodeBehavior, ConstantPool, ConstantPoolEntry, FastConstantPool, FastConstantPoolEntry};
 use crate::field_info::{native_escape, native_escaped_descriptor, FieldInfo, FieldType};
 use crate::method_info::{MethodDescriptor, MethodInfo};
 use crate::vm::class_manager::ClassManager;
@@ -16,7 +16,7 @@ pub struct Class<'a>{
     pub name: String,
     pub constants: ConstantPool,
     pub fast_constants: RefCell<FastConstantPool<'a>>,
-    pub flags: ClassFlags,
+    pub flags: u16,
     pub superclass: Option<ClassRef<'a>>,
     pub interfaces: Vec<ClassRef<'a>>,
     pub fields: Vec<FieldInfo>,
@@ -106,7 +106,7 @@ impl<'a> Class<'a>{
     }
 
     pub fn is_interface(&self) -> bool {
-        self.flags.contains(&ClassFlag::Interface)
+        self.flags & ClassFlag::Interface as u16 > 0
     }
 
     pub fn is_array(&self) -> bool {

@@ -1,11 +1,11 @@
-use std::fmt::Debug;
-
+use serde::Deserialize;
 use strum_macros::FromRepr;
 use crate::attribute::BootstrapMethod;
-use crate::method_info::{MethodDescriptor};
+use crate::method_info::MethodDescriptor;
 use crate::vm::class::{ClassAndField, ClassAndMethod, ClassRef};
 
 #[derive(Debug, FromRepr, PartialEq, Clone)]
+// #[cfg_attr(feature = "serde", derive(Deserialize))]
 #[repr(u8)]
 pub enum ConstantPoolEntry{
     Class(u16) = 7,
@@ -26,6 +26,7 @@ pub enum ConstantPoolEntry{
 }
 
 #[derive(Debug)]
+// #[cfg_attr(feature = "serde", derive(Deserialize))]
 pub struct ConstantPool(pub Vec<ConstantPoolEntry>);
 
 #[derive(Debug, Clone)]

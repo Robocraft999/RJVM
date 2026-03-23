@@ -2,8 +2,8 @@ use std::fmt::{Debug, Formatter};
 
 use crate::bytecode::printable_instructions;
 use crate::bytes::{parse_u1, parse_u2};
+use crate::class_file::constant_pool::ConstantPool;
 use crate::class_file::get_constant_printable;
-use crate::constants::{BytecodeBehavior, ConstantPool};
 use crate::error::ClassParseError;
 
 #[derive(Debug, Clone)]

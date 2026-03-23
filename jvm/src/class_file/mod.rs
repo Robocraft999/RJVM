@@ -1,8 +1,7 @@
-use crate::access_flags::{parse_class_flags, parse_field_flags, parse_method_flags, ClassFlags};
+use crate::access_flags::{parse_field_flags, parse_method_flags};
 use crate::attribute::{Annotation, Attribute, BootstrapMethod, BootstrapMethods, ClassFileAttributes, Code, ConstantValue, Deprecated, EnclosingMethod, ExceptionTable, ExceptionTableEntry, Exceptions, InnerClass, InnerClasses, LineNumber, LineNumberTable, LineNumberTableEntry, ProgramCounter, RuntimeVisibleAnnotations, SourceFile};
 use crate::bytes::{parse_u1, parse_u2, parse_u4, parse_u8};
-use crate::class_file_version::ClassFileVersion;
-use crate::constants::{BytecodeBehavior, ConstantPool, ConstantPoolEntry};
+use version::ClassFileVersion;
 use crate::error::ClassParseError;
 use crate::field_info::{FieldInfo, FieldType};
 use crate::method_info::{MethodDescriptor, MethodInfo};
@@ -13,12 +12,22 @@ use cesu8::from_java_cesu8;
 use log::info;
 use std::fmt::{Debug, Formatter};
 use std::str::FromStr;
+use serde::Deserialize;
+use constant_pool::{BytecodeBehavior, ConstantPool, ConstantPoolEntry};
+
+#[cfg(feature = "serde")]
+#[cfg(test)]
+mod tests;
+mod version;
+pub mod constant_pool;
+#[cfg(feature = "serde")]
+mod serde_impl;
 
 pub struct ClassFile{
     pub magic: u32,
     pub class_file_version: ClassFileVersion,
     pub constant_pool: ConstantPool,
-    pub access_flags: ClassFlags,
+    pub access_flags: u16,
     pub name: String,
     pub super_class: Option<String>,
     pub interfaces: Vec<String>,
@@ -175,7 +184,7 @@ pub fn parse_class_file(bytes: Vec<u8>, class_name: &str) -> VMResult<ClassFile>
         i += 1;
     }
     let constant_pool = ConstantPool(constant_pool_entries);
-    let access_flags = parse_class_flags(parse_u2(&mut bytes)?);
+    let access_flags = parse_u2(&mut bytes)?;
     let name = get_constant_printable(&constant_pool, parse_u2(&mut bytes)?);
     info!("Class name: {}", &name);
     let super_class_index = parse_u2(&mut bytes)?;
@@ -333,7 +342,7 @@ pub fn parse_class_file(bytes: Vec<u8>, class_name: &str) -> VMResult<ClassFile>
                 "Exceptions" => {
                     let number_of_exceptions = parse_u2(&mut bytes)?;
                     let mut exception_vec = Vec::new();
-                        for _ in 0..number_of_exceptions{
+                    for _ in 0..number_of_exceptions{
                         let name = get_constant_printable(&constant_pool, parse_u2(&mut bytes)?);
                         exception_vec.push(name);
                     }

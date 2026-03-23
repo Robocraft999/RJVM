@@ -13,7 +13,7 @@ use std::cmp::PartialEq;
 use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
 use typed_arena::Arena;
-use crate::constants::{BytecodeBehavior, ConstantPool, ConstantPoolEntry, FastConstantPool, FastConstantPoolEntry};
+use crate::class_file::constant_pool::{BytecodeBehavior, ConstantPool, ConstantPoolEntry, FastConstantPool, FastConstantPoolEntry};
 
 #[derive(Debug, Clone)]
 pub(crate) enum ResolvedClass<'a> {

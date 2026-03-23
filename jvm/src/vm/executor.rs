@@ -2,9 +2,10 @@ use std::{cell::RefCell, str::FromStr};
 
 use crate::class_file::get_constant_printable;
 use crate::vm::result::{VMPartialResult, VMResultType};
-use crate::{bytecode::Instruction, constants::ConstantPoolEntry, field_info::{FieldType, PrimitiveType}, get_or_init, get_or_init_option, method_info::MethodDescriptor, vm::{bytecode::InstructionBlock, class::{ClassAndMethod, ClassRef}, java_error::JavaError, result::VMResult, value::{ReferenceType, Value}, VmError, VM}};
+use crate::{bytecode::Instruction, field_info::{FieldType, PrimitiveType}, get_or_init, get_or_init_option, method_info::MethodDescriptor, vm::{bytecode::InstructionBlock, class::{ClassAndMethod, ClassRef}, java_error::JavaError, result::VMResult, value::{ReferenceType, Value}, VmError, VM}};
 use log::{debug, error, info, trace, warn};
-use crate::constants::FastConstantPoolEntry;
+use crate::class_file::constant_pool::ConstantPoolEntry;
+use crate::class_file::constant_pool::FastConstantPoolEntry;
 use crate::vm::class_manager::ClassLoadingState;
 use crate::vm::jni::types::JavaVM;
 

@@ -1,7 +1,7 @@
 use super::call_frame::CallFrame;
 use crate::attribute::{Code, ExceptionTable, RuntimeVisibleAnnotations};
 use crate::bytecode::Instruction;
-use crate::constants::ConstantPool;
+use crate::class_file::constant_pool::ConstantPool;
 use crate::error;
 use crate::field_info::FieldType;
 use crate::method_info::{MethodDescriptor, MethodInfo};

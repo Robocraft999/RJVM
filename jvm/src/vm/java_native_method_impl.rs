@@ -19,7 +19,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use libffi::low::CodePtr;
 use libffi::middle::{Arg, Cif, Type};
 use crate::access_flags::MethodFlag;
-use crate::constants::FastConstantPoolEntry;
+use crate::class_file::constant_pool::FastConstantPoolEntry;
 use crate::vm::class_manager::ClassLoadingState;
 use crate::vm::java_error::JavaError;
 
@@ -709,7 +709,7 @@ fn delegate_get_declared_methods0<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef
 fn delegate_get_class_modifiers<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, class_object: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
     if let Some(obj) = class_object{
         let class = vm.extract_class_from_class_object(obj)?;
-        let flags = class.flags.iter().cloned().map(|val| val as u16).reduce(|val1, val2| val1 | val2).unwrap_or(0) as i32;
+        let flags = class.flags as i32;
         non_failing_some(Value::Integer(flags))
     } else {
         Err(VmError::ValidationError("Expected Class object".to_string()))
@@ -1296,7 +1296,7 @@ fn delegate_get_caller_class<'a>(vm: &VM<'a>, java_vm: &JavaVM, class : ClassRef
 fn delegate_get_class_access_flags<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
     if let Some(Value::Reference(obj)) = args.get(0){
         let class = vm.extract_class_from_class_object(obj)?;
-        let flags = class.flags.iter().cloned().map(|val| val as u16).reduce(|val1, val2| val1 | val2).unwrap_or(0) as i32;
+        let flags = class.flags as i32;
         non_failing_some(Value::Integer(flags))
     } else {
         Err(VmError::ValidationError("Expected Class object".to_string()))
