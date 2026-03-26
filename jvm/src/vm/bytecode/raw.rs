@@ -1,6 +1,6 @@
-use std::collections::{BTreeMap};
+use std::collections::BTreeMap;
 
-use crate::{bytecode::{parse_instruction}, vm::bytecode::InstructionBlock};
+use crate::{bytecode::parse_instruction, vm::bytecode::InstructionBlock};
 
 pub fn get_blocks(bytes: &Vec<u8>) -> BTreeMap<u16, InstructionBlock>{
     let mut blocks = BTreeMap::new();

@@ -1,13 +1,15 @@
 use std::{cell::RefCell, str::FromStr};
 
-use crate::class_file::get_constant_printable;
-use crate::vm::result::{VMPartialResult, VMResultType};
-use crate::{bytecode::Instruction, field_info::{FieldType, PrimitiveType}, get_or_init, get_or_init_option, method_info::MethodDescriptor, vm::{bytecode::InstructionBlock, class::{ClassAndMethod, ClassRef}, java_error::JavaError, result::VMResult, value::{ReferenceType, Value}, VmError, VM}};
-use log::{debug, error, info, trace, warn};
 use crate::class_file::constant_pool::ConstantPoolEntry;
 use crate::class_file::constant_pool::FastConstantPoolEntry;
+use crate::class_file::field_info::{FieldType, PrimitiveType};
+use crate::class_file::get_constant_printable;
+use crate::class_file::method_info::MethodDescriptor;
 use crate::vm::class_manager::ClassLoadingState;
 use crate::vm::jni::types::JavaVM;
+use crate::vm::result::{VMPartialResult, VMResultType};
+use crate::{bytecode::Instruction, get_or_init, get_or_init_option, vm::{bytecode::InstructionBlock, class::{ClassAndMethod, ClassRef}, java_error::JavaError, result::VMResult, value::{ReferenceType, Value}, VmError, VM}};
+use log::{debug, error, info, trace, warn};
 
 macro_rules! wrap_error {
     ($res:expr) => {
@@ -26,7 +28,7 @@ pub fn execute<'a>(vm: &VM<'a>, java_vm: &JavaVM) -> VMPartialResult<Option<Valu
     info!("");
     info!("METHOD_NAME: {} at {}", class_and_method.format(), vm.call_stack.get_pc().0);
     debug!("{:?}", class_and_method.method.code_blocks);
-    if let Some(_) = &class_and_method.method.code{
+    if let Some(_) = &class_and_method.method.attributes.code{
         let mut result = execute_current_block(vm, java_vm);
         while let None = result{
             result = execute_current_block(vm, java_vm);

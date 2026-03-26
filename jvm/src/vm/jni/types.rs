@@ -4,18 +4,18 @@
 #![allow(unused_parens)]
 #![allow(unused_variables)]
 
-use std::cell::RefCell;
-use crate::vm::{jni::{env_function_table::JNINativeInterface, vm_function_table::JNIInvokeInterface}, VmError, VM};
-use log::{debug, error, warn};
-use std::ffi::{c_char, c_double, c_float, c_int, c_long, c_schar, c_short, c_uchar, c_ushort, c_void, CStr, CString, OsStr, VaList};
-use std::fmt::Debug;
-use std::os::unix::ffi::OsStrExt;
-use std::slice;
-use crate::field_info::{FieldType, PrimitiveType};
+use crate::class_file::field_info::{FieldType, PrimitiveType};
 use crate::native_init_wrap;
 use crate::vm::class::{ClassAndMethod, ClassId};
 use crate::vm::result::{VMPartialResult, VMResult, VMResultType};
 use crate::vm::value::{ReferenceType, Value};
+use crate::vm::{jni::{env_function_table::JNINativeInterface, vm_function_table::JNIInvokeInterface}, VmError, VM};
+use log::{debug, error, warn};
+use std::cell::RefCell;
+use std::ffi::{c_char, c_double, c_float, c_int, c_long, c_schar, c_short, c_uchar, c_ushort, c_void, CStr, CString, OsStr, VaList};
+use std::fmt::Debug;
+use std::os::unix::ffi::OsStrExt;
+use std::slice;
 
 //Platform dependent
 pub type jint = c_int;

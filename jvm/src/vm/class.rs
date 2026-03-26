@@ -1,14 +1,14 @@
-use std::cell::RefCell;
-use std::fmt::{Debug, Formatter};
-use std::hash::Hash;
 use crate::access_flags::{ClassFlag, MethodFlag};
 use crate::attribute::{BootstrapMethods, ClassFileAttributes};
 use crate::class_file::constant_pool::{BytecodeBehavior, ConstantPool, ConstantPoolEntry, FastConstantPool, FastConstantPoolEntry};
-use crate::field_info::{native_escape, native_escaped_descriptor, FieldInfo, FieldType};
-use crate::method_info::{MethodDescriptor, MethodInfo};
+use crate::class_file::field_info::{native_escape, native_escaped_descriptor, FieldInfo, FieldType};
+use crate::class_file::method_info::{MethodDescriptor, MethodInfo};
 use crate::vm::class_manager::ClassManager;
 use crate::vm::value::{Reference, Value};
 use crate::vm::VM;
+use std::cell::RefCell;
+use std::fmt::{Debug, Formatter};
+use std::hash::Hash;
 
 #[derive()]
 pub struct Class<'a>{
@@ -34,7 +34,7 @@ impl<'a> Class<'a>{
 
     //https://docs.oracle.com/javase/specs/jvms/se8/html/jvms-2.html#jvms-2.9
     fn has_method_polymorphic_signature(&self, info: &MethodInfo) -> bool {
-        info.flags.contains(&MethodFlag::Native) && info.flags.contains(&MethodFlag::VarArgs) &&
+        info.flags & MethodFlag::Native as u16 > 0 && info.flags & MethodFlag::VarArgs as u16 > 0 &&
             info.descriptor.matches("([Ljava/lang/Object;)Ljava/lang/Object;") &&
             self.name == "java/lang/invoke/MethodHandle"
     }
@@ -137,7 +137,7 @@ impl<'a> Class<'a>{
         let local_values = (self.first_field_index..self.transitive_field_count)
             .map(|index| {
                 let field = self.field_at_index(index).unwrap();
-                if let Some(constant_value) = field.constant_value.clone(){
+                if let Some(constant_value) = field.attributes.constant_value.clone(){
                     self.get_constant_as_value(constant_value.constant_index, Value::Reference(null))
                 } else {
                     field.field_type.get_default_value(Value::Reference(null))
@@ -154,14 +154,14 @@ impl<'a> Class<'a>{
 
     pub fn get_methods(&self, public_only: bool) -> Vec<&MethodInfo>{
         self.methods.iter()
-            .filter(|m| !public_only || m.flags.contains(&MethodFlag::Public))
+            .filter(|m| !public_only || m.flags & MethodFlag::Public as u16 > 0)
             .collect()
     }
 
     pub fn get_constructors(&self, public_only: bool) -> Vec<&MethodInfo>{
         self.methods.iter()
             .filter(|m| m.name == "<init>")
-            .filter(|m| !public_only || m.flags.contains(&MethodFlag::Public))
+            .filter(|m| !public_only || m.flags & MethodFlag::Public as u16 > 0)
             .collect()
     }
 
@@ -495,7 +495,7 @@ impl<'a> ClassAndMethod<'a>{
     }
 
     pub fn get_max_locals(&self) -> usize{
-        if let Some(code) = &self.method.code{
+        if let Some(code) = &self.method.attributes.code{
             code.max_locals as usize
         } else {
             self.method.descriptor.args.iter().map(FieldType::get_locals_length).sum::<usize>() + if self.method.is_static() {0} else {1}
@@ -503,7 +503,7 @@ impl<'a> ClassAndMethod<'a>{
     }
 
     pub fn get_max_stack_size(&self) -> usize{
-        if let Some(code) = &self.method.code{
+        if let Some(code) = &self.method.attributes.code{
             code.max_stack as usize
         } else {
             0

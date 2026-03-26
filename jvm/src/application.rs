@@ -1,10 +1,10 @@
-use std::pin::Pin;
+use crate::vm::class::ClassId;
 use crate::vm::jni::types::{JNIEnv, JavaVM};
 use crate::vm::result::VMResultType;
 use crate::vm::value::Value;
 use crate::vm::{jni, VmError, VM};
 use log::error;
-use crate::vm::class::ClassId;
+use std::pin::Pin;
 
 pub struct Application<'a>{
     java_vm: Pin<Box<JavaVM<'a>>>,

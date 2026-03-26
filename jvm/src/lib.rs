@@ -8,16 +8,14 @@ use vm::class_path::ClassPath;
 
 use crate::application::Application;
 use crate::attribute::ProgramCounter;
-use crate::field_info::FieldType;
 use crate::vm::value::Value;
 use crate::vm::{VmError, VM};
+use class_file::field_info::FieldType;
 
 mod application;
 mod bytes;
 mod access_flags;
 mod attribute;
-mod field_info;
-mod method_info;
 mod vm;
 mod error;
 mod bytecode;

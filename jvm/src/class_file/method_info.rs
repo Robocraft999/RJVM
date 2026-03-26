@@ -1,25 +1,22 @@
-use std::collections::BTreeMap;
-use std::hash::{Hash, Hasher};
 use lazy_regex::{lazy_regex, Lazy};
 use regex::Regex;
+use std::collections::BTreeMap;
+use std::hash::{Hash, Hasher};
 
-use crate::access_flags::{MethodFlag, MethodFlags};
-use crate::attribute::{Attribute, Code, ExceptionTable, Exceptions, ProgramCounter};
-use crate::field_info::FieldType;
+use crate::access_flags::MethodFlag;
+use crate::attribute::{ExceptionTable, MethodInfoAttributes, ProgramCounter};
+use crate::class_file::field_info::FieldType;
 use crate::vm::bytecode::InstructionBlock;
 use crate::vm::VmError;
 
 #[derive(Debug)]
 pub struct MethodInfo{
-    pub flags: MethodFlags,
+    pub flags: u16,
     pub name: String,
     pub descriptor: MethodDescriptor,
-    pub deprecated: bool,
     pub slot: usize,
-    pub code: Option<Code>,
     pub code_blocks: Option<BTreeMap<u16, InstructionBlock>>,
-    pub exceptions: Option<Exceptions>,
-    pub attributes: Vec<Attribute>
+    pub attributes: MethodInfoAttributes,
 }
 
 impl MethodInfo{
@@ -28,17 +25,19 @@ impl MethodInfo{
     }
 
     pub fn is_native(&self) -> bool {
-        self.flags.contains(&MethodFlag::Native)
+        self.flags & MethodFlag::Native as u16 > 0
     }
 
     pub fn is_static(&self) -> bool{
-        self.flags.contains(&MethodFlag::Static)
+        self.flags & MethodFlag::Static as u16 > 0
     }
 
-    pub fn is_abstract(&self) -> bool { self.flags.contains(&MethodFlag::Abstract) }
+    pub fn is_abstract(&self) -> bool {
+        self.flags & MethodFlag::Abstract as u16 > 0
+    }
     
     pub fn has_exception_handler(&self) -> bool {
-        if let Some(code) = &self.code {
+        if let Some(code) = &self.attributes.code {
             code.exception_table.0.len() > 0
         } else {
             false
@@ -46,7 +45,7 @@ impl MethodInfo{
     }
     
     pub fn get_exception_handlers(&self) -> Option<&ExceptionTable> {
-        if let Some(code) = &self.code {
+        if let Some(code) = &self.attributes.code {
             Some(&code.exception_table)
         } else {
             None

@@ -1,8 +1,9 @@
 use crate::attribute::{BootstrapMethod, BootstrapMethods, ElementValue};
+use crate::class_file::constant_pool::{BytecodeBehavior, ConstantPool, ConstantPoolEntry, FastConstantPool, FastConstantPoolEntry};
+use crate::class_file::field_info::{extract_component_type_from_array_class, primitive_to_wrapper_name, FieldType};
+use crate::class_file::method_info::MethodInfo;
 use crate::class_file::{parse_class_file, ClassFile};
 use crate::error::ClassParseError;
-use crate::field_info::{extract_component_type_from_array_class, primitive_to_wrapper_name, FieldType};
-use crate::method_info::MethodInfo;
 use crate::vm::class::{ArrayInfo, Class, ClassAndField, ClassAndMethod, ClassId, ClassRef};
 use crate::vm::class_path::ClassPath;
 use crate::vm::result::VMResult;
@@ -13,7 +14,6 @@ use std::cmp::PartialEq;
 use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
 use typed_arena::Arena;
-use crate::class_file::constant_pool::{BytecodeBehavior, ConstantPool, ConstantPoolEntry, FastConstantPool, FastConstantPoolEntry};
 
 #[derive(Debug, Clone)]
 pub(crate) enum ResolvedClass<'a> {
@@ -106,7 +106,7 @@ impl<'a> ClassManager<'a>{
         };
         let fields_count = parsed_class.fields.len();
         let methods: Vec<MethodInfo> = parsed_class.methods.into_iter().map(|mut t|{
-            if let Some(code) = &t.code{
+            if let Some(code) = &t.attributes.code{
                 t.code_blocks = Some(bytecode::get_blocks(&code.code))
             }
             t

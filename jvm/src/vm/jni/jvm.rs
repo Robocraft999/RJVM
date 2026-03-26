@@ -2,17 +2,17 @@
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
 
-use std::cell::RefCell;
+use crate::class_file::field_info::FieldType;
+use crate::native_init_wrap;
 use crate::vm::jni::types::*;
+use crate::vm::{VMResultType, VM};
+use log::debug;
+use std::cell::RefCell;
 use std::ffi::{c_char, c_int, c_long, c_uchar, c_ushort, c_void, CStr, CString};
 use std::fs::{File, OpenOptions};
 use std::os::fd::{AsFd, AsRawFd, FromRawFd, IntoRawFd, OwnedFd, RawFd};
 use std::path::Path;
 use std::str::FromStr;
-use log::debug;
-use crate::field_info::FieldType;
-use crate::vm::{VM, VMResultType};
-use crate::native_init_wrap;
 
 pub const JVM_INTERFACE_VERSION: jint = 4;
 

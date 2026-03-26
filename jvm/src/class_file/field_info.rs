@@ -1,21 +1,18 @@
-use crate::access_flags::FieldFlags;
-use crate::attribute::{Attribute, ConstantValue};
+use crate::attribute::FieldInfoAttributes;
+use crate::class_file::method_info::MethodDescriptor;
 use crate::vm::result::VMResult;
 use crate::vm::value::Value;
 use crate::vm::VmError;
 use lazy_regex::{lazy_regex, regex, Lazy};
 use regex::Regex;
 use std::str::FromStr;
-use crate::method_info::MethodDescriptor;
 
 #[derive(Debug)]
 pub struct FieldInfo{
-    pub flags: FieldFlags,
+    pub flags: u16,
     pub name: String,
     pub field_type: FieldType,
-    pub deprecated: bool,
-    pub constant_value: Option<ConstantValue>,
-    pub attributes: Vec<Attribute>
+    pub attributes: FieldInfoAttributes
 }
 
 static PATTERN: Lazy<Regex> = lazy_regex!(r"(?<array>\[+)?(?:(?<primitive>[ZBSIJFDC])|L(?<object>[/a-zA-Z$0-9_]+);)");
@@ -312,8 +309,8 @@ impl FromStr for PrimitiveType{
 
 #[cfg(test)]
 mod tests{
-    use crate::field_info::{native_escape, native_escaped_descriptor};
-    use crate::method_info::MethodDescriptor;
+    use crate::class_file::field_info::{native_escape, native_escaped_descriptor};
+    use crate::class_file::method_info::MethodDescriptor;
 
     #[test]
     fn test_native_escape() {

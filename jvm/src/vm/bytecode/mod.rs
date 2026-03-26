@@ -21,14 +21,14 @@ pub enum InstructionBlock{
     Jump(usize, Instruction)
 }
 
-const USE_RAW: bool = false;
-
+#[cfg(feature = "il")]
 pub fn get_blocks(bytes: &Vec<u8>) -> BTreeMap<u16, InstructionBlock>{
-    if USE_RAW{
-        raw::get_blocks(bytes)
-    } else {
-        il::get_blocks(bytes)
-    }
+    il::get_blocks(bytes)
+}
+
+#[cfg(not(feature = "il"))]
+pub fn get_blocks(bytes: &Vec<u8>) -> BTreeMap<u16, InstructionBlock>{
+    raw::get_blocks(bytes)
 }
 
 #[cfg(test)]
@@ -42,7 +42,7 @@ mod tests{
         let cl = ClassManager::new(cp);
         let clazz = cl.get_or_resolve_class("Slot").unwrap().get_class();
 
-        let bytes = clazz.find_method("containsKey", "(Ljava/lang/Comparable;)Z").unwrap().code.clone().unwrap().code;
+        let bytes = clazz.find_method("containsKey", "(Ljava/lang/Comparable;)Z").unwrap().attributes.code.clone().unwrap().code;
         let blocks = raw::get_blocks(&bytes);
 
         let expected = vec![
@@ -84,7 +84,7 @@ mod tests{
         let cl = ClassManager::new(cp);
         let clazz = cl.get_or_resolve_class("Slot").unwrap().get_class();
 
-        let bytes = clazz.find_method("containsKey", "(Ljava/lang/Comparable;)Z").unwrap().code.clone().unwrap().code;
+        let bytes = clazz.find_method("containsKey", "(Ljava/lang/Comparable;)Z").unwrap().attributes.code.clone().unwrap().code;
         let blocks = il::get_blocks(&bytes);
 
         let expected = vec![

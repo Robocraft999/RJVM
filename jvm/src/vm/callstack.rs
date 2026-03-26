@@ -2,9 +2,9 @@ use super::call_frame::CallFrame;
 use crate::attribute::{Code, ExceptionTable, RuntimeVisibleAnnotations};
 use crate::bytecode::Instruction;
 use crate::class_file::constant_pool::ConstantPool;
+use crate::class_file::field_info::FieldType;
+use crate::class_file::method_info::{MethodDescriptor, MethodInfo};
 use crate::error;
-use crate::field_info::FieldType;
-use crate::method_info::{MethodDescriptor, MethodInfo};
 use crate::vm::class::{Class, ClassId, ClassRef};
 use crate::vm::info;
 use crate::vm::result::{VMPartialResult, VMResult, VMResultType};
@@ -129,7 +129,7 @@ impl<'a> CallStack<'a> {
         let mut line_number = -1;
         let mut instruction = None;
         let pc = self.pcs.borrow()[index].0;
-        if let Some(code) = &cam.method.code{
+        if let Some(code) = &cam.method.attributes.code{
             instruction = cam.method.code_blocks.as_ref().map(|blocks| blocks.get(&pc).unwrap());
             if let Some(line_number_table) = &code.line_number_table{
                 for entry in line_number_table.0.iter().rev(){

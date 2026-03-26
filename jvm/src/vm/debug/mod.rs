@@ -34,10 +34,10 @@ impl DebugHelper{
 
 #[cfg(feature="debug")]
 mod loader{
+    use serde::Deserialize;
     use std::collections::HashSet;
     use std::fs::File;
     use std::io::Read;
-    use serde::Deserialize;
 
     #[derive(Deserialize, Debug)]
     pub struct Config{

@@ -28,6 +28,7 @@ pub struct ClassFileAttributes{
     pub bootstrap_methods: Option<BootstrapMethods>,
 }
 
+#[derive(Debug, Clone, Default)]
 pub struct FieldInfoAttributes{
     pub constant_value: Option<ConstantValue>,
     pub synthetic: Option<Attribute>,
@@ -39,6 +40,7 @@ pub struct FieldInfoAttributes{
     pub runtime_invisible_type_annotations: Vec<Attribute>,
 }
 
+#[derive(Debug, Clone, Default)]
 pub struct MethodInfoAttributes{
     pub code: Option<Code>,
     pub exceptions: Option<Exceptions>,

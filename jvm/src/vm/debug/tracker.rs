@@ -1,6 +1,6 @@
+use log::{debug, info};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
-use log::{debug, info};
 
 pub struct Tracker{
     tracked_object_ids: HashSet<u32>,

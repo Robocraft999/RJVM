@@ -1,4 +1,3 @@
-use crate::vm::value::Value;
 use crate::vm::VmError;
 
 pub type VMPartialResult<T> = Result<VMResultType<T>, VmError>;

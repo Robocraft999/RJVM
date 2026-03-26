@@ -1,14 +1,20 @@
-use std::any::{Any, TypeId};
+use crate::access_flags::MethodFlag;
+use crate::class_file::constant_pool::FastConstantPoolEntry;
+use crate::class_file::field_info::{get_class_descriptor, FieldType, PrimitiveType};
+use crate::class_file::method_info::MethodDescriptor;
 use crate::error::ClassParseError;
-use crate::field_info::{get_class_descriptor, FieldType, PrimitiveType};
-use crate::method_info::MethodDescriptor;
 use crate::vm::class::{ClassAndMethod, ClassRef};
-use crate::vm::jni::types::{JavaVM, jbyte, jchar, jdouble, jfloat, jint, jlong, jshort, jboolean, JNIEnv, jobject, jvalue};
+use crate::vm::class_manager::ClassLoadingState;
+use crate::vm::java_error::JavaError;
+use crate::vm::jni::types::{jboolean, jbyte, jchar, jdouble, jfloat, jint, jlong, jobject, jshort, jvalue, JNIEnv, JavaVM};
 use crate::vm::result::{VMPartialResult, VMResult, VMResultType};
 use crate::vm::value::{Reference, ReferenceType, Value};
 use crate::vm::{VmError, VM};
+use libffi::low::CodePtr;
+use libffi::middle::{Arg, Cif, Type};
 use libloading::{Library, Symbol};
 use log::{debug, info, trace, warn};
+use std::any::{Any, TypeId};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::env;
@@ -16,12 +22,6 @@ use std::ffi::{c_schar, c_uchar, c_ushort, c_void};
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
-use libffi::low::CodePtr;
-use libffi::middle::{Arg, Cif, Type};
-use crate::access_flags::MethodFlag;
-use crate::class_file::constant_pool::FastConstantPoolEntry;
-use crate::vm::class_manager::ClassLoadingState;
-use crate::vm::java_error::JavaError;
 
 macro_rules! wrap_init{
     ($macro_vm:expr, $macro_java_vm:expr, $x:expr) => {
@@ -580,7 +580,7 @@ fn delegate_get_declared_fields0<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<
             //clazz
             java_field.set_field(4, Value::Reference(clazz));
             //modifiers
-            java_field.set_field(8, Value::Integer(field.flags.iter().cloned().map(|flag| flag as u16 as i32).reduce(|flag1, flag2| flag1 | flag2).unwrap_or(0)));
+            java_field.set_field(8, Value::Integer(field.flags as i32));
             //type
             let type_class_object = wrap_init!(vm, java_vm, vm.new_class_object_by_name(field.field_type.to_class_name().as_str())?);
             java_field.set_field(7, Value::Reference(type_class_object));
@@ -625,7 +625,7 @@ fn delegate_get_declared_constructors0<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: Cla
                 parameters.push(Value::Reference(parameter_class));
             }
             let mut exceptions = Vec::new();
-            if let Some(exception_vec) = constructor.exceptions.clone(){
+            if let Some(exception_vec) = constructor.attributes.exceptions.clone(){
                 for exception in exception_vec.0{
                     let parameter_class = wrap_init!(vm, java_vm, vm.new_class_object_by_name(exception.as_str())?);
                     exceptions.push(Value::Reference(parameter_class));
@@ -637,9 +637,8 @@ fn delegate_get_declared_constructors0<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: Cla
             // exceptionTypes
             java_constructor.set_field(10, Value::Reference(wrap_init!(vm, java_vm, vm.new_array(1, FieldType::Object("java/lang/Class".to_string()).to_array_field_type(1), RefCell::new(exceptions.clone()))?)));
 
-            let flags = constructor.flags.iter().map(|flag| flag.clone() as u16).fold(0, |flag1, flag2| flag1 | flag2);
             // modifiers
-            java_constructor.set_field(11, Value::Integer(flags as i32));
+            java_constructor.set_field(11, Value::Integer(constructor.flags as i32));
 
             content.push(Value::Reference(java_constructor));
         }
@@ -678,7 +677,7 @@ fn delegate_get_declared_methods0<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef
                 parameters.push(Value::Reference(parameter_class));
             }
             let mut exceptions = Vec::new();
-            if let Some(exception_vec) = method.exceptions.clone(){
+            if let Some(exception_vec) = method.attributes.exceptions.clone(){
                 for exception in exception_vec.0{
                     let parameter_class = wrap_init!(vm, java_vm, vm.new_class_object_by_name(exception.as_str())?);
                     exceptions.push(Value::Reference(parameter_class));
@@ -694,9 +693,8 @@ fn delegate_get_declared_methods0<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef
             // exceptionTypes
             java_method.set_field(12, Value::Reference(wrap_init!(vm, java_vm, vm.new_array(1, FieldType::Object("java/lang/Class".to_string()).to_array_field_type(1), RefCell::new(exceptions.clone()))?)));
 
-            let flags = method.flags.iter().map(|flag| flag.clone() as u16).fold(0, |flag1, flag2| flag1 | flag2);
             // modifiers
-            java_method.set_field(13, Value::Integer(flags as i32));
+            java_method.set_field(13, Value::Integer(method.flags as i32));
 
             content.push(Value::Reference(java_method));
         }
@@ -1862,8 +1860,7 @@ fn delegate_mhn_resolve<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, _: O
         let sig = resolve_signature(typ)?;
         let flags = &selff.get_field(3).expect_int()?;
         let method_info = clazz.find_method(name.as_str(), sig.as_str()).unwrap();
-        let full_flags = *flags | method_info.flags.iter().fold(0, |a, f| a | f.clone() as u8) as i32;
-        selff.set_field(3, Value::Integer(full_flags));
+        selff.set_field(3, Value::Integer(*flags | method_info.flags as i32));
         //TODO see: https://github.com/openjdk/jdk8u/blob/master/hotspot/src/share/vm/prims/methodHandles.cpp#L609
         let vmindex = wrap_init!(vm, java_vm, vm.new_java_lang_long(Value::Long(-69420))?);
         let prev = vm.object_payloads.borrow_mut().insert(selff.id, vec![vmindex, Value::Reference(selff)]);
@@ -1910,7 +1907,7 @@ fn delegate_mhn_init<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, _: Opti
                 let class_ref = vm.extract_class_from_class_object(clazz)?;
                 let method_info = class_ref.get_method_in_slot(slot as usize).unwrap();
 
-                let method_flags = method_info.flags.iter().fold(0, |a, f| a | f.clone() as u8) as i32;
+                let method_flags = method_info.flags as i32;
                 let mut flags = method_flags;
 
                 // FIXME how to figure out the reference kind?

@@ -1,4 +1,4 @@
-use crate::field_info::{FieldType, PrimitiveType};
+use crate::class_file::field_info::FieldType;
 use crate::vm::class::ClassId;
 use crate::vm::{VmError, VM};
 use std::cell::RefCell;

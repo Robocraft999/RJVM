@@ -1,27 +1,22 @@
-use crate::access_flags::{parse_field_flags, parse_method_flags};
-use crate::attribute::{Annotation, Attribute, BootstrapMethod, BootstrapMethods, ClassFileAttributes, Code, ConstantValue, Deprecated, EnclosingMethod, ExceptionTable, ExceptionTableEntry, Exceptions, InnerClass, InnerClasses, LineNumber, LineNumberTable, LineNumberTableEntry, ProgramCounter, RuntimeVisibleAnnotations, SourceFile};
+use crate::attribute::{Annotation, Attribute, BootstrapMethod, BootstrapMethods, ClassFileAttributes, Code, ConstantValue, Deprecated, EnclosingMethod, ExceptionTable, ExceptionTableEntry, Exceptions, FieldInfoAttributes, InnerClass, InnerClasses, LineNumber, LineNumberTable, LineNumberTableEntry, MethodInfoAttributes, ProgramCounter, RuntimeVisibleAnnotations, SourceFile};
 use crate::bytes::{parse_u1, parse_u2, parse_u4, parse_u8};
-use version::ClassFileVersion;
+use crate::class_file::field_info::{FieldInfo, FieldType};
+use crate::class_file::method_info::{MethodDescriptor, MethodInfo};
 use crate::error::ClassParseError;
-use crate::field_info::{FieldInfo, FieldType};
-use crate::method_info::{MethodDescriptor, MethodInfo};
 use crate::vm::class_path::ClassPath;
 use crate::vm::class_path_entry::ClassLoadingError;
 use crate::vm::result::VMResult;
 use cesu8::from_java_cesu8;
+use constant_pool::{BytecodeBehavior, ConstantPool, ConstantPoolEntry};
 use log::info;
 use std::fmt::{Debug, Formatter};
 use std::str::FromStr;
-use serde::Deserialize;
-use constant_pool::{BytecodeBehavior, ConstantPool, ConstantPoolEntry};
+use version::ClassFileVersion;
 
-#[cfg(feature = "serde")]
-#[cfg(test)]
-mod tests;
 mod version;
 pub mod constant_pool;
-#[cfg(feature = "serde")]
-mod serde_impl;
+pub mod field_info;
+pub mod method_info;
 
 pub struct ClassFile{
     pub magic: u32,
@@ -204,14 +199,12 @@ pub fn parse_class_file(bytes: Vec<u8>, class_name: &str) -> VMResult<ClassFile>
     let fields_count = parse_u2(&mut bytes)?;
     let mut fields = Vec::new();
     for _ in 0..fields_count{
-        let flags = parse_field_flags(parse_u2(&mut bytes)?);
+        let flags = parse_u2(&mut bytes)?;
         let name = get_constant_printable(&constant_pool, parse_u2(&mut bytes)?);
         let descriptor = get_constant_printable(&constant_pool, parse_u2(&mut bytes)?);
         let field_type = FieldType::from_str(descriptor.as_str())?;
         let attributes_count = parse_u2(&mut bytes)?;
-        let mut attributes = Vec::new();
-        let mut deprecated = false;
-        let mut constant_value = None;
+        let mut field_attributes = FieldInfoAttributes::default();
         for _ in 0..attributes_count{
             let name = get_constant_printable(&constant_pool, parse_u2(&mut bytes)?);
             let attribute_length = parse_u4(&mut bytes)?;
@@ -219,7 +212,7 @@ pub fn parse_class_file(bytes: Vec<u8>, class_name: &str) -> VMResult<ClassFile>
             match name.as_str() {
                 "ConstantValue" => {
                     let constant_index = parse_u2(&mut bytes)?;
-                    constant_value = Some(ConstantValue{
+                    field_attributes.constant_value = Some(ConstantValue{
                         constant_index
                     })
                 }
@@ -228,11 +221,6 @@ pub fn parse_class_file(bytes: Vec<u8>, class_name: &str) -> VMResult<ClassFile>
                     for _ in 0..attribute_length{
                         info.push(parse_u1(&mut bytes)?)
                     }
-
-                    attributes.push(Attribute{
-                        name,
-                        info
-                    });
                 }
             }
 
@@ -242,24 +230,19 @@ pub fn parse_class_file(bytes: Vec<u8>, class_name: &str) -> VMResult<ClassFile>
             flags,
             name,
             field_type,
-            deprecated,
-            constant_value,
-            attributes
+            attributes: field_attributes,
         });
     }
 
     let method_count = parse_u2(&mut bytes)?;
     let mut methods = Vec::new();
     for slot in 0..method_count{
-        let flags = parse_method_flags(parse_u2(&mut bytes)?);
+        let flags = parse_u2(&mut bytes)?;
         let name = get_constant_printable(&constant_pool, parse_u2(&mut bytes)?);
         let descriptor_str = get_constant_printable(&constant_pool, parse_u2(&mut bytes)?);
         let descriptor = MethodDescriptor::new(descriptor_str);
         let attributes_count = parse_u2(&mut bytes)?;
-        let mut attributes = Vec::new();
-        let mut deprecated = false;
-        let mut code = None;
-        let mut exceptions = None;
+        let mut method_attributes = MethodInfoAttributes::default();
         for _ in 0..attributes_count{
             let name = get_constant_printable(&constant_pool, parse_u2(&mut bytes)?);
             let attribute_length = parse_u4(&mut bytes)?;
@@ -327,7 +310,7 @@ pub fn parse_class_file(bytes: Vec<u8>, class_name: &str) -> VMResult<ClassFile>
                         }
                     }
 
-                    code = Some(Code{
+                    method_attributes.code = Some(Code{
                         max_stack,
                         max_locals,
                         code: code_bytes,
@@ -337,7 +320,7 @@ pub fn parse_class_file(bytes: Vec<u8>, class_name: &str) -> VMResult<ClassFile>
                     });
                 }
                 "Deprecated" => {
-                    deprecated = true
+                    method_attributes.deprecated = Some(Deprecated)
                 }
                 "Exceptions" => {
                     let number_of_exceptions = parse_u2(&mut bytes)?;
@@ -346,18 +329,13 @@ pub fn parse_class_file(bytes: Vec<u8>, class_name: &str) -> VMResult<ClassFile>
                         let name = get_constant_printable(&constant_pool, parse_u2(&mut bytes)?);
                         exception_vec.push(name);
                     }
-                    exceptions = Some(Exceptions(exception_vec));
+                    method_attributes.exceptions = Some(Exceptions(exception_vec));
                 }
                 _ => {
                     let mut info = Vec::new();
                     for _ in 0..attribute_length{
                         info.push(parse_u1(&mut bytes)?)
                     }
-
-                    attributes.push(Attribute{
-                        name,
-                        info
-                    });
                 }
             }
         }
@@ -365,12 +343,9 @@ pub fn parse_class_file(bytes: Vec<u8>, class_name: &str) -> VMResult<ClassFile>
             flags,
             name,
             descriptor,
-            deprecated,
             slot: slot as usize + 1,
-            attributes,
-            code,
+            attributes: method_attributes,
             code_blocks: None,
-            exceptions
         });
     }
     let attributes_count = parse_u2(&mut bytes)?;
