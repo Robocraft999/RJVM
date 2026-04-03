@@ -22,6 +22,7 @@ use std::ffi::{c_schar, c_uchar, c_ushort, c_void};
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
+use crate::class_file::parse_class_file;
 
 macro_rules! wrap_init{
     ($macro_vm:expr, $macro_java_vm:expr, $x:expr) => {
@@ -1244,7 +1245,9 @@ fn delegate_define_class<'a>(vm: &VM<'a>, java_vm: &JavaVM, _ : ClassRef<'a>, _:
 fn delegate_define_anon_class<'a>(vm: &VM<'a>, java_vm: &JavaVM, _ : ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
     if let (Some(Value::Reference(host_class)), Some(Value::Reference(byte_arr)), Some(Value::Reference(cp_patch_arr))) = (args.get(0), args.get(1), args.get(2)) {
         if let ReferenceType::Array(_, _, bytes ) = &byte_arr.reference_type{
-
+            let bytes = bytes.borrow().iter().map(|val| if let Value::Integer(byte) = val {*byte as u8} else {0}).collect::<Vec<_>>();
+            let class_file = parse_class_file(bytes, "GibbetNich")?;
+            println!("{:#?}", class_file);
         }
         todo!()
     } else {
