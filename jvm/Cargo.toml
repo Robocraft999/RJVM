@@ -19,6 +19,7 @@ cesu8 = "1.1.0"
 libloading = "0.8"
 libffi = "5.0.0"
 serde = { version = "1.0.228", features = ["derive"], optional = true }
+nom = "8.0.0"
 toml = {  version = "0.9.8", optional = true, features = ["serde"]}
 
 [features]
