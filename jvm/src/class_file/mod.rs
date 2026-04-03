@@ -17,6 +17,7 @@ mod version;
 pub mod constant_pool;
 pub mod field_info;
 pub mod method_info;
+mod nom;
 
 pub struct ClassFile{
     pub magic: u32,
