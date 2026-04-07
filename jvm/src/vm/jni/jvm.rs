@@ -2,7 +2,7 @@
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
 
-use crate::class_file::field_info::FieldType;
+use crate::class_file::fields::field_type::FieldType;
 use crate::native_init_wrap;
 use crate::vm::jni::types::*;
 use crate::vm::{VMResultType, VM};

@@ -4,7 +4,7 @@
 #![allow(unused_parens)]
 #![allow(unused_variables)]
 
-use crate::class_file::field_info::{FieldType, PrimitiveType};
+use crate::class_file::fields::field_type::{FieldType, PrimitiveType};
 use crate::native_init_wrap;
 use crate::vm::class::{ClassAndMethod, ClassId};
 use crate::vm::result::{VMPartialResult, VMResult, VMResultType};

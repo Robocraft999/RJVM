@@ -27,4 +27,6 @@ pub enum ClassParseError{
     LoadingError(#[from] ClassLoadingError),
     #[error("Could not resolve class {0}")]
     ResolveError(String),
+    #[error("{0}")]
+    ConstantPoolError(String),
 }

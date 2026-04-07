@@ -1,4 +1,4 @@
-use crate::class_file::field_info::FieldType;
+use crate::class_file::fields::field_type::FieldType;
 use crate::vm::class::{ClassId, ClassRef};
 use crate::vm::value::{Reference, ReferenceType, ReferenceValue, Value};
 use std::cell::RefCell;
@@ -28,22 +28,19 @@ impl<'a> ObjectAllocator<'a>{
         }
     }
 
-    pub fn allocate_object(&self, class: ClassRef<'a>) -> Reference<'a>{
-        let new_object = self.arena.alloc(self.object_from_class(class));
-        *self.next_object_id.borrow_mut() += 1;
-        unsafe {
-            let object_ptr: *const ReferenceValue = new_object;
-            &*object_ptr
-        }
-    }
-
-    fn object_from_class(&self, class: ClassRef<'a>) -> ReferenceValue<'a>{
-        let fields = class.get_fields(self.null);
-        ReferenceValue{
+    pub fn allocate_object(&self, class: ClassRef<'a>, fields: Vec<Value<'a>>) -> Reference<'a>{
+        let object = ReferenceValue{
             id: *self.next_object_id.borrow(),
             class_id: class.id,
             class_name: class.name.to_string(),
             reference_type: ReferenceType::Object(RefCell::new(fields))
+        };
+
+        let new_object = self.arena.alloc(object);
+        *self.next_object_id.borrow_mut() += 1;
+        unsafe {
+            let object_ptr: *const ReferenceValue = new_object;
+            &*object_ptr
         }
     }
 

@@ -33,14 +33,15 @@ pub fn get_blocks(bytes: &Vec<u8>) -> BTreeMap<u16, InstructionBlock>{
 
 #[cfg(test)]
 mod tests{
-    use crate::{bytecode::Instruction, vm::{bytecode::{il, raw, InstructionBlock}, class_manager::ClassManager, class_path::ClassPath}};
+    use crate::vm::VM;
+    use crate::{bytecode::Instruction, vm::{bytecode::{il, raw, InstructionBlock}, class_path::ClassPath}};
 
     #[test]
     fn test_raw(){
         let mut cp = ClassPath::default();
         cp.push("../resources;../resources/rt.jar").unwrap();
-        let cl = ClassManager::new(cp);
-        let clazz = cl.get_or_resolve_class("Slot").unwrap().get_class();
+        let vm = VM::new(cp);
+        let clazz = vm.get_or_resolve_class("Slot").unwrap();
 
         let bytes = clazz.find_method("containsKey", "(Ljava/lang/Comparable;)Z").unwrap().attributes.code.clone().unwrap().code;
         let blocks = raw::get_blocks(&bytes);
@@ -81,8 +82,8 @@ mod tests{
     fn test_il(){
         let mut cp = ClassPath::default();
         cp.push("../resources;../resources/rt.jar").unwrap();
-        let cl = ClassManager::new(cp);
-        let clazz = cl.get_or_resolve_class("Slot").unwrap().get_class();
+        let vm = VM::new(cp);
+        let clazz = vm.get_or_resolve_class("Slot").unwrap();
 
         let bytes = clazz.find_method("containsKey", "(Ljava/lang/Comparable;)Z").unwrap().attributes.code.clone().unwrap().code;
         let blocks = il::get_blocks(&bytes);

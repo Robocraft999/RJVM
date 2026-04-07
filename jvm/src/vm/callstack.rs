@@ -1,16 +1,12 @@
 use super::call_frame::CallFrame;
-use crate::attribute::{Code, ExceptionTable, RuntimeVisibleAnnotations};
 use crate::bytecode::Instruction;
-use crate::class_file::constant_pool::ConstantPool;
-use crate::class_file::field_info::FieldType;
-use crate::class_file::method_info::{MethodDescriptor, MethodInfo};
 use crate::error;
 use crate::vm::class::{Class, ClassId, ClassRef};
 use crate::vm::info;
 use crate::vm::result::{VMPartialResult, VMResult, VMResultType};
 use crate::vm::value::Reference;
 use crate::vm::ClassAndMethod;
-use crate::ProgramCounter;
+use crate::vm::ProgramCounter;
 use crate::Value;
 use crate::VmError;
 use crate::VM;
@@ -131,10 +127,11 @@ impl<'a> CallStack<'a> {
         let pc = self.pcs.borrow()[index].0;
         if let Some(code) = &cam.method.attributes.code{
             instruction = cam.method.code_blocks.as_ref().map(|blocks| blocks.get(&pc).unwrap());
-            if let Some(line_number_table) = &code.line_number_table{
-                for entry in line_number_table.0.iter().rev(){
-                    if entry.program_counter.0 < pc || (pc == 0 && entry.program_counter.0 == 0) {
-                        line_number = entry.line_number.0 as i32;
+            // TODO check all tables not only the first
+            if let Some(line_number_table) = &code.attributes.line_number_tables.get(0){
+                for entry in line_number_table.line_number_table.iter().rev(){
+                    if entry.start_pc < pc || (pc == 0 && entry.start_pc == 0) {
+                        line_number = entry.line_number as i32;
                         break; 
                     }
                 }

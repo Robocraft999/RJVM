@@ -1,5 +1,7 @@
 #![feature(negative_impls)]
 #![feature(c_variadic)]
+#![feature(iterator_try_collect)]
+extern crate core;
 
 use log::{error, LevelFilter};
 use std::cell::RefCell;
@@ -7,15 +9,13 @@ use std::env;
 use vm::class_path::ClassPath;
 
 use crate::application::Application;
-use crate::attribute::ProgramCounter;
+use crate::class_file::fields::field_type::FieldType;
 use crate::vm::value::Value;
 use crate::vm::{VmError, VM};
-use class_file::field_info::FieldType;
 
 mod application;
 mod bytes;
 mod access_flags;
-mod attribute;
 mod vm;
 mod error;
 mod bytecode;

@@ -9,11 +9,11 @@ use std::str::Utf8Error;
 use thiserror::Error;
 
 use crate::access_flags::MethodFlag;
-use crate::attribute::{BootstrapMethods, Code, ExceptionTable, ProgramCounter, RuntimeVisibleAnnotations};
 use crate::bytecode::Instruction;
-use crate::class_file::constant_pool::{BytecodeBehavior, ConstantPool, FastConstantPoolEntry};
-use crate::class_file::field_info::{FieldType, PrimitiveType};
-use crate::class_file::method_info::{MethodDescriptor, MethodInfo};
+use crate::class_file::constant_pool::{BytecodeBehavior, ConstantPoolEntry};
+use crate::class_file::fields::field_type::{FieldType, PrimitiveType};
+use crate::class_file::methods::attributes::ExceptionTableEntry;
+use crate::class_file::methods::descriptor::MethodDescriptor;
 use crate::error::ClassParseError;
 use crate::vm::bytecode::InstructionBlock;
 use crate::vm::call_frame::CallFrame;
@@ -121,11 +121,10 @@ impl<'a> VM<'a>{
                     debug!("Exception handler not in this native function {}", class_and_method.format());
                     continue;
                 }
-                let exception_table = class_and_method.method.get_exception_handlers();
                 let current_pc = &self.call_stack.get_pc();
                 //[unchecked] class already loaded by method
-                if let Some(handler_pc) = self.unchecked_resolve_exception_handler(exception_table, current_pc, thrown_class_name.as_str())?{
-                    self.call_stack.set_pc(handler_pc.0);
+                if let Some(handler_pc) = class_and_method.resolve_exception_handler(self, current_pc, thrown_class_name.as_str()){
+                    self.call_stack.set_pc(handler_pc);
                     self.call_stack.push_operand_value(throwable.clone());
                     self.debug_helper.exception_helper.push(format!("Handled {} by {}\n└-- thrown by {} with message: {}", thrown_class_name, class_and_method.format(), origin, message));
                     debug!("Exception thrown handled by {}", class_and_method.format());
@@ -215,34 +214,9 @@ impl<'a> VM<'a>{
         }
     }
 
-    fn resolve_exception_handler(&self, exception_table_option: Option<&ExceptionTable>, pc: &ProgramCounter, thrown_class_name: &str) -> VMPartialResult<Option<ProgramCounter>>{
-        let _ = self.get_or_resolve_class(thrown_class_name)?;
-        self.unchecked_resolve_exception_handler(exception_table_option, pc, thrown_class_name).map(VMResultType::Successful)
-    }
-
-    fn unchecked_resolve_exception_handler(&self, exception_table_option: Option<&ExceptionTable>, pc: &ProgramCounter, thrown_class_name: &str) -> VMResult<Option<ProgramCounter>>{
-        if let Some(exception_table) = exception_table_option {
-            for handler in &exception_table.0 {
-                let can_handle = match handler.catch_type {
-                    Some(ref class_name) => {
-                        self.unchecked_check_if_subclass_of(class_name.as_str(), thrown_class_name)?
-                    }
-                    None => true
-                };
-                if can_handle{
-                    //FIXME check if end_pc is inclusive or exclusive
-                    if handler.start_pc.0 <= pc.0 && pc.0 <= handler.end_pc.0{
-                        return Ok(Some(handler.handler_pc));
-                    }
-                }
-            }
-        }
-        Ok(None)
-    }
-
     pub fn get_or_resolve_class(&self, class_name: &str) -> VMResult<ClassRef<'a>>{
-        let resolved = self.class_manager.get_or_resolve_class(class_name)?;
-        Ok(resolved.get_class())
+        let resolved = self.class_manager.get_or_resolve_class(self, class_name)?;
+        Ok(resolved)
     }
 
     pub fn get_or_initialize_class(&self, class_name: &str) -> VMPartialResult<ClassRef<'a>>{
@@ -272,20 +246,10 @@ impl<'a> VM<'a>{
 
     pub fn define_class(&self, class_name: &str, bytes: Vec<u8>) -> VMPartialResult<Reference<'a>>{
         println!("FIXME: define_class");
-        let resolved = self.find_class_by_name(class_name);
-        if resolved.is_none() {
-            let to_init = self.class_manager.parse_and_load_class(class_name, class_name, None, bytes)?;
-            return Ok(VMResultType::Interrupted(
-                to_init.to_load
-                    .iter()
-                    .map(|class| self.init_class(class))
-                    .filter(Option::is_some)
-                    .map(Option::unwrap)
-                    .count(),
-                true
-            ))
-        }
-        let resolved = resolved.unwrap();
+        let resolved = match self.find_class_by_name(class_name){
+            Some(resolved) => resolved,
+            None => self.class_manager.parse_and_load_class(self, class_name, class_name, None, bytes)?
+        };
         self.new_class_object_by_class(resolved)
     }
 
@@ -336,7 +300,8 @@ impl<'a> VM<'a>{
 
     pub fn new_object_from_class(&self, class: ClassRef<'a>) -> Reference<'a>{
         info!("CC[{:?}] = {}", class.id, class.name);
-        let obj = self.object_allocator.allocate_object(class);
+        let fields = class.get_fields(&self);
+        let obj = self.object_allocator.allocate_object(class, fields);
         self.objects_by_id.borrow_mut().insert(obj.id, obj);
         self.debug_helper.tracker.push_object_event(obj.id, format!("Object ({}) allocated", class.name));
         obj
@@ -602,6 +567,9 @@ pub enum VmError{
     #[error("")]
     ParseError(#[from] ClassParseError),
 
+    #[error("")]
+    NomError(#[from] nom::Err<nom::error::Error<&'static [u8]>>),
+
     #[error("Methodcall to {0} failed")]
     MethodCallError(String),
 
@@ -620,3 +588,6 @@ pub enum VmError{
     #[error("Error caught in native function: {0}")]
     Native(String)
 }
+
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub struct ProgramCounter(pub u16);

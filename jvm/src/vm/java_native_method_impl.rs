@@ -1,7 +1,9 @@
 use crate::access_flags::MethodFlag;
-use crate::class_file::constant_pool::FastConstantPoolEntry;
-use crate::class_file::field_info::{get_class_descriptor, FieldType, PrimitiveType};
-use crate::class_file::method_info::MethodDescriptor;
+use crate::class_file::constant_pool::ConstantPoolEntry;
+use crate::class_file::fields::field_type::{FieldType, PrimitiveType};
+use crate::class_file::fields::get_class_descriptor;
+use crate::class_file::methods::descriptor::MethodDescriptor;
+use crate::class_file::nom::parse_class_file;
 use crate::error::ClassParseError;
 use crate::vm::class::{ClassAndMethod, ClassRef};
 use crate::vm::class_manager::ClassLoadingState;
@@ -22,7 +24,6 @@ use std::ffi::{c_schar, c_uchar, c_ushort, c_void};
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
-use crate::class_file::parse_class_file;
 
 macro_rules! wrap_init{
     ($macro_vm:expr, $macro_java_vm:expr, $x:expr) => {
@@ -525,7 +526,7 @@ fn delegate_system_map_library_name<'a>(vm: &VM<'a>, java_vm: &JavaVM, _ : Class
 
 fn delegate_get_primitive_class<'a>(vm: &VM<'a>, java_vm: &JavaVM, _ : ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
     let string = VM::extract_string_from_object(args.get(0).unwrap())?;
-    let class_id = vm.class_manager.get_primitive_class(string.as_str());
+    let class_id = vm.class_manager.get_primitive_class(&vm, string.as_str());
     match string.as_str() {
         "int"     |
         "long"    |
@@ -626,9 +627,14 @@ fn delegate_get_declared_constructors0<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: Cla
                 parameters.push(Value::Reference(parameter_class));
             }
             let mut exceptions = Vec::new();
-            if let Some(exception_vec) = constructor.attributes.exceptions.clone(){
-                for exception in exception_vec.0{
-                    let parameter_class = wrap_init!(vm, java_vm, vm.new_class_object_by_name(exception.as_str())?);
+            if let Some(exception_vec) = &constructor.attributes.exceptions {
+                for exception_index in &exception_vec.exception_index_table {
+                    let exception_class = if let Some(ConstantPoolEntry::Class(clazz)) = class.get_or_resolve_constant(vm, *exception_index) {
+                        Ok(clazz)
+                    } else {
+                        Err(VmError::ValidationError(format!("Exception class could not be resolved in class: {}", class.name)))
+                    }?;
+                    let parameter_class = wrap_init!(vm, java_vm, vm.new_class_object_by_class(exception_class)?);
                     exceptions.push(Value::Reference(parameter_class));
                 }
             }
@@ -678,9 +684,14 @@ fn delegate_get_declared_methods0<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef
                 parameters.push(Value::Reference(parameter_class));
             }
             let mut exceptions = Vec::new();
-            if let Some(exception_vec) = method.attributes.exceptions.clone(){
-                for exception in exception_vec.0{
-                    let parameter_class = wrap_init!(vm, java_vm, vm.new_class_object_by_name(exception.as_str())?);
+            if let Some(exception_vec) = &method.attributes.exceptions {
+                for exception_index in &exception_vec.exception_index_table {
+                    let exception_class = if let Some(ConstantPoolEntry::Class(clazz)) = class.get_or_resolve_constant(vm, *exception_index) {
+                        Ok(clazz)
+                    } else {
+                        Err(VmError::ValidationError(format!("Exception class could not be resolved in class: {}", class.name)))
+                    }?;
+                    let parameter_class = wrap_init!(vm, java_vm, vm.new_class_object_by_class(exception_class)?);
                     exceptions.push(Value::Reference(parameter_class));
                 }
             }
@@ -735,12 +746,12 @@ fn delegate_get_enclosing_method<'a>(vm: &VM<'a>, java_vm: &JavaVM, c: ClassRef<
     if let Some(obj) = this {
         let class = vm.extract_class_from_class_object(obj)?;
         if let Some(enclosing) = &class.attributes.enclosing_method{
-            let class_ref = if let Some(FastConstantPoolEntry::Class(class_ref)) = class.get_or_resolve_constant_fast(vm, enclosing.class_index){
+            let class_ref = if let Some(ConstantPoolEntry::Class(class_ref)) = class.get_or_resolve_constant(vm, enclosing.class_index){
                 Value::Reference(wrap_init!(vm, java_vm, vm.new_class_object_by_class(class_ref)?))
             } else {
                 return Err(VmError::ValidationError("expected a class constant".to_string()));
             };
-            let (method_name, method_type) = if let Some(FastConstantPoolEntry::NameAndType(name, typ)) = class.get_or_resolve_constant_fast(vm, enclosing.class_index){
+            let (method_name, method_type) = if let Some(ConstantPoolEntry::NameAndType(name, typ)) = class.get_or_resolve_constant(vm, enclosing.class_index){
                 (
                     Value::Reference(wrap_init!(vm, java_vm, vm.new_string_object(name.as_str())?)),
                     Value::Reference(wrap_init!(vm, java_vm, vm.new_string_object(typ.as_str())?))
@@ -762,9 +773,9 @@ fn delegate_get_declaring_class<'a>(vm: &VM<'a>, java_vm: &JavaVM, c: ClassRef<'
     if let Some(obj) = this {
         let class = vm.extract_class_from_class_object(obj)?;
         if let Some(inner_classes) = &class.attributes.inner_classes{
-            for inner_class in inner_classes {
-                if let Some(FastConstantPoolEntry::Class(inner_class_ref)) = class.get_or_resolve_constant_fast(vm, inner_class.inner_class_info_index) && class.name == inner_class_ref.name{
-                    if let Some(FastConstantPoolEntry::Class(outer_class_ref)) = class.get_or_resolve_constant_fast(vm, inner_class.outer_class_info_index){
+            for inner_class in &inner_classes.classes {
+                if let Some(ConstantPoolEntry::Class(inner_class_ref)) = class.get_or_resolve_constant(vm, inner_class.inner_class_info_index) && class.name == inner_class_ref.name{
+                    if let Some(ConstantPoolEntry::Class(outer_class_ref)) = class.get_or_resolve_constant(vm, inner_class.outer_class_info_index){
                         let outer_class_obj = wrap_init!(vm, java_vm, vm.new_class_object_by_class(outer_class_ref)?);
                         return non_failing_some(Value::Reference(outer_class_obj));
                     }
@@ -1246,7 +1257,7 @@ fn delegate_define_anon_class<'a>(vm: &VM<'a>, java_vm: &JavaVM, _ : ClassRef<'a
     if let (Some(Value::Reference(host_class)), Some(Value::Reference(byte_arr)), Some(Value::Reference(cp_patch_arr))) = (args.get(0), args.get(1), args.get(2)) {
         if let ReferenceType::Array(_, _, bytes ) = &byte_arr.reference_type{
             let bytes = bytes.borrow().iter().map(|val| if let Value::Integer(byte) = val {*byte as u8} else {0}).collect::<Vec<_>>();
-            let class_file = parse_class_file(bytes, "GibbetNich")?;
+            let class_file = parse_class_file(bytes)?;
             println!("{:#?}", class_file);
         }
         todo!()
