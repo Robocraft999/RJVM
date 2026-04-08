@@ -1,19 +1,6 @@
-[package]
-name = "rjvm"
-version = "0.1.0"
-edition = "2024"
-
-[dependencies]
-strum_macros = "0.26.4"
-zip = { version = "2.2.0", features = ["deflate"] }
-thiserror = "1.0.63"
-typed-arena = "2.0.2"
-log = "0.4.22"
-simple_logger = "5.0.0"
-regex = "1.10.6"
-lazy-regex = "3.4.1"
-cesu8 = "1.1.0"
-libloading = "0.8"
-
-[features]
-debug = []
+[workspace]
+members = [
+    "jvm",
+    "rjvm-driver",
+]
+resolver = "3"

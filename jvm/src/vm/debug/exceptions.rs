@@ -1,0 +1,27 @@
+use log::error;
+use std::cell::RefCell;
+
+pub struct ExceptionHelper{
+    history: RefCell<Vec<String>>
+}
+
+impl ExceptionHelper{
+    pub fn new() -> Self{
+        Self{
+            history: RefCell::new(Vec::new())
+        }
+    }
+    
+    pub fn push(&self, line: String){
+        #[cfg(feature = "debug")]
+        {
+            self.history.borrow_mut().push(line);
+        }
+    }
+    
+    pub fn print(&self){
+        for line in self.history.borrow().iter(){
+            error!(target: "debug", "{}", line);
+        }
+    }
+}

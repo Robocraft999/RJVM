@@ -112,4 +112,14 @@ final class UnixFileSystem{
         if (isAbsolute(f)) return f.getPath();
         return resolve(userDir, f.getPath());
     }
+
+    /* -- Basic infrastructure -- */
+
+    public int compare(File f1, File f2) {
+        return f1.getPath().compareTo(f2.getPath());
+    }
+
+    public int hashCode(File f) {
+        return f.getPath().hashCode() ^ 1234321;
+    }
 }
