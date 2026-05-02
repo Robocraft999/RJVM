@@ -15,9 +15,18 @@ pub struct MethodInfo{
     pub name: String,
     pub descriptor: MethodDescriptor,
     pub slot: usize,
+    pub vtable_index: isize,
     pub code_blocks: Option<BTreeMap<u16, InstructionBlock>>,
+    // FIXME store the entire holder instead.
+    // This would require to store all methods including from superclass in a vtable to be useful
+    // Although it would improve virtual resolving a lot
+    pub is_holder_interface: bool,
     pub attributes: MethodInfoAttributes,
 }
+
+pub const ITABLE_INDEX_MAX: isize = -10;
+pub const INVALID_VTABLE_INDEX: isize = -4;
+pub const NONVIRTUAL_VTABLE_INDEX: isize = -2;
 
 impl MethodInfo{
     pub fn get_args_count(&self) -> usize{
@@ -34,6 +43,14 @@ impl MethodInfo{
 
     pub fn is_abstract(&self) -> bool {
         self.flags & MethodFlag::Abstract as u16 > 0
+    }
+
+    pub fn is_final(&self) -> bool {
+        self.flags & MethodFlag::Final as u16 > 0
+    }
+
+    pub fn is_initializer(&self) -> bool {
+        self.name == "<init>" && self.descriptor.return_type.is_none()
     }
 
     pub fn has_exception_handler(&self) -> bool {
@@ -62,6 +79,24 @@ impl MethodInfo{
 
     pub fn previous_pc(&self, pc: ProgramCounter) -> u16{
         self.code_blocks.as_ref().map(|blocks| blocks.range(..pc.0).next_back()).flatten().map(|t|*t.0).unwrap_or(0)
+    }
+
+    pub fn has_vtable_index(&self) -> bool {
+        self.vtable_index >= 0
+    }
+
+    pub fn vtable_index(&self) -> isize{
+        self.vtable_index
+    }
+
+    pub fn has_itable_index(&self) -> bool {
+        self.vtable_index <= ITABLE_INDEX_MAX
+    }
+
+    pub fn itable_index(&self) -> isize {
+        // technically <= pending_itable_entry, but we don't have that
+        assert!(self.vtable_index <= ITABLE_INDEX_MAX);
+        ITABLE_INDEX_MAX - self.vtable_index
     }
 }
 

@@ -112,6 +112,9 @@ impl<'a> Class<'a>{
     pub fn is_interface(&self) -> bool {
         self.flags & ClassFlag::Interface as u16 > 0
     }
+    pub fn is_final(&self) -> bool {
+        self.flags & ClassFlag::Final as u16 > 0
+    }
 
     pub fn is_array(&self) -> bool {
         self.name.starts_with("[")

@@ -24,6 +24,8 @@ use std::ffi::{c_schar, c_uchar, c_ushort, c_void};
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
+use crate::class_file::methods::{INVALID_VTABLE_INDEX, NONVIRTUAL_VTABLE_INDEX};
+use crate::vm::call_info::{CallInfo, CallInfoKind};
 
 macro_rules! wrap_init{
     ($macro_vm:expr, $macro_java_vm:expr, $x:expr) => {
@@ -1886,7 +1888,9 @@ fn resolve_signature<'a>(sig: Reference<'a>) -> VMResult<String>{
             Err(VmError::ValidationError("Invalid signature (args is not an array)".to_string()))
         }
     } else if sig.class_name == "java/lang/Class"{
-        todo!()
+        let class_name = VM::extract_class_name_from_class_object(sig)?;
+        let signature = get_class_descriptor(class_name.as_str());
+        Ok(signature)
     } else if sig.class_name == "java/lang/String"{
         todo!()
     } else {
@@ -1902,8 +1906,19 @@ fn delegate_mhn_resolve<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, _: O
         let typ = selff.get_field(2).expect_reference()?;
         let sig = resolve_signature(typ)?;
         let flags = &selff.get_field(3).expect_int()?;
-        let method_info = clazz.find_method(name.as_str(), sig.as_str()).unwrap();
-        selff.set_field(3, Value::Integer(*flags | method_info.flags as i32));
+        let ref_kind = flags >> REFERENCE_KIND_SHIFT;
+        match flags & ALL_KINDS {
+            IS_METHOD => {
+                let method_info = clazz.find_method(name.as_str(), sig.as_str()).unwrap();
+                selff.set_field(3, Value::Integer(*flags | method_info.flags as i32));
+            }
+            IS_FIELD => {
+                let (_, field_info) = clazz.find_field(name.as_str()).unwrap();
+                selff.set_field(3, Value::Integer(*flags | field_info.flags as i32));
+            }
+            other => todo!("Unsupported mh type: {:b}", other)
+        }
+
         //TODO see: https://github.com/openjdk/jdk8u/blob/master/hotspot/src/share/vm/prims/methodHandles.cpp#L609
         let vmindex = wrap_init!(vm, java_vm, vm.new_java_lang_long(Value::Long(-69420))?);
         let prev = vm.object_payloads.borrow_mut().insert(selff.id, vec![vmindex, Value::Reference(selff)]);
@@ -1930,6 +1945,7 @@ fn delegate_mhn_member_vminfo<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>
 const IS_METHOD: i32 = 0x00010000;
 const IS_CONSTRUCTOR: i32 = 0x00020000;
 const IS_FIELD: i32 = 0x00040000;
+const ALL_KINDS: i32 = IS_METHOD | IS_CONSTRUCTOR | IS_FIELD;
 const REFERENCE_KIND_SHIFT: i32 = 24;
 const REF_invokeVirtual: i32    = 5;
 const REF_invokeStatic: i32     = 6;
@@ -1952,10 +1968,28 @@ fn delegate_mhn_init<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, _: Opti
 
                 let method_flags = method_info.flags as i32;
                 let mut flags = method_flags;
-
-                // FIXME how to figure out the reference kind?
-                if method_info.is_static(){
-                    flags |= IS_METHOD | (REF_invokeStatic << REFERENCE_KIND_SHIFT);
+                let mut vmindex = INVALID_VTABLE_INDEX;
+                let info = CallInfo::new(&method_info, &class_ref);
+                match info.kind {
+                    CallInfoKind::Itable => {
+                        vmindex = info.index;
+                        flags |= IS_METHOD | (REF_invokeInterface << REFERENCE_KIND_SHIFT);
+                    }
+                    CallInfoKind::Vtable => {
+                        vmindex = info.index;
+                        flags |= IS_METHOD | (REF_invokeVirtual << REFERENCE_KIND_SHIFT);
+                    }
+                    CallInfoKind::Direct => {
+                        vmindex = NONVIRTUAL_VTABLE_INDEX;
+                        if method_info.is_static() {
+                            flags |= IS_METHOD | (REF_invokeStatic << REFERENCE_KIND_SHIFT);
+                        } else if method_info.is_initializer() {
+                            flags |= IS_CONSTRUCTOR | (REF_invokeSpecial << REFERENCE_KIND_SHIFT);
+                        } else {
+                            flags |= IS_METHOD | (REF_invokeSpecial << REFERENCE_KIND_SHIFT);
+                        }
+                    }
+                    CallInfoKind::Unknown => return Err(VmError::ValidationError("Unknown CallInfo kind".to_string()))
                 }
 
                 // flags
@@ -1964,7 +1998,7 @@ fn delegate_mhn_init<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, _: Opti
                 // vmindex
                 // FIXME this is not intended, this should be a JVM_Method*, idk how though
                 // FIXME idk what index this should represent
-                let old = vm.object_payloads.borrow_mut().insert(mname.id, vec![Value::Integer(-420), Value::Reference(mname)]);
+                let old = vm.object_payloads.borrow_mut().insert(mname.id, vec![Value::Integer(vmindex as i32), Value::Reference(mname)]);
                 // clazz
                 mname.set_field(0, Value::Reference(clazz));
                 non_failing_none()

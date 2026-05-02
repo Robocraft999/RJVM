@@ -48,6 +48,7 @@ pub mod bytecode; //TODO move out from vm
 mod executor;
 mod debug;
 pub mod jni;
+mod call_info;
 
 pub struct VM<'a>{
     pub class_manager: ClassManager<'a>,

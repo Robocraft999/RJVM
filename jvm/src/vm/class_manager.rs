@@ -5,7 +5,7 @@ use crate::class_file::fields::field_type::{extract_component_type_from_array_cl
 use crate::class_file::fields::{primitive_to_wrapper_name, FieldInfo};
 use crate::class_file::methods::attributes::{CodeAttributes, MethodInfoAttributes};
 use crate::class_file::methods::descriptor::MethodDescriptor;
-use crate::class_file::methods::MethodInfo;
+use crate::class_file::methods::{MethodInfo, ITABLE_INDEX_MAX};
 use crate::class_file::nom::parse_class_file;
 use crate::error::ClassParseError;
 use crate::vm::class::{ArrayInfo, Class, ClassAndField, ClassAndMethod, ClassId, ClassRef};
@@ -222,11 +222,18 @@ impl<'a> ClassManager<'a>{
                     }
                     let descriptor = MethodDescriptor::new(descriptor);
                     let code_blocks = method_attributes.code.clone().map(|c| bytecode::get_blocks(&c.code));
+                    let vtable_index = if class.is_interface(){
+                        ITABLE_INDEX_MAX - i as isize
+                    } else {
+                        i as isize
+                    };
                     Some(MethodInfo{
                         name,
                         descriptor,
                         slot: i,
+                        vtable_index,
                         attributes: method_attributes,
+                        is_holder_interface: class.is_interface(),
                         code_blocks,
                         flags: raw_field.access_flags,
                     })
