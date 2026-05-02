@@ -24,6 +24,6 @@ nom-derive = {path = "../../nom-derive"}
 toml = {  version = "0.9.8", optional = true, features = ["serde"]}
 
 [features]
-debug = ["dep:toml"]
+debug = ["dep:toml", "dep:serde"]
 il = []
 default = ["il"]

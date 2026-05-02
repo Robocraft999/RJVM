@@ -87,21 +87,52 @@ impl<'a> ClassManager<'a>{
     }
 
     pub fn parse_and_load_class(&self, vm: &VM<'a>, class_name: &str, class_to_load_name: &str, array_info: Option<ArrayInfo>, bytes: Vec<u8>) -> VMResult<ClassRef<'a>>{
+        let class = self.define_class(vm, Some(class_name), array_info, bytes)?;
+
+        if class.array_info.is_some(){
+            let _ = self.get_or_resolve_class(vm, class_to_load_name)?;
+        }
+
+        // alloc + register
+        let class_ref = self.classes.alloc(class);
+
+        let class_ref = unsafe {
+            let class_ptr: *const Class<'a> = class_ref;
+            &*class_ptr
+        };
+
+        self.classes_by_name.borrow_mut().insert(class_name.to_string(), class_ref);
+        self.classes_by_id.borrow_mut().insert(class_ref.id, class_ref);
+        self.class_loading_states.borrow_mut().insert(class_ref.id, ClassLoadingState::LOADED);
+
+        Ok(class_ref)
+    }
+
+    pub fn define_class(&self, vm: &VM<'a>, class_name: Option<&str>, array_info: Option<ArrayInfo>, bytes: Vec<u8>) -> VMResult<Class<'a>>{
         let parsed_class = parse_class_file(bytes)?;
         let next_id = *self.next_id.borrow();
         *self.next_id.borrow_mut() += 1;
 
-        // fix constant pool
-        let constants = parsed_class.constant_pool/*.into_iter().flat_map(|e| match e {
-            FastConstantPoolEntry::Double(v) => vec![FastConstantPoolEntry::Double(v), FastConstantPoolEntry::Dummy],
-            FastConstantPoolEntry::Long(v) => vec![FastConstantPoolEntry::Long(v), FastConstantPoolEntry::Dummy],
-            single => vec![single],
-        }).collect()*/;
+        let constants = parsed_class.constant_pool;
+        let class_name = match class_name {
+            Some(name) => Ok(name.to_owned()),
+            None => {
+                if let Some(ConstantPoolEntry::RawClass(name_index)) = constants.get(parsed_class.this_class as usize - 1){
+                    if let Some(ConstantPoolEntry::Utf8(name)) = constants.get(*name_index as usize - 1){
+                        Ok(name.clone())
+                    } else {
+                        Err(VmError::ParseError(ClassParseError::ConstantPoolError("Expected a utf entry".to_string())))
+                    }
+                } else {
+                    Err(VmError::ParseError(ClassParseError::ConstantPoolError("Expected a raw class entry".to_string())))
+                }
+            }
+        }?;
 
         // shallow class
         let mut class = Class{
             id: ClassId(next_id),
-            name: class_name.to_string(),
+            name: class_name,
             constants: RefCell::new(constants),
             flags: parsed_class.access_flags,
             superclass: None,
@@ -128,14 +159,14 @@ impl<'a> ClassManager<'a>{
                 .map(|e| if let ConstantPoolEntry::Class(clazz) = e {Some(clazz)} else {None}))
             .flatten()
             .try_collect::<Vec<ClassRef>>()
-            .ok_or(VmError::ParseError(ClassParseError::ConstantPoolError(format!("Interface of {} could not be loaded.", class_name))))?;
+            .ok_or(VmError::ParseError(ClassParseError::ConstantPoolError(format!("Interface of {} could not be loaded.", class.name))))?;
 
         // build class attributes
         for ra in parsed_class.attributes.into_iter(){
             if let Some(ConstantPoolEntry::Utf8(name)) = class.get_or_resolve_constant(&vm, ra.attribute_name_index){
                 class.attributes.set(name.as_str(), ra.info).unwrap();
             } else {
-                warn!("Attribute of {} ({}) could not be loaded.", class_name, ra.attribute_name_index);
+                warn!("Attribute of {} ({}) could not be loaded.", class.name, ra.attribute_name_index);
             }
         }
 
@@ -165,7 +196,7 @@ impl<'a> ClassManager<'a>{
                 _ => None,
             })
             .try_collect::<Vec<FieldInfo>>()
-            .ok_or(VmError::ParseError(ClassParseError::ConstantPoolError(format!("Field of class '{}' could not be loaded.", class_name))))?;
+            .ok_or(VmError::ParseError(ClassParseError::ConstantPoolError(format!("Field of class '{}' could not be loaded.", class.name))))?;
         class.transitive_field_count = super_class_field_count + class.fields.len();
         class.first_field_index = super_class_field_count;
 
@@ -203,25 +234,9 @@ impl<'a> ClassManager<'a>{
                 _ => None,
             })
             .try_collect::<Vec<MethodInfo>>()
-            .ok_or(VmError::ParseError(ClassParseError::ConstantPoolError(format!("Method of class '{}' could not be loaded.", class_name))))?;
+            .ok_or(VmError::ParseError(ClassParseError::ConstantPoolError(format!("Method of class '{}' could not be loaded.", class.name))))?;
 
-        if class.array_info.is_some(){
-            let _ = self.get_or_resolve_class(vm, class_to_load_name)?;
-        }
-
-        // alloc + register
-        let class_ref = self.classes.alloc(class);
-
-        let class_ref = unsafe {
-            let class_ptr: *const Class<'a> = class_ref;
-            &*class_ptr
-        };
-
-        self.classes_by_name.borrow_mut().insert(class_name.to_string(), class_ref);
-        self.classes_by_id.borrow_mut().insert(class_ref.id, class_ref);
-        self.class_loading_states.borrow_mut().insert(class_ref.id, ClassLoadingState::LOADED);
-
-        Ok(class_ref)
+        Ok(class)
     }
     
     // Use this carefully! The is no ClassRef for this id

@@ -5,7 +5,7 @@ use crate::class_file::fields::get_class_descriptor;
 use crate::class_file::methods::descriptor::MethodDescriptor;
 use crate::class_file::nom::parse_class_file;
 use crate::error::ClassParseError;
-use crate::vm::class::{ClassAndMethod, ClassRef};
+use crate::vm::class::{Class, ClassAndMethod, ClassRef};
 use crate::vm::class_manager::ClassLoadingState;
 use crate::vm::java_error::JavaError;
 use crate::vm::jni::types::{jboolean, jbyte, jchar, jdouble, jfloat, jint, jlong, jobject, jshort, jvalue, JNIEnv, JavaVM};
@@ -328,6 +328,7 @@ pub fn register_all_natives(registry: &mut NativeMethodRegistry){
     registry.register("sun/misc/Unsafe", "addressSize", "()I", delegate_address_size);
     registry.register("sun/misc/Unsafe", "objectFieldOffset", "(Ljava/lang/reflect/Field;)J", delegate_object_field_offset);
     registry.register("sun/misc/Unsafe", "staticFieldOffset", "(Ljava/lang/reflect/Field;)J", delegate_static_field_offset);
+    registry.register("sun/misc/Unsafe", "putObjectVolatile", "(Ljava/lang/Object;JLjava/lang/Object;)V", delegate_put_object_volatile);
     registry.register("sun/misc/Unsafe", "getObjectVolatile", "(Ljava/lang/Object;J)Ljava/lang/Object;", delegate_get_object_volatile);
     registry.register("sun/misc/Unsafe", "getIntVolatile", "(Ljava/lang/Object;J)I", delegate_get_int_volatile);
     registry.register("sun/misc/Unsafe", "staticFieldBase", "(Ljava/lang/reflect/Field;)Ljava/lang/Object;", delegate_static_field_base);
@@ -676,7 +677,7 @@ fn delegate_get_declared_methods0<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef
             let return_type = if let Some(f) = &method.descriptor.return_type{
                 Value::Reference(wrap_init!(vm, java_vm, vm.new_class_object_by_name(f.to_class_name().as_str())?))
             } else {
-                vm.null()
+                Value::Reference(wrap_init!(vm, java_vm, vm.new_class_object("void", vm.class_manager.get_primitive_class(vm, "void"))?))
             };
             let mut parameters = Vec::new();
             for field_type in method.descriptor.args.iter(){
@@ -1081,11 +1082,26 @@ fn delegate_static_field_offset<'a>(vm: &VM<'a>, java_vm: &JavaVM, class : Class
     delegate_object_field_offset(vm, java_vm, class, object, args)
 }
 
+fn delegate_put_object_volatile<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
+    debug!("put_object_volatile args: {:?}", args);
+    if let (Some(Value::Reference(o)), Some(Value::Long(index)), Some(Value::Reference(x))) = (args.get(0), args.get(1), args.get(3)){
+        // FIXME verify if null or correct field type
+        if o.is_array(){
+            o.set_element(*index as usize - ARRAY_BASE_OFFSET, Value::Reference(x));
+        } else {
+            o.set_field(*index as usize, Value::Reference(x));
+        }
+        non_failing_none()
+    } else {
+        Err(VmError::ValidationError(format!("Expected an Reference, Long and Reference but got: {:?}", args)))
+    }
+}
+
 fn delegate_get_object_volatile<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
     debug!("get_object_volatile args: {:?}", args);
     if let (Some(Value::Reference(o)), Some(Value::Long(index))) = (args.get(0), args.get(1)) {
         if o.is_array(){
-            return non_failing_some(o.get_element(*index as usize  - ARRAY_BASE_OFFSET));
+            return non_failing_some(o.get_element(*index as usize - ARRAY_BASE_OFFSET));
         }
         let field_value = if o.class_name == "java/lang/Class"{
             let class_ref = vm.extract_class_from_class_object(o)?;
@@ -1257,10 +1273,23 @@ fn delegate_define_anon_class<'a>(vm: &VM<'a>, java_vm: &JavaVM, _ : ClassRef<'a
     if let (Some(Value::Reference(host_class)), Some(Value::Reference(byte_arr)), Some(Value::Reference(cp_patch_arr))) = (args.get(0), args.get(1), args.get(2)) {
         if let ReferenceType::Array(_, _, bytes ) = &byte_arr.reference_type{
             let bytes = bytes.borrow().iter().map(|val| if let Value::Integer(byte) = val {*byte as u8} else {0}).collect::<Vec<_>>();
-            let class_file = parse_class_file(bytes)?;
-            println!("{:#?}", class_file);
+            let class = vm.class_manager.define_class(vm, None, None, bytes)?;
+
+            let class_ref = vm.class_manager.classes.alloc(class);
+
+            let class_ref = unsafe {
+                let class_ptr: *const Class<'a> = class_ref;
+                &*class_ptr
+            };
+
+            vm.class_manager.classes_by_id.borrow_mut().insert(class_ref.id, class_ref);
+            vm.class_manager.classes_by_name.borrow_mut().insert(class_ref.name.clone(), class_ref);
+            vm.class_manager.class_loading_states.borrow_mut().insert(class_ref.id, ClassLoadingState::LOADED);
+            let class_obj = wrap_init!(vm, java_vm, vm.new_class_object_by_class(class_ref)?);
+            non_failing_some(Value::Reference(class_obj))
+        } else {
+            Err(VmError::ValidationError(format!("define_anon_class: expected bytes array type but got: {:?}", byte_arr)))
         }
-        todo!()
     } else {
         Err(VmError::ValidationError(format!("define_anon_class: expected three objects, got {:?}", args)))
     }

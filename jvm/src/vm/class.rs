@@ -7,11 +7,13 @@ use crate::class_file::fields::FieldInfo;
 use crate::class_file::methods::descriptor::MethodDescriptor;
 use crate::class_file::methods::MethodInfo;
 use crate::vm::value::Value;
-use crate::vm::ProgramCounter;
+use crate::vm::{ProgramCounter, VmError};
 use crate::vm::VM;
 use std::cell::RefCell;
 use std::fmt::{Debug, Formatter};
 use std::hash::Hash;
+use crate::error::ClassParseError;
+use crate::vm::result::VMResult;
 
 #[derive()]
 pub struct Class<'a>{
@@ -293,6 +295,18 @@ impl <'a> Class<'a>{
             }
         }
         self.constants.borrow().get(index as usize - 1).cloned()
+    }
+    
+    pub fn get_constant(&self, index: u16) -> Option<ConstantPoolEntry<'a>> {
+        self.constants.borrow().get(index as usize - 1).cloned()
+    }
+    
+    pub fn get_utf_constant(&self, index: u16) -> VMResult<String> {
+        match self.get_constant(index) {
+            Some(ConstantPoolEntry::Utf8(string)) => Ok(string),
+            Some(entry) => Err(VmError::ParseError(ClassParseError::ConstantPoolError(format!("CP entry at {} is not of type UTF8 but: {:?}", index, entry)))),
+            None => Err(VmError::ParseError(ClassParseError::ConstantPoolError(format!("CP entry at {} is not present", index)))),
+        }
     }
 }
 

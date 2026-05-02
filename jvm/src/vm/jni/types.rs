@@ -408,6 +408,7 @@ impl JNINativeInterface_ {
             Ok(result) => result,
             Err(e) => {
                 error!(target: "native", "Java error: {:?}", e);
+                vm.debug_helper.print();
                 vm.native_method_registry.mark_exception();
                 return 0;
             }
@@ -466,6 +467,7 @@ impl JNINativeInterface_ {
             Ok(result) => result,
             Err(e) => {
                 error!(target: "native", "Java error: {:?}", e);
+                vm.debug_helper.print();
                 vm.native_method_registry.mark_exception();
                 return;
             }
@@ -614,6 +616,7 @@ impl JNINativeInterface_ {
             Ok(result) => result,
             Err(e) => {
                 error!(target: "native", "Java error: {:?}", e);
+                vm.debug_helper.print();
                 vm.native_method_registry.mark_exception();
                 return 0;
             }
@@ -647,6 +650,7 @@ impl JNINativeInterface_ {
             Ok(result) => result,
             Err(e) => {
                 error!(target: "native", "Java error: {:?}", e);
+                vm.debug_helper.print();
                 vm.native_method_registry.mark_exception();
                 return 0;
             }
@@ -701,6 +705,7 @@ impl JNINativeInterface_ {
             Ok(result) => result,
             Err(e) => {
                 error!(target: "native", "Java error: {:?}", e);
+                vm.debug_helper.print();
                 vm.native_method_registry.mark_exception();
                 return;
             }

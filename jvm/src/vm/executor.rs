@@ -1112,9 +1112,9 @@ fn execute_invoke<'a>(vm: &VM<'a>, index: u16, kind: InvokeKind) -> VMPartialRes
     debug!("INVOKE{:?}: {}{} on {:?}", kind, cam.method.name, cam.method.descriptor.as_str(), receiver);
     if let Some(rec) = receiver{
         vm.debug_helper.tracker.push_object_event(rec.id, format!("Preparing call {} with args:{}", class_and_method.format(), args.iter().map(|v| format!("\n    {:?}", v)).collect::<Vec<_>>().join("")));
-        vm.debug_helper.tracker.push_method_event(class_and_method.format(), format!("Calling on {:?} with args: {}", rec, args.iter().map(|v| format!("\n    {:?}", v)).collect::<Vec<_>>().join("") ));
+        vm.debug_helper.tracker.push_method_event(class_and_method.format(), format!("Calling on {:?} from {} with args: {}", rec, calling_class_and_method.format(), args.iter().map(|v| format!("\n    {:?}", v)).collect::<Vec<_>>().join("") ));
     } else {
-        vm.debug_helper.tracker.push_method_event(class_and_method.format(), format!("Calling static with args: {}", args.iter().map(|v| format!("\n    {:?}", v)).collect::<Vec<_>>().join("") ));
+        vm.debug_helper.tracker.push_method_event(class_and_method.format(), format!("Calling static from {} with args: {}", calling_class_and_method.format(), args.iter().map(|v| format!("\n    {:?}", v)).collect::<Vec<_>>().join("") ));
     }
     for (i, provided_arg) in args.iter().filter(|a| if let Value::Dummy = a {false} else {true}).enumerate(){
         if !(&class_and_method.method.descriptor.args[i] == provided_arg){

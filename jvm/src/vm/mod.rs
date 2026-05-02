@@ -303,7 +303,7 @@ impl<'a> VM<'a>{
         let fields = class.get_fields(&self);
         let obj = self.object_allocator.allocate_object(class, fields);
         self.objects_by_id.borrow_mut().insert(obj.id, obj);
-        self.debug_helper.tracker.push_object_event(obj.id, format!("Object ({}) allocated", class.name));
+        self.debug_helper.tracker.push_object_event(obj.id, format!("Object ({}) allocated in {:?}", class.name, self.call_stack.frames.borrow().last().map(|f| f.class_and_method.format())));
         obj
     }
 
@@ -564,10 +564,10 @@ pub enum VmError{
     #[error("{0}")]
     JavaException(#[from] JavaError),
 
-    #[error("")]
+    #[error("{0}")]
     ParseError(#[from] ClassParseError),
 
-    #[error("")]
+    #[error("{0}")]
     NomError(#[from] nom::Err<nom::error::Error<&'static [u8]>>),
 
     #[error("Methodcall to {0} failed")]
