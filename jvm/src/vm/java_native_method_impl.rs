@@ -1,7 +1,7 @@
-use crate::access_flags::MethodFlag;
+use crate::access_flags::{FieldFlag, MethodFlag};
 use crate::class_file::constant_pool::ConstantPoolEntry;
 use crate::class_file::fields::field_type::{FieldType, PrimitiveType};
-use crate::class_file::fields::get_class_descriptor;
+use crate::class_file::fields::{get_class_descriptor, FieldInfo};
 use crate::class_file::methods::descriptor::MethodDescriptor;
 use crate::class_file::nom::parse_class_file;
 use crate::error::ClassParseError;
@@ -25,7 +25,7 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 use crate::class_file::methods::{INVALID_VTABLE_INDEX, NONVIRTUAL_VTABLE_INDEX};
-use crate::vm::call_info::{CallInfo, CallInfoKind};
+use crate::vm::call_info::{resolve_virtual_call, CallInfo, CallInfoKind};
 
 macro_rules! wrap_init{
     ($macro_vm:expr, $macro_java_vm:expr, $x:expr) => {
@@ -306,6 +306,7 @@ pub fn register_all_natives(registry: &mut NativeMethodRegistry){
     registry.register("java/lang/Class", "getSuperclass", "()Ljava/lang/Class;", delegate_get_super_class);
     registry.register("java/lang/Class", "getEnclosingMethod0", "()[Ljava/lang/Object;", delegate_get_enclosing_method);
     registry.register("java/lang/Class", "getDeclaringClass0", "()Ljava/lang/Class;", delegate_get_declaring_class);
+    registry.register("java/lang/Class", "getDeclaredClasses0", "()[Ljava/lang/Class;", delegate_get_declared_classes0);
     registry.register("java/lang/Class", "forName0", "(Ljava/lang/String;ZLjava/lang/ClassLoader;Ljava/lang/Class;)Ljava/lang/Class;", delegate_for_name0);
     registry.register("java/lang/Class", "isInterface", "()Z", delegate_is_interface);
     registry.register("java/lang/Class", "isArray", "()Z", delegate_is_array);
@@ -388,6 +389,8 @@ pub fn register_all_natives(registry: &mut NativeMethodRegistry){
     registry.register("java/lang/invoke/MethodHandleNatives", "resolve", "(Ljava/lang/invoke/MemberName;Ljava/lang/Class;)Ljava/lang/invoke/MemberName;", delegate_mhn_resolve);
     registry.register("java/lang/invoke/MethodHandleNatives", "getMemberVMInfo", "(Ljava/lang/invoke/MemberName;)Ljava/lang/Object;", delegate_mhn_member_vminfo);
     registry.register("java/lang/invoke/MethodHandleNatives", "init", "(Ljava/lang/invoke/MemberName;Ljava/lang/Object;)V", delegate_mhn_init);
+    registry.register("java/lang/invoke/MethodHandleNatives", "objectFieldOffset", "(Ljava/lang/invoke/MemberName;)J", delegate_mhn_field_offset);
+    registry.register("java/lang/invoke/MethodHandleNatives", "getMembers", "(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Class;I[Ljava/lang/invoke/MemberName;)I", delegate_mhn_get_members);
 }
 
 fn non_failing_some<'a>(value: Value<'a>) -> VMPartialResult<Option<Value<'a>>>{
@@ -786,6 +789,30 @@ fn delegate_get_declaring_class<'a>(vm: &VM<'a>, java_vm: &JavaVM, c: ClassRef<'
             }
         }
         non_failing_some(vm.null())
+    } else {
+        Err(VmError::ValidationError("Expected Class object".to_string()))
+    }
+}
+
+fn delegate_get_declared_classes0<'a>(vm: &VM<'a>, java_vm: &JavaVM, c: ClassRef<'a>, this: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>> {
+    if let Some(obj) = this {
+        let class = vm.extract_class_from_class_object(obj)?;
+        let mut inner = Vec::new();
+        if let Some(inner_classes) = &class.attributes.inner_classes {
+            for inner_classes_entry in inner_classes.classes.iter() {
+                if inner_classes_entry.outer_class_info_index == 0 || inner_classes_entry.inner_class_info_index == 0 {
+                    continue;
+                }
+                if let Some(ConstantPoolEntry::Class(outer_class_ref)) = class.get_or_resolve_constant(vm, inner_classes_entry.outer_class_info_index) && class.name == outer_class_ref.name {
+                    if let Some(ConstantPoolEntry::Class(inner_class_ref)) = class.get_or_resolve_constant(vm, inner_classes_entry.inner_class_info_index) {
+                        let inner_class_obj = wrap_init!(vm, java_vm, vm.new_class_object_by_class(inner_class_ref)?);
+                        inner.push(Value::Reference(inner_class_obj));
+                    }
+                }
+            }
+        }
+        let array_ref = wrap_init!(vm, java_vm, vm.new_class_array_1(inner.clone())?);
+        non_failing_some(Value::Reference(array_ref))
     } else {
         Err(VmError::ValidationError("Expected Class object".to_string()))
     }
@@ -1909,20 +1936,39 @@ fn delegate_mhn_resolve<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, _: O
         let ref_kind = flags >> REFERENCE_KIND_SHIFT;
         match flags & ALL_KINDS {
             IS_METHOD => {
-                let method_info = clazz.find_method(name.as_str(), sig.as_str()).unwrap();
-                selff.set_field(3, Value::Integer(*flags | method_info.flags as i32));
+                let call_info = match ref_kind {
+                    REF_invokeStatic => {
+                        let method_info = clazz.find_method(name.as_str(), sig.as_str()).unwrap();
+                        CallInfo::new_static(clazz, method_info)
+                    }
+                    REF_invokeInterface => {
+                        let cam = clazz.resolve_interface_method_virtual(name.as_str(), sig.as_str()).unwrap();
+                        if !cam.method.has_itable_index(){
+                            CallInfo::new_virtual(clazz, cam.class, cam.method, cam.method, cam.method.vtable_index())
+                        } else {
+                            CallInfo::new_interface(clazz, cam.class, cam.method, cam.method, cam.method.itable_index())
+                        }
+                    }
+                    REF_invokeVirtual => {
+                        resolve_virtual_call(clazz, clazz, name.as_str(), sig.as_str())
+                    }
+                    _ => unreachable!("Invalid ref_kind: {}", ref_kind)
+                };
+                member_name_init_method(vm, java_vm, selff, &call_info)?;
+                //selff.set_field(3, Value::Integer(*flags | call_info.selected_method.flags as i32));
             }
             IS_FIELD => {
-                let (_, field_info) = clazz.find_field(name.as_str()).unwrap();
+                let (vmindex, field_info, holder_id) = clazz.find_field_static(name.as_str()).unwrap();
                 selff.set_field(3, Value::Integer(*flags | field_info.flags as i32));
+                member_name_init_field(vm, java_vm, selff, field_info)?;
             }
             other => todo!("Unsupported mh type: {:b}", other)
-        }
+        };
 
         //TODO see: https://github.com/openjdk/jdk8u/blob/master/hotspot/src/share/vm/prims/methodHandles.cpp#L609
-        let vmindex = wrap_init!(vm, java_vm, vm.new_java_lang_long(Value::Long(-69420))?);
-        let prev = vm.object_payloads.borrow_mut().insert(selff.id, vec![vmindex, Value::Reference(selff)]);
-        assert!(prev.is_none());
+
+        //let prev = vm.object_payloads.borrow_mut().insert(selff.id, vec![vmindex, vmtarget]);
+        //assert!(prev.is_none());
         non_failing_some(Value::Reference(selff))
     } else {
         Err(VmError::ValidationError("Expected two references".to_string()))
@@ -1942,11 +1988,18 @@ fn delegate_mhn_member_vminfo<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>
     }
 }
 
-const IS_METHOD: i32 = 0x00010000;
+const IS_METHOD: i32      = 0x00010000;
 const IS_CONSTRUCTOR: i32 = 0x00020000;
-const IS_FIELD: i32 = 0x00040000;
-const ALL_KINDS: i32 = IS_METHOD | IS_CONSTRUCTOR | IS_FIELD;
+const IS_FIELD: i32       = 0x00040000;
+const IS_TYPE: i32        = 0x00080000;
+const ALL_KINDS: i32 = IS_METHOD | IS_CONSTRUCTOR | IS_FIELD | IS_TYPE;
 const REFERENCE_KIND_SHIFT: i32 = 24;
+
+const REF_None: i32             = 0;
+const REF_getField: i32         = 1;
+const REF_getStatic: i32        = 2;
+const putField: i32             = 3;
+const putStatic: i32            = 4;
 const REF_invokeVirtual: i32    = 5;
 const REF_invokeStatic: i32     = 6;
 const REF_invokeSpecial: i32    = 7;
@@ -1965,42 +2018,12 @@ fn delegate_mhn_init<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, _: Opti
 
                 let class_ref = vm.extract_class_from_class_object(clazz)?;
                 let method_info = class_ref.get_method_in_slot(slot as usize).unwrap();
-
-                let method_flags = method_info.flags as i32;
-                let mut flags = method_flags;
-                let mut vmindex = INVALID_VTABLE_INDEX;
                 let info = CallInfo::new(&method_info, &class_ref);
-                match info.kind {
-                    CallInfoKind::Itable => {
-                        vmindex = info.index;
-                        flags |= IS_METHOD | (REF_invokeInterface << REFERENCE_KIND_SHIFT);
-                    }
-                    CallInfoKind::Vtable => {
-                        vmindex = info.index;
-                        flags |= IS_METHOD | (REF_invokeVirtual << REFERENCE_KIND_SHIFT);
-                    }
-                    CallInfoKind::Direct => {
-                        vmindex = NONVIRTUAL_VTABLE_INDEX;
-                        if method_info.is_static() {
-                            flags |= IS_METHOD | (REF_invokeStatic << REFERENCE_KIND_SHIFT);
-                        } else if method_info.is_initializer() {
-                            flags |= IS_CONSTRUCTOR | (REF_invokeSpecial << REFERENCE_KIND_SHIFT);
-                        } else {
-                            flags |= IS_METHOD | (REF_invokeSpecial << REFERENCE_KIND_SHIFT);
-                        }
-                    }
-                    CallInfoKind::Unknown => return Err(VmError::ValidationError("Unknown CallInfo kind".to_string()))
-                }
 
-                // flags
-                mname.set_field(3, Value::Integer(flags));
-                // vmtarget
-                // vmindex
-                // FIXME this is not intended, this should be a JVM_Method*, idk how though
-                // FIXME idk what index this should represent
-                let old = vm.object_payloads.borrow_mut().insert(mname.id, vec![Value::Integer(vmindex as i32), Value::Reference(mname)]);
                 // clazz
                 mname.set_field(0, Value::Reference(clazz));
+                member_name_init_method(vm, java_vm, mname, &info)?;
+
                 non_failing_none()
             } else if target.class_name == "java/lang/reflect/Field"{
                 todo!()
@@ -2015,6 +2038,103 @@ fn delegate_mhn_init<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, _: Opti
     } else {
         Err(VmError::ValidationError("Expected MemberName and target reference".to_string()))
     }
+}
+
+fn member_name_init_method<'a>(vm: &VM<'a>, java_vm: &JavaVM, mname: Reference<'a>, info: &CallInfo<'a>) -> VMResult<()> {
+    let m = info.resolved_method;
+    let method_flags = m.flags as i32;
+    let mut flags = method_flags;
+    let mut vmindex = INVALID_VTABLE_INDEX;
+    match info.kind {
+        CallInfoKind::Itable => {
+            vmindex = info.index;
+            flags |= IS_METHOD | (REF_invokeInterface << REFERENCE_KIND_SHIFT);
+        }
+        CallInfoKind::Vtable => {
+            vmindex = info.index;
+            assert!(vmindex >= 0, "Invalid vtable index: {} in {:?}", vmindex, m);
+            flags |= IS_METHOD | (REF_invokeVirtual << REFERENCE_KIND_SHIFT);
+        }
+        CallInfoKind::Direct => {
+            vmindex = NONVIRTUAL_VTABLE_INDEX;
+            if m.is_static() {
+                flags |= IS_METHOD | (REF_invokeStatic << REFERENCE_KIND_SHIFT);
+            } else if m.is_initializer() {
+                flags |= IS_CONSTRUCTOR | (REF_invokeSpecial << REFERENCE_KIND_SHIFT);
+            } else {
+                flags |= IS_METHOD | (REF_invokeSpecial << REFERENCE_KIND_SHIFT);
+            }
+        }
+        CallInfoKind::Unknown => return Err(VmError::ValidationError("Unknown CallInfo kind".to_string()))
+    }
+
+    // flags
+    mname.set_field(3, Value::Integer(flags));
+    // vmindex
+    // vmtarget
+    let vmindex = wrap_init!(vm, java_vm, vm.new_java_lang_long(Value::Long(vmindex as i64))?);
+    let old = vm.object_payloads.borrow_mut().insert(mname.id, vec![vmindex, Value::Reference(mname)]);
+    Ok(())
+}
+
+fn member_name_init_field<'a>(vm: &VM<'a>, java_vm: &JavaVM, mname: Reference<'a>, field_info: &FieldInfo) -> VMResult<()> {
+    let mut flags = field_info.flags as i32;
+    flags |= IS_FIELD | ((if field_info.is_static() { REF_getStatic } else { REF_getField } ) << REFERENCE_KIND_SHIFT);
+    //TODO add support for setters
+
+    let clazz = vm.find_class_by_id(field_info.holder_id).unwrap();
+    let vmtarget = wrap_init!(vm, java_vm, vm.new_class_object_by_class(clazz)?);
+    let slot = field_info.slot as i32;
+    let vmindex = wrap_init!(vm, java_vm, vm.new_java_lang_long(Value::Long(slot as i64))?);
+    let old = vm.object_payloads.borrow_mut().insert(mname.id, vec![vmindex, Value::Reference(vmtarget)]);
+
+    // flags
+    mname.set_field(3, Value::Integer(flags));
+    Ok(())
+}
+
+fn delegate_mhn_field_offset<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>> {
+    if let Some(Value::Reference(mname)) = args.get(0) {
+        if !mname.is_null() && let Some(payload) = vm.object_payloads.borrow().get(&mname.id) {
+            // flags
+            let flags = mname.get_field(3).expect_int()?;
+            if flags & IS_FIELD != 0 && flags & FieldFlag::Static as i32 == 0 {
+                non_failing_some(vm.extract_long(payload[0].clone())?)
+            } else {
+                Err(VmError::ValidationError("member name does not represent a non-static field".to_string()))
+            }
+        } else {
+            Err(VmError::ValidationError("member name is null or has no payload".to_string()))
+        }
+    } else {
+        Err(VmError::ValidationError(format!("expected member name reference but got: {:?}", args)))
+    }
+}
+
+fn delegate_mhn_get_members<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>> {
+    if let (
+        Some(Value::Reference(clazz_ref)),
+        Some(Value::Reference(name_ref)),
+        Some(Value::Reference(sig_ref)),
+        Some(Value::Integer(m_flags)),
+        Some(Value::Reference(caller_ref)),
+        Some(Value::Integer(skip)),
+        Some(Value::Reference(results_ref)),
+    ) = (args.get(0), args.get(1), args.get(2), args.get(3), args.get(4), args.get(5), args.get(6)) {
+        if clazz_ref.is_null() || results_ref.is_null() {
+            return non_failing_some(Value::Integer(-1))
+        }
+        let clazz = vm.extract_class_from_class_object(clazz_ref)?;
+        if name_ref.is_null() || sig_ref.is_null() {
+            return non_failing_some(Value::Integer(0));
+        }
+        let name = VM::extract_string_from_object(&Value::Reference(name_ref))?;
+        let sig = VM::extract_string_from_object(&Value::Reference(sig_ref))?;
+        let caller = vm.extract_class_from_class_object(caller_ref)?;
+        todo!()
+    }
+
+    todo!()
 }
 
 /*

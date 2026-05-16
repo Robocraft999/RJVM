@@ -5,7 +5,7 @@ use crate::class_file::field_info::{native_escape, native_escaped_descriptor};
 use crate::class_file::fields::field_type::FieldType;
 use crate::class_file::fields::FieldInfo;
 use crate::class_file::methods::descriptor::MethodDescriptor;
-use crate::class_file::methods::MethodInfo;
+use crate::class_file::methods::{MethodInfo, ITABLE_INDEX_MAX, NONVIRTUAL_VTABLE_INDEX, PENDING_ITABLE_INDEX};
 use crate::vm::value::Value;
 use crate::vm::{ProgramCounter, VmError};
 use crate::vm::VM;
@@ -173,6 +173,99 @@ impl<'a> Class<'a>{
             self.superclass.and_then(|superclass| superclass.field_at_index(index))
         } else {
             self.fields.get(index - self.first_field_index)
+        }
+    }
+
+
+    pub fn init_vtable(&mut self) {
+        for i in 0..self.methods.len(){
+            let needs_vtable_entry = self.needs_vtable_entry(i);
+            if needs_vtable_entry {
+                let method = self.methods.get_mut(i).unwrap();
+                method.vtable_index = method.slot as isize;
+            }
+        }
+    }
+
+    fn needs_vtable_entry(&mut self, index: usize) -> bool {
+        let is_final = self.is_final();
+        let is_interface = self.is_interface();
+        let super_class = self.superclass.clone();
+
+        let mut allocate_new: bool = true;
+
+        let mut target_method = self.methods.get_mut(index).unwrap();
+
+        // TODO account for default methods
+        target_method.vtable_index = NONVIRTUAL_VTABLE_INDEX;
+
+        if target_method.is_static() || target_method.name == "<init>"{
+            return false;
+        }
+
+        if target_method.is_final() || is_final{
+            allocate_new = false;
+        } else if is_interface {
+            allocate_new = false;
+            if !target_method.has_itable_index() {
+                target_method.vtable_index = PENDING_ITABLE_INDEX;
+            }
+        }
+
+        if !super_class.is_some() {
+            return allocate_new;
+        }
+
+        if target_method.is_private() {
+            return allocate_new;
+        }
+
+        // https://github.com/openjdk/jdk8u/blob/master/hotspot/src/share/vm/oops/klassVtable.cpp#L341
+        let super_class = super_class.unwrap();
+        // FIXME only works one layer deep
+        for super_method in super_class.methods.iter() {
+            if target_method == super_method {
+                if !super_method.is_private() && true /* is_override */ {
+                    if !target_method.is_package_private() {
+                        allocate_new = false;
+                    }
+
+                    target_method.vtable_index = target_method.slot as isize;
+                }
+            }
+        }
+
+        allocate_new
+    }
+
+    pub fn init_itable(&mut self) {
+
+        // assign_itable_indices_for_interface
+        if self.is_interface() {
+            for target_method in self.methods.iter_mut(){
+                // interface_method_needs_itable_index
+                if !target_method.is_static() && !target_method.is_initializer() {
+                    if !target_method.has_vtable_index() {
+                        assert_eq!(target_method.vtable_index, PENDING_ITABLE_INDEX);
+                        target_method.vtable_index = ITABLE_INDEX_MAX - target_method.slot as isize;
+                    }
+                }
+            }
+            return;
+        }
+        let interfaces = self.interfaces.clone();
+        for interface in interfaces.iter() {
+            for interface_method in interface.methods.iter() {
+                if interface_method.has_itable_index() {
+                    //let cam = self.resolve_interface_method_virtual(interface_method.name.as_str(), interface_method.descriptor.as_str()).unwrap();
+                    // FIXME only one layer deep
+                    for target_method in self.methods.iter_mut(){
+                        if target_method == interface_method {
+                            target_method.vtable_index = ITABLE_INDEX_MAX - target_method.slot as isize;
+                        }
+                    }
+                }
+            }
         }
     }
 }

@@ -25,7 +25,9 @@ pub struct MethodInfo{
 }
 
 pub const ITABLE_INDEX_MAX: isize = -10;
+pub const PENDING_ITABLE_INDEX: isize = -9;
 pub const INVALID_VTABLE_INDEX: isize = -4;
+pub const GARBAGE_VTABLE_INDEX: isize = -3;
 pub const NONVIRTUAL_VTABLE_INDEX: isize = -2;
 
 impl MethodInfo{
@@ -49,8 +51,15 @@ impl MethodInfo{
         self.flags & MethodFlag::Final as u16 > 0
     }
 
+    pub fn is_public(&self) -> bool { self.flags & MethodFlag::Public as u16 > 0 }
+    pub fn is_private(&self) -> bool {
+        self.flags & MethodFlag::Private as u16 > 0
+    }
+    pub fn is_protected(&self) -> bool { self.flags & MethodFlag::Protected as u16 > 0 }
+    pub fn is_package_private(&self) -> bool { !self.is_private() && !self.is_public() && !self.is_protected() }
+
     pub fn is_initializer(&self) -> bool {
-        self.name == "<init>" && self.descriptor.return_type.is_none()
+        (self.name == "<init>" || self.name == "<clinit>") && self.descriptor.return_type.is_none()
     }
 
     pub fn has_exception_handler(&self) -> bool {

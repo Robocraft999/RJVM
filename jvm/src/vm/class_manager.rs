@@ -5,7 +5,7 @@ use crate::class_file::fields::field_type::{extract_component_type_from_array_cl
 use crate::class_file::fields::{primitive_to_wrapper_name, FieldInfo};
 use crate::class_file::methods::attributes::{CodeAttributes, MethodInfoAttributes};
 use crate::class_file::methods::descriptor::MethodDescriptor;
-use crate::class_file::methods::{MethodInfo, ITABLE_INDEX_MAX};
+use crate::class_file::methods::{MethodInfo, GARBAGE_VTABLE_INDEX, ITABLE_INDEX_MAX};
 use crate::class_file::nom::parse_class_file;
 use crate::error::ClassParseError;
 use crate::vm::class::{ArrayInfo, Class, ClassAndField, ClassAndMethod, ClassId, ClassRef};
@@ -176,9 +176,10 @@ impl<'a> ClassManager<'a>{
             None => 0,
         };
         class.fields = parsed_class.fields.iter()
-            .map(|raw_field| (raw_field, class.get_or_resolve_constant(&vm, raw_field.name_index), class.get_or_resolve_constant(&vm, raw_field.descriptor_index)))
+            .enumerate()
+            .map(|(i, raw_field)| (i, raw_field, class.get_or_resolve_constant(&vm, raw_field.name_index), class.get_or_resolve_constant(&vm, raw_field.descriptor_index)))
             .map(|optional| match optional {
-                (raw_field, Some(ConstantPoolEntry::Utf8(name)), Some(ConstantPoolEntry::Utf8(descriptor))) => {
+                (i, raw_field, Some(ConstantPoolEntry::Utf8(name)), Some(ConstantPoolEntry::Utf8(descriptor))) => {
                     let mut field_attributes = FieldInfoAttributes::default();
                     for ra in raw_field.attributes.iter(){
                         if let Some(ConstantPoolEntry::Utf8(name)) = class.get_or_resolve_constant(&vm, ra.attribute_name_index){
@@ -190,6 +191,8 @@ impl<'a> ClassManager<'a>{
                         name,
                         attributes: field_attributes,
                         field_type,
+                        slot: i + super_class_field_count,
+                        holder_id: class.id,
                         flags: raw_field.access_flags,
                     })
                 }
@@ -222,16 +225,11 @@ impl<'a> ClassManager<'a>{
                     }
                     let descriptor = MethodDescriptor::new(descriptor);
                     let code_blocks = method_attributes.code.clone().map(|c| bytecode::get_blocks(&c.code));
-                    let vtable_index = if class.is_interface(){
-                        ITABLE_INDEX_MAX - i as isize
-                    } else {
-                        i as isize
-                    };
                     Some(MethodInfo{
                         name,
                         descriptor,
-                        slot: i,
-                        vtable_index,
+                        slot: i+1,
+                        vtable_index: GARBAGE_VTABLE_INDEX,
                         attributes: method_attributes,
                         is_holder_interface: class.is_interface(),
                         code_blocks,
@@ -242,6 +240,9 @@ impl<'a> ClassManager<'a>{
             })
             .try_collect::<Vec<MethodInfo>>()
             .ok_or(VmError::ParseError(ClassParseError::ConstantPoolError(format!("Method of class '{}' could not be loaded.", class.name))))?;
+
+        class.init_vtable();
+        class.init_itable();
 
         Ok(class)
     }

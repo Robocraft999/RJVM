@@ -1,5 +1,7 @@
+use crate::access_flags::FieldFlag;
 use crate::class_file::fields::attributes::FieldInfoAttributes;
 use crate::class_file::fields::field_type::{FieldType, PrimitiveType};
+use crate::vm::class::ClassId;
 
 pub mod attributes;
 pub mod field_type;
@@ -9,7 +11,15 @@ pub struct FieldInfo{
     pub flags: u16,
     pub name: String,
     pub field_type: FieldType,
-    pub attributes: FieldInfoAttributes
+    pub slot: usize,
+    pub holder_id: ClassId,
+    pub attributes: FieldInfoAttributes,
+}
+
+impl FieldInfo {
+    pub fn is_static(&self) -> bool {
+        self.flags & FieldFlag::Static as u16 > 0
+    }
 }
 
 

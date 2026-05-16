@@ -489,6 +489,15 @@ impl<'a> VM<'a>{
         Ok(VMResultType::Successful(Value::Reference(long)))
     }
 
+    pub fn extract_long(&self, value: Value<'a>) -> VMResult<Value<'a>> {
+        if let Value::Reference(long_ref) = value && long_ref.class_name == "java/lang/Long" {
+            let value = long_ref.get_field(4).expect_long()?;
+            Ok(Value::Long(value))
+        } else {
+            Err(VmError::ValidationError("expected a long reference".to_string()))
+        }
+    }
+
     pub fn extract_class_from_class_object(&self, object: Reference<'a>) -> VMResult<ClassRef<'a>>{
         let name_object = object.get_field(5);
         let name = VM::extract_string_from_object(&name_object)?;
