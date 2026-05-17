@@ -247,8 +247,8 @@ impl<'a> ClassManager<'a>{
         Ok(class)
     }
     
-    // Use this carefully! The is no ClassRef for this id
-    pub fn get_primitive_class(&self, vm: &VM<'a>, name: &str) -> ClassId{
+    /// Use this carefully! The is no ClassRef for this id
+    pub fn get_primitive_class(&self, vm: &VM<'a>, name: &str) -> ClassId {
         if !self.primitive_class_ids.borrow().contains_key(name){
             let id = *self.next_id.borrow();
             *self.next_id.borrow_mut() += 1;
@@ -288,7 +288,12 @@ impl<'a> ClassManager<'a>{
 
     fn try_create_array_class(&self, class_name: &str) -> VMResult<(String, Option<ArrayInfo>)>{
         if let Ok((component_type, dims)) = extract_component_type_from_array_class(class_name){
-            let new_class_name = component_type.to_class_name();
+            let new_class_name = if component_type.is_primitive() {
+                // 私はこれがすきじゃないです
+                primitive_to_wrapper_name(component_type.to_class_name().as_str())
+            } else {
+                component_type.to_class_name()
+            };
             info!("{}", new_class_name);
             let array_info = ArrayInfo{
                 dims,

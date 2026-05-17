@@ -31,6 +31,7 @@ use crate::{get_or_init, get_or_init_special};
 use class_manager::ClassManager;
 use class_path::ClassPath;
 use value::Value;
+use crate::class_file::fields::primitive_to_wrapper_name;
 
 pub mod class_path;
 pub mod class_path_entry;
@@ -103,6 +104,7 @@ impl<'a> VM<'a>{
         self.invoke_frames_until(java_vm, current_index)
     }
 
+    /// Returns only Err() or Ok(Successful())
     pub fn invoke_frames_until(&self, java_vm: &JavaVM, stop_index: isize) -> VMPartialResult<Option<Value<'a>>> {
         loop {
             let frame_amount = self.call_stack.len();
@@ -322,7 +324,7 @@ impl<'a> VM<'a>{
         let class = self.get_or_resolve_class(class_name.as_str())?;
         let obj = self.object_allocator.allocate_array(class, dims, *component_type, content);
         self.objects_by_id.borrow_mut().insert(obj.id, obj);
-        self.debug_helper.tracker.push_object_event(obj.id, format!("Array ({}) allocated", class.name));
+        self.debug_helper.tracker.push_object_event(obj.id, format!("Array allocated:   \n{:?}", obj));
         Ok(VMResultType::Successful(obj))
         /*get_or_init_special!(self.get_or_initialize_class(class_name.as_str())?,
             |class| {
@@ -360,8 +362,8 @@ impl<'a> VM<'a>{
         }
     }
 
-    pub fn try_new_class_object(&self, class_name: &str, class_id: ClassId) -> VMResult<Reference<'a>>{
-        let result = self.new_class_object(class_name, class_id)?;
+    pub fn try_new_class_object(&self, class: ClassRef<'a>) -> VMResult<Reference<'a>>{
+        let result = self.new_class_object_by_class(class)?;
         if let VMResultType::Successful(object) = result {
             Ok(object)
         } else {
@@ -412,7 +414,7 @@ impl<'a> VM<'a>{
     }
 
     // FIXME use only ClassRef instead
-    pub fn new_class_object(&self, class_name: &str, class_id: ClassId) -> VMPartialResult<Reference<'a>>{
+    fn new_class_object(&self, class_name: &str, class_id: ClassId) -> VMPartialResult<Reference<'a>>{
         if !self.class_objects.borrow().contains_key(&class_id){
             let class_object = get_or_init!(self.new_object("java/lang/Class")?);
             let string_object = get_or_init!(self.new_string_object(class_name.replace("/", ".").as_str())?);
@@ -427,15 +429,23 @@ impl<'a> VM<'a>{
         }
     }
 
-    pub fn new_class_object_by_class(&self, class: ClassRef<'a>) -> VMPartialResult<Reference<'a>>{
-        let class_id = class.id;
-        let class_name = class.name.as_str();
-        self.new_class_object(class_name, class_id)
+    pub fn new_class_object_by_name(&self, class_name: &str) -> VMPartialResult<Reference<'a>> {
+        let class = self.get_or_resolve_class(class_name)?;
+        self.new_class_object(class_name, class.id)
     }
 
-    pub fn new_class_object_by_name(&self, class_name: &str) -> VMPartialResult<Reference<'a>> {
-        let class_id = self.get_or_resolve_class(class_name)?.id;
-        self.new_class_object(class_name, class_id)
+    pub fn new_class_object_by_class(&self, class: ClassRef<'a>) -> VMPartialResult<Reference<'a>> {
+        self.new_class_object(class.name.as_str(), class.id)
+    }
+
+    pub fn new_class_object_from_field_type(&self, field_type: &FieldType) -> VMPartialResult<Reference<'a>> {
+        let class_name = field_type.to_class_name();
+        if field_type.is_primitive() {
+            let class_id = self.class_manager.get_primitive_class(self, class_name.as_str());
+            self.new_class_object(class_name.as_str(), class_id)
+        } else {
+            self.new_class_object_by_name(class_name.as_str())
+        }
     }
 
     pub fn new_method_type(&self, java_vm: &JavaVM, descriptor: &MethodDescriptor) -> VMPartialResult<Option<Value<'a>>> {
@@ -443,12 +453,24 @@ impl<'a> VM<'a>{
 
         let mut b_args_classes = Vec::new();
         for ft in &descriptor.args{
-            let class_ref = get_or_init!(self.new_class_object_by_name(ft.to_class_name().as_str())?);
+            /*let class_name = if ft.is_primitive() {
+                primitive_to_wrapper_name(ft.to_class_name().as_str())
+            } else {
+                ft.to_class_name()
+            };
+            let class_ref = get_or_init!(self.new_class_object_by_name(class_name.as_str())?);*/
+            let class_ref = get_or_init!(self.new_class_object_from_field_type(ft)?);
             b_args_classes.push(Value::Reference(class_ref));
         }
-        let b_ret_type_class_name = descriptor.return_type.clone().map(|ft| ft.to_class_name());
-        let b_ret_type = if let Some(name) = b_ret_type_class_name{
-            Value::Reference(get_or_init!(self.new_class_object_by_name(name.as_str())?))
+        let b_ret_type_class_name = descriptor.return_type.clone();
+        let b_ret_type = if let Some(ft) = b_ret_type_class_name{
+            /*let class_name = if ft.is_primitive() {
+                primitive_to_wrapper_name(ft.to_class_name().as_str())
+            } else {
+                ft.to_class_name()
+            };
+            Value::Reference(get_or_init!(self.new_class_object_by_name(class_name.as_str())?))*/
+            Value::Reference(get_or_init!(self.new_class_object_from_field_type(&ft)?))
         } else {
             self.null()
         };
@@ -554,6 +576,28 @@ impl<'a> VM<'a>{
 
     pub fn null(&self) -> Value<'a>{
         Value::Reference(self.object_allocator.null)
+    }
+
+    /// Returns a `VMResultType::ExceptionThrown` and places the throwable into the exception slot
+    ///
+    /// `throwable_class` has to be initialized beforehand
+    ///
+    pub fn throw<T>(&self, throwable_class: ClassRef<'a>, message: String, origin: String) -> VMPartialResult<T> {
+        //let exception_class = self.get_or_initialize_class(&throwable_class_name)?;
+        let exception_object = self.new_object_from_class(throwable_class);
+
+        let details = self.try_new_string_object(message.as_str())?;
+        //detailsMessage
+        exception_object.set_field(2, Value::Reference(details));
+
+        let prev = self.caught_exception.replace(
+            Some((
+                message,
+                origin,
+                Value::Reference(exception_object)
+            )));
+        assert!(prev.is_none());
+        Ok(VMResultType::ExceptionThrown)
     }
 }
 

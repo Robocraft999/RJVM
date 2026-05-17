@@ -117,7 +117,7 @@ impl<'a> Class<'a>{
     }
 
     pub fn is_array(&self) -> bool {
-        self.name.starts_with("[")
+        self.array_info.is_some()
     }
 
     pub fn get_constant_as_value(&'a self, vm: &VM<'a>, index: u16) -> Value<'a>{
@@ -275,7 +275,6 @@ impl<'a> Debug for Class<'a>{
         f.debug_struct("Class")
             .field("id", &self.id)
             .field("name", &self.name)
-            .field("constants", &self.constants)
             .field("flags", &self.flags)
             .field("array_info", &self.array_info)
             .field("attributes", &self.attributes)

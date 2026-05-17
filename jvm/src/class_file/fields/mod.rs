@@ -22,21 +22,6 @@ impl FieldInfo {
     }
 }
 
-
-pub fn get_primitive_class(short_name: &str) -> String{
-    match short_name {
-        "Z" => "java/lang/Boolean",
-        "B" => "java/lang/Byte",
-        "C" => "java/lang/Character",
-        "S" => "java/lang/Short",
-        "I" => "java/lang/Integer",
-        "J" => "java/lang/Long",
-        "F" => "java/lang/Float",
-        "D" => "java/lang/Double",
-        _   => unreachable!("Type is not primitive")
-    }.to_string()
-}
-
 pub fn primitive_to_wrapper_name(prim_name: &str) -> String{
     match prim_name {
         "boolean" => "java/lang/Boolean",
@@ -54,14 +39,14 @@ pub fn primitive_to_wrapper_name(prim_name: &str) -> String{
 
 pub fn primitive_type_to_class_name(primitive_type: &PrimitiveType) -> String {
     match primitive_type {
-        PrimitiveType::Integer => "java/lang/Integer".to_string(),
-        PrimitiveType::Long    => "java/lang/Long".to_string(),
-        PrimitiveType::Short   => "java/lang/Short".to_string(),
-        PrimitiveType::Char    => "java/lang/Character".to_string(),
-        PrimitiveType::Byte    => "java/lang/Byte".to_string(),
-        PrimitiveType::Float   => "java/lang/Float".to_string(),
-        PrimitiveType::Double  => "java/lang/Double".to_string(),
-        PrimitiveType::Boolean => "java/lang/Boolean".to_string(),
+        PrimitiveType::Integer => "int".to_string(),
+        PrimitiveType::Long    => "long".to_string(),
+        PrimitiveType::Short   => "short".to_string(),
+        PrimitiveType::Char    => "char".to_string(),
+        PrimitiveType::Byte    => "byte".to_string(),
+        PrimitiveType::Float   => "float".to_string(),
+        PrimitiveType::Double  => "double".to_string(),
+        PrimitiveType::Boolean => "boolean".to_string(),
     }
 }
 
@@ -83,15 +68,6 @@ pub fn primitive_type_to_descriptor(primitive_type: &PrimitiveType) -> String {
 */
 pub fn get_class_descriptor(class_name: &str) -> String{
     match class_name {
-        // idk if these even appear here
-        "java/lang/Boolean" => "Z".to_string(),
-        "java/lang/Byte" => "B".to_string(),
-        "java/lang/Character" => "C".to_string(),
-        "java/lang/Short" => "S".to_string(),
-        "java/lang/Integer" => "I".to_string(),
-        "java/lang/Long" => "J".to_string(),
-        "java/lang/Float" => "F".to_string(),
-        "java/lang/Double" => "D".to_string(),
         // primitive classes
         "boolean" => "Z".to_string(),
         "byte" => "B".to_string(),

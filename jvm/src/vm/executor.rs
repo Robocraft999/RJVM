@@ -24,7 +24,7 @@ pub fn execute<'a>(vm: &VM<'a>, java_vm: &JavaVM) -> VMPartialResult<Option<Valu
     }
     info!("");
     info!("METHOD_NAME: {} at {}", class_and_method.format(), vm.call_stack.get_pc().0);
-    debug!("{:?}", class_and_method.method.code_blocks);
+    trace!("{:?}", class_and_method.method.code_blocks);
     if let Some(_) = &class_and_method.method.attributes.code{
         let mut result = execute_current_block(vm, java_vm);
         while let None = result{
@@ -137,6 +137,7 @@ pub fn execute_current_block<'a>(vm: &VM<'a>, java_vm: &JavaVM) -> Option<VMPart
                 Instruction::ISTORE(index) => wrap_error!(istore(vm, *index as usize)),
                 Instruction::LSTORE(index) => wrap_error!(lstore(vm, *index as usize)),
                 Instruction::FSTORE(index) => wrap_error!(fstore(vm, *index as usize)),
+                Instruction::DSTORE(index) => wrap_error!(dstore(vm, *index as usize)),
                 Instruction::ASTORE(index) => wrap_error!(astore(vm, *index as usize)),
 
                 Instruction::ISTORE0 => wrap_error!(istore(vm, 0)),
@@ -154,6 +155,11 @@ pub fn execute_current_block<'a>(vm: &VM<'a>, java_vm: &JavaVM) -> Option<VMPart
                 Instruction::FSTORE2 => wrap_error!(fstore(vm, 2)),
                 Instruction::FSTORE3 => wrap_error!(fstore(vm, 3)),
 
+                Instruction::DSTORE0 => wrap_error!(dstore(vm, 0)),
+                Instruction::DSTORE1 => wrap_error!(dstore(vm, 1)),
+                Instruction::DSTORE2 => wrap_error!(dstore(vm, 2)),
+                Instruction::DSTORE3 => wrap_error!(dstore(vm, 3)),
+
                 Instruction::ASTORE0 => wrap_error!(astore(vm, 0)),
                 Instruction::ASTORE1 => wrap_error!(astore(vm, 1)),
                 Instruction::ASTORE2 => wrap_error!(astore(vm, 2)),
@@ -166,6 +172,7 @@ pub fn execute_current_block<'a>(vm: &VM<'a>, java_vm: &JavaVM) -> Option<VMPart
                     let popped = vm.call_stack.pop_operand_value().unwrap();
                     debug!("XASTORE: {:?}[{}] <- {:?}", popped, index, value);
                     if let Value::Reference(array_ref) = popped{
+                        vm.debug_helper.tracker.push_object_event(array_ref.id, format!("Setting [{}] to:\n    {:?}", index, value));
                         array_ref.set_element(index as usize, value);
                     }
                 }
@@ -333,6 +340,10 @@ pub fn execute_current_block<'a>(vm: &VM<'a>, java_vm: &JavaVM) -> Option<VMPart
                 Instruction::INEG => {
                     let value = wrap_error!(vm.call_stack.pop_operand_value().unwrap().expect_int());
                     vm.call_stack.push_operand_value(Value::Integer(-value))
+                }
+                Instruction::LNEG => {
+                    let value = wrap_error!(vm.call_stack.pop_operand_value().unwrap().expect_long());
+                    vm.call_stack.push_operand_value(Value::Long(-value))
                 }
 
                 Instruction::ISHL => wrap_error!(execute_i_arithmetic(vm, |val1, val2| Ok(val1 << (val2 & 0x1f)))),
@@ -680,7 +691,25 @@ pub fn execute_current_block<'a>(vm: &VM<'a>, java_vm: &JavaVM) -> Option<VMPart
                             let method_type_ref_option = get_or_init_option!(vm.new_method_type(java_vm, &cam.method.descriptor));
 
                             if let Some(Value::Reference(method_type_ref)) = method_type_ref_option{
-                                let method_handle_option = get_or_init_option!(vm.new_method_handle(java_vm, class_and_method.class, kind, cam, method_type_ref));
+                                let caller = Value::Reference(get_or_init_option!(vm.new_class_object_by_class(class_and_method.class)));
+                                let name_obj = Value::Reference(get_or_init_option!(vm.new_string_object(cam.method.name.as_str())));
+                                let type_obj = Value::Reference(method_type_ref);
+                                let bootstrap_method_obj = get_or_init_option!(vm.new_method_handle(java_vm, class_and_method.class, kind, cam, method_type_ref)).unwrap();
+                                let info_obj = vm.null();
+                                let appendix_arr = Value::Reference(get_or_init_option!(vm.new_object_array_1(vec![vm.null()])));
+
+                                println!("schwubbel1");
+                                let helper = vm.resolve_class_method(
+                                    "java/lang/invoke/MethodHandleNatives",
+                                    "linkCallSite",
+                                    "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/invoke/MemberName;"
+                                ).unwrap();
+                                let frame_index = vm.call_stack.len() as isize - 1;
+                                vm.call_stack.create_and_push_call_frame(helper, None, vec![caller, bootstrap_method_obj, name_obj, type_obj, info_obj, appendix_arr], false);
+                                let mname = get_or_init_option!(vm.invoke_frames_until(java_vm, frame_index));
+                                println!("schwubbel2");
+
+                                let additional_args: Vec<ConstantPoolEntry> = bm.bootstrap_arguments.iter().map(|i| class_and_method.class.get_or_resolve_constant(vm, *i)).try_collect().unwrap();
                                 unimplemented!()
                             }
                         }
@@ -883,6 +912,14 @@ fn fstore(vm: &VM, index: usize) -> VMResult<()> {
     Ok(())
 }
 
+fn dstore(vm: &VM, index: usize) -> VMResult<()> {
+    let value = vm.call_stack.pop_operand_value().unwrap();
+    debug!("DSTORE{} {:?}", index, value);
+    vm.call_stack.store_local(value, index);
+    vm.call_stack.store_local(Value::Dummy, index+1);
+    Ok(())
+}
+
 fn astore(vm: &VM, index: usize) -> VMResult<()> {
     let value = vm.call_stack.pop_operand_value().unwrap();
     debug!("ASTORE{} {:?}", index, value);
@@ -1040,6 +1077,9 @@ fn execute_ji_arithmetic<F: FnOnce(i64, i32) -> Result<i64, VmError>>(vm: &VM, f
 
 fn execute_invoke<'a>(vm: &VM<'a>, index: u16, kind: InvokeKind) -> VMPartialResult<Option<Value<'a>>> {
     let calling_class_and_method = &vm.call_stack.frames.borrow().last().unwrap().class_and_method.clone();
+    // FIXME: signature polymorphic methods such as MethodHandle.invoke(Object... args) don't create an array of arguments before call.
+    // This means if calling MethodHandle.invoke() without arguments will pop 'this' as the parameter which is not needed and will cause a missing
+    // error when trying to pop the receiver after
     let cam = calling_class_and_method.get_constant_method_ref_fast(vm, index).expect("GIB MICH DIE METHODE");
     trace!("loading class to execute on: '{}'", cam.class.name.as_str());
     let class = get_or_init!(vm.get_or_initialize_class(cam.class.name.as_str())?);

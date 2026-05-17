@@ -128,6 +128,14 @@ impl FieldType {
             field_type.ok_or(VmError::ValidationError("Field type is neither object nor primitive".to_string()))
         }
     }
+    
+    pub fn is_primitive(&self) -> bool {
+        if let FieldType::Primitive(_) = self {
+            true
+        } else {
+            false
+        }
+    }
 }
 
 impl FromStr for FieldType{
