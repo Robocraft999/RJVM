@@ -172,7 +172,7 @@ unsafe fn resolve_function_args<'a>(env: *mut JNIEnv<'a>, class_and_method: &Cla
     let vm = unsafe{&*(*env).vm};
     class_and_method.method.descriptor.args.iter().flat_map(|ft| match ft{
         FieldType::Object(..) | FieldType::Array(..) => {
-            let ref_id: u32 = unsafe{raw.arg()};
+            let ref_id: u32 = unsafe{raw.next_arg()};
             {
                 let reference = vm.objects_by_id.borrow().get(&ref_id).copied().unwrap();
                 println!("NATIVE: arg for {}: {:?}", class_and_method.format(), reference);
@@ -181,19 +181,19 @@ unsafe fn resolve_function_args<'a>(env: *mut JNIEnv<'a>, class_and_method: &Cla
         }
         FieldType::Primitive(pt) => match pt{
             PrimitiveType::Boolean | PrimitiveType::Byte | PrimitiveType::Char | PrimitiveType::Integer | PrimitiveType::Short => {
-                let i: i32 = unsafe{raw.arg()};
+                let i: i32 = unsafe{raw.next_arg()};
                 vec![Value::Integer(i)]
             }
             PrimitiveType::Float => {
-                let f: f64 = unsafe{raw.arg()};
+                let f: f64 = unsafe{raw.next_arg()};
                 vec![Value::Float(f as f32)]
             }
             PrimitiveType::Double => {
-                let d: f64 = unsafe{raw.arg()};
+                let d: f64 = unsafe{raw.next_arg()};
                 vec![Value::Double(d), Value::Dummy]
             }
             PrimitiveType::Long => {
-                let l: i64 = unsafe{raw.arg()};
+                let l: i64 = unsafe{raw.next_arg()};
                 vec![Value::Long(l), Value::Dummy]
             }
         }
