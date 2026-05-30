@@ -457,17 +457,21 @@ fn delegate_set_err<'a>(vm: &VM<'a>, _: &JavaVM, class : ClassRef<'a>, _: Option
 
 // TODO real arraycopy
 fn delegate_arraycopy<'a>(vm: &VM<'a>, _: &JavaVM, _ : ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
-    if let (Some(arg0), Some(arg1), Some(arg2), Some(arg3)) = (args.get(0), args.get(1), args.get(2), args.get(3)){
-        let ref1 = arg0.expect_reference()?;
-        let src_pos = arg1.expect_int()? as usize;
-        let ref2 = arg2.expect_reference()?;
-        let dst_pos = arg3.expect_int()? as usize;
-        if let (Some(arg4), ReferenceType::Array(_, _, src), ReferenceType::Array(_, _, dst)) = (args.get(4), &ref1.reference_type, &ref2.reference_type){
-            let length = arg4.expect_int()? as usize;
+    if let (
+        Some(Value::Reference(src_ref)),
+        Some(Value::Integer(src_pos)),
+        Some(Value::Reference(dst_ref)),
+        Some(Value::Integer(dst_pos)),
+        Some(Value::Integer(length))
+    ) = (args.get(0), args.get(1), args.get(2), args.get(3), args.get(4)){
+        let src_pos = *src_pos as usize;
+        let dst_pos = *dst_pos as usize;
+        if let (ReferenceType::Array(_, _, src), ReferenceType::Array(_, _, dst)) = (&src_ref.reference_type, &dst_ref.reference_type){
+            let length = *length as usize;
             // if src and dst are the same, we must preserve the original content before we start copying.
             let src_content = src.borrow()[src_pos..src_pos + length].to_vec();
             dst.borrow_mut()[dst_pos..dst_pos+length].clone_from_slice(&src_content);
-            vm.debug_helper.tracker.push_object_event(ref2.id, format!("Arraycopy from {} [{}:{}]->[{}:{}] :\n    {:?}", ref1.id, src_pos, src_pos+length, dst_pos, dst_pos+length, ref2));
+            vm.debug_helper.tracker.push_object_event(dst_ref.id, format!("Arraycopy from {} [{}:{}]->[{}:{}] :\n    {:?}", src_ref.id, src_pos, src_pos+length, dst_pos, dst_pos+length, dst_ref));
             return non_failing_none()
         }
     }
@@ -647,10 +651,9 @@ fn delegate_get_declared_constructors0<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: Cla
                 }
             }
             // parameterTypes
-            java_constructor.set_field(CONSTRUCTOR_parameterTypes_INDEX, Value::Reference(wrap_init!(vm, java_vm, vm.new_array(1, FieldType::Object("java/lang/Class".to_string()).to_array_field_type(1), RefCell::new(parameters.clone()))?)));
-            
+            java_constructor.set_field(CONSTRUCTOR_parameterTypes_INDEX, Value::Reference(wrap_init!(vm, java_vm, vm.new_class_array_1(parameters.clone())?)));
             // exceptionTypes
-            java_constructor.set_field(CONSTRUCTOR_exceptionTypes_INDEX, Value::Reference(wrap_init!(vm, java_vm, vm.new_array(1, FieldType::Object("java/lang/Class".to_string()).to_array_field_type(1), RefCell::new(exceptions.clone()))?)));
+            java_constructor.set_field(CONSTRUCTOR_exceptionTypes_INDEX, Value::Reference(wrap_init!(vm, java_vm, vm.new_class_array_1(exceptions.clone())?)));
 
             // modifiers
             java_constructor.set_field(CONSTRUCTOR_modifiers_INDEX, Value::Integer(constructor.flags as i32));
@@ -708,10 +711,10 @@ fn delegate_get_declared_methods0<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef
             java_method.set_field(METHOD_returnType_INDEX, return_type);
 
             // parameterTypes
-            java_method.set_field(METHOD_parameterTypes_INDEX, Value::Reference(wrap_init!(vm, java_vm, vm.new_array(1, FieldType::Object("java/lang/Class".to_string()).to_array_field_type(1), RefCell::new(parameters.clone()))?)));
+            java_method.set_field(METHOD_parameterTypes_INDEX, Value::Reference(wrap_init!(vm, java_vm, vm.new_class_array_1(parameters.clone())?)));
 
             // exceptionTypes
-            java_method.set_field(METHOD_exceptionTypes_INDEX, Value::Reference(wrap_init!(vm, java_vm, vm.new_array(1, FieldType::Object("java/lang/Class".to_string()).to_array_field_type(1), RefCell::new(exceptions.clone()))?)));
+            java_method.set_field(METHOD_exceptionTypes_INDEX, Value::Reference(wrap_init!(vm, java_vm, vm.new_class_array_1(exceptions.clone())?)));
 
             // modifiers
             java_method.set_field(METHOD_modifiers_INDEX, Value::Integer(method.flags as i32));
@@ -835,7 +838,6 @@ fn delegate_for_name0<'a>(vm: &VM<'a>, java_vm: &JavaVM,  _: ClassRef<'a>, _: Op
     if let Some(name) = args.get(0) && !name.is_null(){
         let name = VM::extract_string_from_object(&name)?;
         let name = name.replace(".", "/");
-        let current_frame_index = vm.call_stack.len() as isize -1;
         match vm.get_or_resolve_class(&name){
             Ok(..) => {
                 non_failing_some(Value::Reference(wrap_init!(vm, java_vm, vm.new_class_object_by_name(&name)?)))
@@ -850,30 +852,30 @@ fn delegate_for_name0<'a>(vm: &VM<'a>, java_vm: &JavaVM,  _: ClassRef<'a>, _: Op
     }
 }
 
-fn delegate_is_interface<'a>(vm: &VM<'a>, java_vm: &JavaVM,  _: ClassRef<'a>, obj: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
-    debug!("isInterface {:?}", obj);
-    if let Some(obj) = obj {
-        let class = vm.extract_class_from_class_object(obj)?;
-        non_failing_some(Value::from(class.is_interface()))
+fn delegate_is_interface<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, class_ref: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
+    debug!("isInterface {:?}", class_ref);
+    if let Some(class_ref) = class_ref {
+        let clazz = vm.extract_class_from_class_object(class_ref)?;
+        non_failing_some(Value::from(clazz.is_interface()))
     } else {
         Err(VmError::ValidationError("this is Null".to_string()))
     }
 }
 
-fn delegate_is_array<'a>(vm: &VM<'a>, _: &JavaVM,  _: ClassRef<'a>, obj: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
-    debug!("isArray {:?}", obj);
-    if let Some(clazz_obj) = obj {
-        let clazz = vm.extract_class_from_class_object(clazz_obj)?;
+fn delegate_is_array<'a>(vm: &VM<'a>, _: &JavaVM,  _: ClassRef<'a>, class_ref: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
+    debug!("isArray {:?}", class_ref);
+    if let Some(class_ref) = class_ref {
+        let clazz = vm.extract_class_from_class_object(class_ref)?;
         non_failing_some(Value::from(clazz.is_array()))
     } else {
         Err(VmError::ValidationError("this is Null".to_string()))
     }
 }
 
-fn delegate_is_primitive<'a>(vm: &VM<'a>, _: &JavaVM,  _: ClassRef<'a>, obj: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
-    debug!("isPrimitive {:?}", obj);
-    if let Some(obj) = obj {
-        let name = VM::extract_class_name_from_class_object(obj)?;
+fn delegate_is_primitive<'a>(vm: &VM<'a>, _: &JavaVM,  _: ClassRef<'a>, class_ref: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
+    debug!("isPrimitive {:?}", class_ref);
+    if let Some(class_ref) = class_ref {
+        let name = VM::extract_class_name_from_class_object(class_ref)?;
         non_failing_some(Value::Integer(match name.as_str() {
             "boolean" | "char" | "byte" | "short" | "int" | "long" | "float" | "double" | "void" => 1,
             _ => 0,
@@ -884,11 +886,11 @@ fn delegate_is_primitive<'a>(vm: &VM<'a>, _: &JavaVM,  _: ClassRef<'a>, obj: Opt
     }
 }
 
-fn delegate_is_assignable_from<'a>(vm: &VM<'a>, java_vm: &JavaVM,  _: ClassRef<'a>, obj: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
-    debug!("isAssignableFrom\nthis: {:?}\nfrom: {:?}", obj, args);
-    if let (Some(object), Some(Value::Reference(other))) = (obj, args.get(0)) {
-        let this_class = vm.extract_class_from_class_object(object)?;
-        let from_class = vm.extract_class_from_class_object(other)?;
+fn delegate_is_assignable_from<'a>(vm: &VM<'a>, java_vm: &JavaVM,  _: ClassRef<'a>, class_ref: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
+    debug!("isAssignableFrom\nthis: {:?}\nfrom: {:?}", class_ref, args);
+    if let (Some(class_ref), Some(Value::Reference(other_ref))) = (class_ref, args.get(0)) {
+        let this_class = vm.extract_class_from_class_object(class_ref)?;
+        let from_class = vm.extract_class_from_class_object(other_ref)?;
         non_failing_some(Value::from(vm.unchecked_check_if_subclass_of(this_class.name.as_str(), from_class.name.as_str())?))
     } else {
         Err(VmError::ValidationError("expected a class reference".to_string()))
@@ -968,30 +970,33 @@ fn delegate_native_lib_load<'a>(vm: &VM<'a>, java_vm: &JavaVM,  _: ClassRef<'a>,
 
 fn delegate_float_to_raw_bits<'a>(_: &VM<'a>, _: &JavaVM, _ : ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
     if let Some(Value::Float(value)) = args.get(0){
-        return non_failing_some(Value::Integer(value.to_bits() as i32))
+        non_failing_some(Value::Integer(value.to_bits() as i32))
+    } else {
+        Err(VmError::ValidationError(format!("Expected float but got: {:?}", args.get(0))))
     }
-    Err(VmError::ValidationError(format!("Expected float")))
 }
 
 fn delegate_double_to_raw_bits<'a>(_: &VM<'a>, _: &JavaVM, _ : ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
     if let Some(Value::Double(value)) = args.get(0){
-        return non_failing_some(Value::Long(value.to_bits() as i64))
+        non_failing_some(Value::Long(value.to_bits() as i64))
+    } else {
+        Err(VmError::ValidationError(format!("Expected double but got: {:?}", args.get(0))))
     }
-    Err(VmError::ValidationError(format!("Expected double")))
 }
 
 fn delegate_long_bits_to_double<'a>(_: &VM<'a>, _: &JavaVM, _ : ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
     if let Some(Value::Long(value)) = args.get(0){
-        return non_failing_some(Value::Double(f64::from_bits(*value as u64)))
+        non_failing_some(Value::Double(f64::from_bits(*value as u64)))
+    } else {
+        Err(VmError::ValidationError(format!("Expected long but got: {:?}", args.get(0))))
     }
-    Err(VmError::ValidationError(format!("Expected long")))
 }
 
-fn delegate_get_class<'a>(vm: &VM<'a>, java_vm: &JavaVM, class: ClassRef<'a>, object: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
+fn delegate_get_class<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, object: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
     //TODO check
     debug!("getClass");
     if let Some(obj) = object {
-        debug!("{} obj: {:?}", class.name, obj.class_name);
+        debug!("obj: {:?}", obj.class_name);
         let class_object = wrap_init!(vm, java_vm, vm.new_class_object_by_name(obj.class_name.as_str())?);
         non_failing_some(Value::Reference(class_object))
     } else {
@@ -1014,28 +1019,21 @@ fn delegate_hashcode<'a>(_: &VM<'a>, _: &JavaVM, _: ClassRef<'a>, reference: Opt
 fn delegate_clone<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, reference: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
     debug!("clone");
     if let Some(obj) = reference{
-        if obj.is_array(){
-            if let ReferenceType::Array(dims, component_type, content) = &obj.reference_type{
+        match &obj.reference_type {
+            ReferenceType::Array(dims, component_type, content) => {
                 debug!("Cloning array: {:?}", reference);
                 let new_array = wrap_init!(vm, java_vm, vm.new_array(*dims, component_type.clone().to_array_field_type(*dims), content.clone())?);
                 vm.debug_helper.tracker.push_object_event(new_array.id, format!("Cloned from:\n    {:?}", obj));
                 non_failing_some(Value::Reference(new_array))
-            } else {
-                Err(VmError::ValidationError("Expected array to be cloned".to_string()))
             }
-        } else {
-            if let ReferenceType::Object(content) = &obj.reference_type{
+            ReferenceType::Object(content) => {
                 debug!("Cloning object: {:?}", reference);
                 let mut new_object = wrap_init!(vm, java_vm, vm.new_object(obj.class_name.as_str())?);
                 vm.debug_helper.tracker.push_object_event(new_object.id, format!("Cloned from:\n    {:?}", obj));
                 if let ReferenceType::Object(new_content) = &new_object.reference_type{
-                    for (index, item) in content.borrow().iter().enumerate(){
-                        new_content.borrow_mut().insert(index, item.clone());
-                    }
+                    let _ = new_content.replace(content.borrow().clone());
                 }
                 non_failing_some(Value::Reference(new_object))
-            } else {
-                Err(VmError::ValidationError("Expected array to be cloned".to_string()))
             }
         }
     } else {
@@ -1043,15 +1041,16 @@ fn delegate_clone<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, reference:
     }
 }
 
-fn delegate_fill_in_stacktrace<'a>(_: &VM<'a>, _: &JavaVM, _ : ClassRef<'a>, object: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
-    if let Some(receiver) = object{
-        return non_failing_some(Value::Reference(receiver));
+fn delegate_fill_in_stacktrace<'a>(_: &VM<'a>, _: &JavaVM, _ : ClassRef<'a>, throwable_ref: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
+    if let Some(throwable_ref) = throwable_ref{
+        non_failing_some(Value::Reference(throwable_ref))
+    } else {
+        Err(VmError::ValidationError("Expected a Throwable".to_string()))
     }
-    Err(VmError::ValidationError("Expected a Throwable".to_string()))
 }
 
-fn delegate_stack_trace_depth<'a>(_: &VM<'a>, _: &JavaVM, _ : ClassRef<'a>, object: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
-    if let Some(obj) = object{
+fn delegate_stack_trace_depth<'a>(_: &VM<'a>, _: &JavaVM, _ : ClassRef<'a>, throwable_ref: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
+    if let Some(throwable_ref) = throwable_ref{
         non_failing_some(Value::Integer(0))
     } else {
         Err(VmError::ValidationError("Expected a Throwable".to_string()))
@@ -1083,13 +1082,12 @@ fn delegate_address_size<'a>(_: &VM<'a>, _: &JavaVM, _ : ClassRef<'a>, _: Option
 fn delegate_object_field_offset<'a>(vm: &VM<'a>, java_vm: &JavaVM, _ : ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
     //FIXME calc real offset
     debug!("delegate_object_field_offset: '{:?}'", args);
-    if let Some(field) = args.get(0){
-        let field_ref = field.expect_reference()?;
-        let clazz = field_ref.get_field(FIELD_clazz_INDEX).expect_reference()?;
-        let class_ref = vm.extract_class_from_class_object(clazz)?;
+    if let Some(Value::Reference(field_ref)) = args.get(0){
+        let class_ref = field_ref.get_field(FIELD_clazz_INDEX).expect_reference()?;
+        let clazz = vm.extract_class_from_class_object(class_ref)?;
         let name_val = field_ref.get_field(FIELD_name_INDEX);
         let name = VM::extract_string_from_object(&name_val)?;
-        if let Some((index, _)) = class_ref.find_field(name.as_str()){
+        if let Some((index, _)) = clazz.find_field(name.as_str()){
             non_failing_some(Value::Long(index as i64))
         } else {
             Err(VmError::ValidationError(format!("Field with name: '{}' does not exist", name)))
@@ -1258,7 +1256,7 @@ fn delegate_put_ordered_object<'a>(vm: &VM<'a>, java_vm: &JavaVM, _ : ClassRef<'
     debug!("put_ordered_object args: {:?}", args);
     if let (Some(Value::Reference(o)), Some(Value::Long(index)), Some(x)) = (args.get(0), args.get(1), args.get(3)) {
         if o.is_array(){
-            o.set_element(*index as usize  - 16, x.clone());
+            o.set_element(*index as usize - ARRAY_BASE_OFFSET, x.clone());
             return non_failing_none();
         }
         if o.class_name == "java/lang/Class"{
@@ -1276,15 +1274,14 @@ fn delegate_put_ordered_object<'a>(vm: &VM<'a>, java_vm: &JavaVM, _ : ClassRef<'
 }
 
 fn delegate_define_class<'a>(vm: &VM<'a>, java_vm: &JavaVM, _ : ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
-    if let (Some(class_name_value), Some(Value::Reference(bytes_value)), Some(start), Some(end)) = (args.get(0), args.get(1), args.get(2), args.get(3)) {
+    if let (Some(class_name_value), Some(Value::Reference(bytes_value)), Some(Value::Integer(start)), Some(Value::Integer(end))) = (args.get(0), args.get(1), args.get(2), args.get(3)) {
         let class_name = VM::extract_string_from_object(class_name_value)?;
         let bytes = if let ReferenceType::Array(_, _, data) = &bytes_value.reference_type{
             data.borrow().iter().map(|val| if let Value::Integer(byte) = val {*byte as u8} else {0}).collect()
         } else {
             Vec::new()
         };
-        let (start, end) = (start.expect_int()?, end.expect_int()?);
-        let bytes = bytes.into_iter().skip(start as usize).take((end - start) as usize).collect::<Vec<_>>();
+        let bytes = bytes.into_iter().skip(*start as usize).take((*end - *start) as usize).collect::<Vec<_>>();
         let class_object = wrap_init!(vm, java_vm, vm.define_class(class_name.as_str(), bytes.clone())?);
         non_failing_some(Value::Reference(class_object))
     } else {
@@ -1319,8 +1316,8 @@ fn delegate_define_anon_class<'a>(vm: &VM<'a>, java_vm: &JavaVM, _ : ClassRef<'a
 }
 
 fn delegate_allocate_instance<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
-    if let Some(Value::Reference(class_object)) = args.get(0){
-        let class_name = VM::extract_class_name_from_class_object(class_object)?;
+    if let Some(Value::Reference(class_ref)) = args.get(0){
+        let class_name = VM::extract_class_name_from_class_object(class_ref)?;
         let object = wrap_init!(vm, java_vm, vm.new_object(class_name.as_str())?);
         non_failing_some(Value::Reference(object))
     } else {
@@ -1329,8 +1326,8 @@ fn delegate_allocate_instance<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>
 }
 
 fn delegate_should_be_initialized<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
-    if let Some(Value::Reference(class_object)) = args.get(0){
-        let clazz = vm.extract_class_from_class_object(class_object)?;
+    if let Some(Value::Reference(class_ref)) = args.get(0){
+        let clazz = vm.extract_class_from_class_object(class_ref)?;
         let initialized = vm.class_manager.expect_class_state(clazz.id, ClassLoadingState::INITIALIZED);
         non_failing_some(Value::from(!initialized))
     } else {
@@ -1339,8 +1336,8 @@ fn delegate_should_be_initialized<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef
 }
 
 fn delegate_ensure_initialized<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
-    if let Some(Value::Reference(class_object)) = args.get(0){
-        let class_name = VM::extract_class_name_from_class_object(class_object)?;
+    if let Some(Value::Reference(class_ref)) = args.get(0){
+        let class_name = VM::extract_class_name_from_class_object(class_ref)?;
         let clazz = wrap_init!(vm, java_vm, vm.get_or_initialize_class(class_name.as_str())?);
         non_failing_none()
     } else {
@@ -1358,9 +1355,9 @@ fn delegate_get_caller_class<'a>(vm: &VM<'a>, java_vm: &JavaVM, class : ClassRef
 }
 
 fn delegate_get_class_access_flags<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
-    if let Some(Value::Reference(obj)) = args.get(0){
-        let class = vm.extract_class_from_class_object(obj)?;
-        let flags = class.flags as i32;
+    if let Some(Value::Reference(class_ref)) = args.get(0){
+        let clazz = vm.extract_class_from_class_object(class_ref)?;
+        let flags = clazz.flags as i32;
         non_failing_some(Value::Integer(flags))
     } else {
         Err(VmError::ValidationError("Expected Class object".to_string()))
@@ -1369,12 +1366,12 @@ fn delegate_get_class_access_flags<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRe
 
 fn delegate_current_thread<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
     if vm.current_thread.borrow().is_none(){
-        // TODO call the private contructor directly
         let thread = wrap_init!(vm, java_vm, vm.new_object("java/lang/Thread")?);
         //let thread_init = vm.resolve_class_method("java/lang/Thread", "<init>", "()V")?;
         //vm.invoke(thread_init, Some(thread), vec![])?;
         let name_string = wrap_init!(vm, java_vm, vm.new_string_object("Main")?);
 
+        // TODO call the private contructor directly
         let group_name = wrap_init!(vm, java_vm, vm.new_string_object("system")?);
         let group = wrap_init!(vm, java_vm, vm.new_object("java/lang/ThreadGroup")?);
         group.set_field(THREADGROUP_nUnstartedThreads_INDEX, Value::Integer(0));
@@ -1388,7 +1385,7 @@ fn delegate_current_thread<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, _
         thread.set_field(THREAD_name_INDEX, Value::Reference(name_string));
         thread.set_field(THREAD_priority_INDEX, Value::Integer(10));
         thread.set_field(THREAD_group_INDEX, Value::Reference(group));
-        vm.current_thread.replace(Some(thread));
+        let _ = vm.current_thread.replace(Some(thread));
         non_failing_some(Value::Reference(thread))
     } else {
         non_failing_some(Value::Reference(vm.current_thread.borrow().unwrap()))
@@ -1608,9 +1605,12 @@ fn delegate_invoke0<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, _: Optio
 }
 
 fn delegate_write_bytes<'a>(_: &VM<'a>, _: &JavaVM, _: ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
-    if let (Some(Value::Reference(bytes_ref)), Some(Value::Integer(offset)), Some(Value::Integer(amount)), Some(Value::Integer(should_append))) =
-        (args.get(0), args.get(1), args.get(2), args.get(3))
-    {
+    if let (
+        Some(Value::Reference(bytes_ref)),
+        Some(Value::Integer(offset)),
+        Some(Value::Integer(amount)),
+        Some(Value::Integer(should_append))
+    ) = (args.get(0), args.get(1), args.get(2), args.get(3)) {
         if let ReferenceType::Array(_, _, data) = &bytes_ref.reference_type{
             let data = &data.borrow()[*offset as usize..(*offset + *amount) as usize];
             let string: String = data.iter().map(|value| if let Value::Integer(int) = value { (*int as u8) as char} else { '?' }).collect();
@@ -1642,11 +1642,7 @@ fn delegate_open0<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, _: Option<
 }
 
 fn delegate_read_bytes<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, obj: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
-    if let (Some(arg0), Some(arg1), Some(arg2)) = (args.get(0), args.get(1), args.get(2)) {
-        let data = arg0.expect_reference()?;
-        let offset = arg1.expect_int()?;
-        let length = arg2.expect_int()?;
-        
+    if let (Some(Value::Reference(data_ref)), Some(Value::Integer(offset)), Some(Value::Integer(length))) = (args.get(0), args.get(1), args.get(2)) {
         let io_exception_class = wrap_init!(vm, java_vm, vm.get_or_initialize_class("java/io/IOException")?);
 
         if let Some(file_input_stream) = obj{
@@ -1658,10 +1654,10 @@ fn delegate_read_bytes<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, obj: 
                 //buffer: blen 30, o 10, length 20
                 //start = 10, end = 25 = 10 + min(30 - 10, 20 - 5)
 
-                let start = offset as usize;
-                let end = start + std::cmp::min(length as usize, content.len() - index);
+                let start = *offset as usize;
+                let end = start + std::cmp::min(*length as usize, content.len() - index);
                 //println!("start={}, end={}, length={}, readable_bytes={}", start, end, length, content.len() - index);
-                (start..end).for_each(|i| data.set_element(i, Value::Integer(content[i - start + index] as i32)));
+                (start..end).for_each(|i| data_ref.set_element(i, Value::Integer(content[i - start + index] as i32)));
 
                 let new_index = index + end - start;
                 if new_index > index{
@@ -1699,21 +1695,11 @@ fn delegate_read_bytes<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, obj: 
                     Ok(Some(Value::Integer((end - start) as i32)))
                 }*/
             } else {
-                let exception_class_name = String::from("java/io/IOException");
-                let exception_message = format!("File {} was not found", path);
-
-                let exception_object = vm.try_new_object("java/io/IOException")?;
-                let details = wrap_init!(vm, java_vm, vm.new_string_object(exception_message.as_str())?);
-                //detailsMessage
-                exception_object.set_field(2, Value::Reference(details));
-                
-                let prev = vm.caught_exception.replace(Some((
-                    exception_message,
-                    String::from("java/io/FileInputStream.readBytes([BII)I"),
-                    Value::Reference(exception_object)
-                )));
-                assert!(prev.is_none());
-                Ok(VMResultType::ExceptionThrown)
+                vm.throw(
+                    io_exception_class,
+                    format!("File {} was not found", path),
+                    String::from("java/io/FileInputStream.readBytes([BII)I")
+                )
             }
         } else {
             Err(VmError::ValidationError("Expected an object reference".to_string()))
@@ -1752,29 +1738,28 @@ const BA_DIRECTORY: i32 = 4;
 const BA_HIDDEN: i32 = 8;
 
 fn delegate_get_boolean_attribute<'a>(vm: &VM<'a>, _: &JavaVM, _: ClassRef<'a>, object: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
-    // FIXME wtf did you do. clean this up
-    let path = if let Some(Value::Reference(path_val)) = args.get(0){
+    if let Some(Value::Reference(path_val)) = args.get(0){
         let string_val = path_val.get_field(FILE_path_INDEX);
-        VM::extract_string_from_object(&string_val)?
-    } else {
-        String::new()
-    };
-    let path = Path::new(&path);
-    let mut attributes = 0;
-    if path.exists(){
-        attributes |= BA_EXISTS;
-        if path.is_dir(){
-            attributes |= BA_DIRECTORY;
+        let path = VM::extract_string_from_object(&string_val)?;
+        let path = Path::new(&path);
+        let mut attributes = 0;
+        if path.exists(){
+            attributes |= BA_EXISTS;
+            if path.is_dir(){
+                attributes |= BA_DIRECTORY;
+            }
         }
+        println!("HILFE {:?} ({}), {}", path, attributes, attributes & BA_EXISTS);
+        non_failing_some(Value::Integer(attributes))
+    } else {
+        Err(VmError::ValidationError("Expected file as parameter".to_string()))
     }
-    println!("HILFE {:?} ({}), {}", path, attributes, attributes & BA_EXISTS);
-    non_failing_some(Value::Integer(attributes))
 }
 
 fn delegate_canonicalize0<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
     debug!("canonicalize0");
-    if let Some(string) = args.get(0){
-        let path = VM::extract_string_from_object(string)?;
+    if let Some(string_val) = args.get(0){
+        let path = VM::extract_string_from_object(string_val)?;
         let path = Path::new(&path);
         let path = path.canonicalize().unwrap().into_os_string().into_string().unwrap();
         let new_path = wrap_init!(vm, java_vm, vm.new_string_object(path.as_str())?);
@@ -2128,7 +2113,7 @@ fn delegate_mhn_field_offset<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>,
 
 fn delegate_mhn_get_members<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>> {
     if let (
-        Some(Value::Reference(clazz_ref)),
+        Some(Value::Reference(class_ref)),
         Some(Value::Reference(name_ref)),
         Some(Value::Reference(sig_ref)),
         Some(Value::Integer(m_flags)),
@@ -2136,10 +2121,10 @@ fn delegate_mhn_get_members<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, 
         Some(Value::Integer(skip)),
         Some(Value::Reference(results_ref)),
     ) = (args.get(0), args.get(1), args.get(2), args.get(3), args.get(4), args.get(5), args.get(6)) {
-        if clazz_ref.is_null() || results_ref.is_null() {
+        if class_ref.is_null() || results_ref.is_null() {
             return non_failing_some(Value::Integer(-1))
         }
-        let clazz = vm.extract_class_from_class_object(clazz_ref)?;
+        let clazz = vm.extract_class_from_class_object(class_ref)?;
         if name_ref.is_null() || sig_ref.is_null() {
             return non_failing_some(Value::Integer(0));
         }
