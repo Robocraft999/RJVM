@@ -1080,15 +1080,14 @@ fn execute_invoke<'a>(vm: &VM<'a>, index: u16, kind: InvokeKind) -> VMPartialRes
     // FIXME: signature polymorphic methods such as MethodHandle.invoke(Object... args) don't create an array of arguments before call.
     // This means if calling MethodHandle.invoke() without arguments will pop 'this' as the parameter which is not needed and will cause a missing
     // error when trying to pop the receiver after
-    let cam = calling_class_and_method.get_constant_method_ref_fast(vm, index).expect("GIB MICH DIE METHODE");
+    let (cam, args_count) = get_constant_method_ref_and_args_count(calling_class_and_method, vm, index).expect("GIB MICH DIE METHODE");
     trace!("loading class to execute on: '{}'", cam.class.name.as_str());
     let class = get_or_init!(vm.get_or_initialize_class(cam.class.name.as_str())?);
-    if vm.class_manager.expect_class_state(class.id, ClassLoadingState::LOADED){
+    if vm.class_manager.expect_class_state(class.id, ClassLoadingState::LOADED) {
         unimplemented!()
     }
     trace!("loading state is: {:?}", vm.class_manager.class_loading_states.borrow().get(&class.id));
     trace!("finished loading class to execute on: '{}'", cam.class.name.as_str());
-    let args_count = cam.method.descriptor.args.len();
     trace!("args_count: {}", args_count);
     let mut args = Vec::new();
     for _ in 0..args_count{
@@ -1223,6 +1222,19 @@ fn get_method_interface_virtual<'a>(class: ClassRef<'a>, method_name: &str, desc
         } else {
             return Err(VmError::JavaException(JavaError::MethodNotFoundException(format!("{}{} in {}", method_name, descriptor, class.name))));
         }
+    }
+}
+
+fn get_constant_method_ref_and_args_count<'a>(calling: &ClassAndMethod<'a>, vm: &VM<'a>, index: u16) -> Option<(ClassAndMethod<'a>, usize)> {
+    match calling.class.get_or_resolve_constant(vm, index) {
+        Some(ConstantPoolEntry::MethodRef(cam)) | Some(ConstantPoolEntry::InterfaceMethodRef(cam)) => {
+            let args_count = cam.method.descriptor.args.len();
+            Some((cam, args_count))
+        }
+        Some(ConstantPoolEntry::MethodRefSigPoly(cam, desc)) => {
+            Some((cam, desc.args.len()))
+        }
+        _ => None
     }
 }
 

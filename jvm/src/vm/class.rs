@@ -37,7 +37,7 @@ impl<'a> Class<'a>{
     }
 
     //https://docs.oracle.com/javase/specs/jvms/se8/html/jvms-2.html#jvms-2.9
-    fn has_method_polymorphic_signature(&self, info: &MethodInfo) -> bool {
+    pub fn has_method_polymorphic_signature(&self, info: &MethodInfo) -> bool {
         info.flags & MethodFlag::Native as u16 > 0 && info.flags & MethodFlag::VarArgs as u16 > 0 &&
             info.descriptor.matches("([Ljava/lang/Object;)Ljava/lang/Object;") &&
             self.name == "java/lang/invoke/MethodHandle"
@@ -308,6 +308,7 @@ impl <'a> Class<'a>{
             ConstantPoolEntry::Class(..) |
             ConstantPoolEntry::FieldRef(..) |
             ConstantPoolEntry::MethodRef(..) |
+            ConstantPoolEntry::MethodRefSigPoly(..) |
             ConstantPoolEntry::InterfaceMethodRef(..) |
             ConstantPoolEntry::String(..) |
             ConstantPoolEntry::Integer(..) |
@@ -339,8 +340,14 @@ impl <'a> Class<'a>{
                 self.constants.borrow_mut()[index as usize - 1] = ConstantPoolEntry::FieldRef(caf);
             }
             ConstantPoolEntry::RawMethodRef(class_index, name_and_type_index) => {
-                let cam = resolve_class_and_method(&vm, &self.constants.borrow(), class_index, name_and_type_index, false)?;
-                self.constants.borrow_mut()[index as usize - 1] = ConstantPoolEntry::MethodRef(cam);
+                //let cam = resolve_class_and_method(&vm, &self.constants.borrow(), class_index, name_and_type_index, false)?;
+                let (clazz, method_name, method_descriptor) = resolve_class_and_name_and_type(vm, &self.constants.borrow(), class_index, name_and_type_index)?;
+                let cam = clazz.resolve_method_virtual(method_name.as_str(), method_descriptor.as_str()).unwrap();
+                if cam.class.has_method_polymorphic_signature(cam.method) {
+                    self.constants.borrow_mut()[index as usize - 1] = ConstantPoolEntry::MethodRefSigPoly(cam, MethodDescriptor::new(method_descriptor));
+                } else {
+                    self.constants.borrow_mut()[index as usize - 1] = ConstantPoolEntry::MethodRef(cam);
+                }
             }
             ConstantPoolEntry::RawInterfaceMethodRef(class_index, name_and_type_index) => {
                 let cam = resolve_class_and_method(&vm, &self.constants.borrow(), class_index, name_and_type_index, true)?;

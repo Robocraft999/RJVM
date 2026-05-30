@@ -154,32 +154,32 @@ impl <'a>NativeMethodRegistry<'a>{
         self.exception_in_native.replace(true);
     }
 
-    pub fn invoke(vm: &VM<'a>, java_vm: &JavaVM, class_and_method: &ClassAndMethod<'a>, object: Option<Reference<'a>>, args: Vec<Value<'a>>) -> Option<VMPartialResult<Option<Value<'a>>>>{
+    pub fn invoke(vm: &VM<'a>, java_vm: &JavaVM, cam: &ClassAndMethod<'a>, object: Option<Reference<'a>>, args: Vec<Value<'a>>) -> Option<VMPartialResult<Option<Value<'a>>>>{
         for method in &vm.native_method_registry.methods{
-            if method.method_name == class_and_method.method.name && method.method_descriptor == class_and_method.method.descriptor && class_and_method.class.name == method.class_name{
-                let needed_arg_count = class_and_method.method.descriptor.args.len();
+            if method.method_name == cam.method.name && method.method_descriptor == cam.method.descriptor && cam.class.name == method.class_name{
+                let needed_arg_count = cam.method.descriptor.args.len();
                 let provided_arg_count = args.iter().filter(|v| v != &&Value::Dummy).count();
-                info!("METHOD_NAME (custom native): {}", class_and_method.format());
-                if needed_arg_count == provided_arg_count{
-                    return Some((method.delegate)(vm, java_vm, class_and_method.class, object, args))
+                info!("METHOD_NAME (custom native): {}", cam.format());
+                if needed_arg_count == provided_arg_count || cam.class.has_method_polymorphic_signature(cam.method){
+                    return Some((method.delegate)(vm, java_vm, cam.class, object, args))
                 }
                 return Some(Err(VmError::ValidationError(format!("expected {} args but got: {}:{:?}", needed_arg_count, provided_arg_count, args))))
             }
         }
-        if vm.native_method_registry.try_resolve_extern_native(class_and_method){
-            let optional_extern = vm.native_method_registry.extern_methods.borrow().get(&class_and_method).cloned();
+        if vm.native_method_registry.try_resolve_extern_native(cam){
+            let optional_extern = vm.native_method_registry.extern_methods.borrow().get(&cam).cloned();
             if let Some(extern_native) = optional_extern {
-                let class_object_or_this = if class_and_method.method.is_static(){
-                    vm.try_new_class_object(class_and_method.class).ok()?
+                let class_object_or_this = if cam.method.is_static(){
+                    vm.try_new_class_object(cam.class).ok()?
                 } else {
                     object.unwrap()
                 };
                 println!("[try_resolve_extern_native]: {class_object_or_this:?} with args: \n{:?}", args);
-                info!("METHOD_NAME (extern native): {}", class_and_method.format());
-                let jni_result = extern_native.call(java_vm, class_and_method, class_object_or_this, args);
+                info!("METHOD_NAME (extern native): {}", cam.format());
+                let jni_result = extern_native.call(java_vm, cam, class_object_or_this, args);
                 let result = if let Some(val) = jni_result{
                     unsafe {
-                        Some(match (class_and_method.method.descriptor.return_type.clone().unwrap(), val){
+                        Some(match (cam.method.descriptor.return_type.clone().unwrap(), val){
                             (FieldType::Primitive(PrimitiveType::Boolean), jvalue { z }) => Value::Integer(z as i32),
                             (FieldType::Primitive(PrimitiveType::Byte), jvalue { b }) => Value::Integer(b as i32),
                             (FieldType::Primitive(PrimitiveType::Char), jvalue { c }) => Value::Integer(c as i32),
@@ -363,6 +363,7 @@ pub fn register_all_natives(registry: &mut NativeMethodRegistry){
     registry.register("java/security/AccessController", "doPrivileged", "(Ljava/security/PrivilegedExceptionAction;)Ljava/lang/Object;", delegate_do_privileged);
     registry.register("java/security/AccessController", "doPrivileged", "(Ljava/security/PrivilegedExceptionAction;Ljava/security/AccessControlContext;)Ljava/lang/Object;", delegate_do_privileged);
     registry.register("java/lang/String", "intern", "()Ljava/lang/String;", delegate_string_intern);
+    registry.register("java/lang/invoke/MethodHandle", "invoke", "([Ljava/lang/Object;)Ljava/lang/Object;", delegate_mh_invoke);
     registry.register("java/lang/invoke/MethodHandle", "invokeExact", "([Ljava/lang/Object;)Ljava/lang/Object;", delegate_mh_invoke_exact);
     registry.register("sun/reflect/NativeConstructorAccessorImpl", "newInstance0", "(Ljava/lang/reflect/Constructor;[Ljava/lang/Object;)Ljava/lang/Object;", delegate_new_instance0);
     registry.register("sun/reflect/NativeMethodAccessorImpl", "invoke0", "(Ljava/lang/reflect/Method;Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;", delegate_invoke0);
@@ -1457,6 +1458,19 @@ fn delegate_string_intern<'a>(vm: &VM<'a>, _: &JavaVM, _: ClassRef<'a>, object: 
         }
     } else {
         Err(VmError::ValidationError("Expected a string object reference".to_owned()))
+    }
+}
+
+fn delegate_mh_invoke<'a>(vm: &VM<'a>, _: &JavaVM, _: ClassRef<'a>, object: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>> {
+    if let Some(mh) = object {
+        // form
+        let lambda_form = mh.get_field(METHODHANDLE_form_INDEX).expect_reference()?;
+        // vmentry
+        let vmentry = lambda_form.get_field(LAMBDAFORM_vmentry_INDEX).expect_reference()?;
+        let blub = vm.object_payloads.borrow().get(&vmentry.id).unwrap();
+        unimplemented!()
+    } else {
+        Err(VmError::ValidationError("Expected a MethodHandle object reference".to_string()))
     }
 }
 
