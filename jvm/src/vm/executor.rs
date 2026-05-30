@@ -7,6 +7,7 @@ use crate::vm::jni::types::JavaVM;
 use crate::vm::result::{VMPartialResult, VMResultType};
 use crate::{bytecode::Instruction, get_or_init, get_or_init_option, vm::{bytecode::InstructionBlock, class::{ClassAndMethod, ClassRef}, java_error::JavaError, result::VMResult, value::{ReferenceType, Value}, VmError, VM}};
 use log::{debug, error, info, trace, warn};
+use crate::vm::constants::THROWABLE_detailsMessage_INDEX;
 
 macro_rules! wrap_error {
     ($res:expr) => {
@@ -771,7 +772,7 @@ pub fn execute_current_block<'a>(vm: &VM<'a>, java_vm: &JavaVM) -> Option<VMPart
                 Instruction::ATHROW => {
                     debug!("ATHROW");
                     if let Some(Value::Reference(error)) = vm.call_stack.pop_operand_value(){
-                        let string_value = error.get_field(2);
+                        let string_value = error.get_field(THROWABLE_detailsMessage_INDEX);
                         let string = if !string_value.is_null() {VM::extract_string_from_object(&string_value).unwrap()} else {String::new()};
                         let exception_name = vm.class_manager.find_class_by_id(error.class_id).unwrap().name.clone();
                         vm.debug_helper.exception_helper.push(format!("Throw   {}: {}\n└-- thrown by {} at {}", exception_name, string, class_and_method.format(), vm.call_stack.get_pc().0));

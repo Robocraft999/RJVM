@@ -26,6 +26,7 @@ use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 use crate::class_file::methods::{INVALID_VTABLE_INDEX, NONVIRTUAL_VTABLE_INDEX};
 use crate::vm::call_info::{resolve_virtual_call, CallInfo, CallInfoKind};
+use crate::vm::constants::*;
 
 macro_rules! wrap_init{
     ($macro_vm:expr, $macro_java_vm:expr, $x:expr) => {
@@ -431,7 +432,7 @@ fn delegate_identity_hash_code<'a>(_: &VM<'a>, _: &JavaVM, _ : ClassRef<'a>, _: 
 fn delegate_set_out<'a>(vm: &VM<'a>, _: &JavaVM, class : ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
     if let Some(static_object) = vm.get_static_class_object(class.id){
         if let Some(Value::Reference(object)) = args.get(0){
-            static_object.set_field(1, Value::Reference(object));
+            static_object.set_field(SYSTEM_out_INDEX, Value::Reference(object));
             non_failing_none()
         } else {
             Err(VmError::ValidationError(format!("Expected Object but found '{:?}'", args.get(0))))
@@ -444,7 +445,7 @@ fn delegate_set_out<'a>(vm: &VM<'a>, _: &JavaVM, class : ClassRef<'a>, _: Option
 fn delegate_set_err<'a>(vm: &VM<'a>, _: &JavaVM, class : ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
     if let Some(static_object) = vm.get_static_class_object(class.id){
         if let Some(Value::Reference(object)) = args.get(0){
-            static_object.set_field(2, Value::Reference(object));
+            static_object.set_field(SYSTEM_err_INDEX, Value::Reference(object));
             non_failing_none()
         } else {
             Err(VmError::ValidationError(format!("Expected Object but found '{:?}'", args.get(0))))
@@ -585,14 +586,14 @@ fn delegate_get_declared_fields0<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<
         for field in class_ref.fields.iter(){
             let java_field = wrap_init!(vm, java_vm, vm.new_object("java/lang/reflect/Field")?);
             //name
-            java_field.set_field(6, Value::Reference(wrap_init!(vm, java_vm, vm.new_string_object(field.name.as_str())?)));
+            java_field.set_field(FIELD_name_INDEX, Value::Reference(wrap_init!(vm, java_vm, vm.new_string_object(field.name.as_str())?)));
             //clazz
-            java_field.set_field(4, Value::Reference(clazz));
+            java_field.set_field(FIELD_clazz_INDEX, Value::Reference(clazz));
             //modifiers
-            java_field.set_field(8, Value::Integer(field.flags as i32));
+            java_field.set_field(FIELD_modifiers_INDEX, Value::Integer(field.flags as i32));
             //type
             let type_class_object = wrap_init!(vm, java_vm, vm.new_class_object_from_field_type(&field.field_type)?);
-            java_field.set_field(7, Value::Reference(type_class_object));
+            java_field.set_field(FIELD_type_INDEX, Value::Reference(type_class_object));
             info!("field name: {}", field.name);
             content.push(Value::Reference(java_field));
         }
@@ -623,10 +624,10 @@ fn delegate_get_declared_constructors0<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: Cla
             let java_constructor = vm.new_object_from_class(java_constructor_class);
 
             // clazz
-            java_constructor.set_field(7, Value::Reference(class_ref));
+            java_constructor.set_field(CONSTRUCTOR_clazz_INDEX, Value::Reference(class_ref));
 
             // slot
-            java_constructor.set_field(8, Value::Integer(constructor.slot as i32));
+            java_constructor.set_field(CONSTRUCTOR_slot_INDEX, Value::Integer(constructor.slot as i32));
 
             let mut parameters = Vec::new();
             for field_type in constructor.descriptor.args.iter(){
@@ -646,13 +647,13 @@ fn delegate_get_declared_constructors0<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: Cla
                 }
             }
             // parameterTypes
-            java_constructor.set_field(9, Value::Reference(wrap_init!(vm, java_vm, vm.new_array(1, FieldType::Object("java/lang/Class".to_string()).to_array_field_type(1), RefCell::new(parameters.clone()))?)));
+            java_constructor.set_field(CONSTRUCTOR_parameterTypes_INDEX, Value::Reference(wrap_init!(vm, java_vm, vm.new_array(1, FieldType::Object("java/lang/Class".to_string()).to_array_field_type(1), RefCell::new(parameters.clone()))?)));
             
             // exceptionTypes
-            java_constructor.set_field(10, Value::Reference(wrap_init!(vm, java_vm, vm.new_array(1, FieldType::Object("java/lang/Class".to_string()).to_array_field_type(1), RefCell::new(exceptions.clone()))?)));
+            java_constructor.set_field(CONSTRUCTOR_exceptionTypes_INDEX, Value::Reference(wrap_init!(vm, java_vm, vm.new_array(1, FieldType::Object("java/lang/Class".to_string()).to_array_field_type(1), RefCell::new(exceptions.clone()))?)));
 
             // modifiers
-            java_constructor.set_field(11, Value::Integer(constructor.flags as i32));
+            java_constructor.set_field(CONSTRUCTOR_modifiers_INDEX, Value::Integer(constructor.flags as i32));
 
             content.push(Value::Reference(java_constructor));
         }
@@ -671,14 +672,14 @@ fn delegate_get_declared_methods0<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef
             let java_method = wrap_init!(vm, java_vm, vm.new_object("java/lang/reflect/Method")?);
 
             // clazz
-            java_method.set_field(7, Value::Reference(class_ref));
+            java_method.set_field(METHOD_clazz_INDEX, Value::Reference(class_ref));
 
             // slot
-            java_method.set_field(8, Value::Integer(method.slot as i32));
+            java_method.set_field(METHOD_slot_INDEX, Value::Integer(method.slot as i32));
 
             let name = wrap_init!(vm, java_vm, vm.new_string_object(&method.name.as_str())?);
             // name
-            java_method.set_field(9, Value::Reference(name));
+            java_method.set_field(METHOD_name_INDEX, Value::Reference(name));
 
             let return_type = if let Some(f) = &method.descriptor.return_type{
                 Value::Reference(wrap_init!(vm, java_vm, vm.new_class_object_from_field_type(f)?))
@@ -704,16 +705,16 @@ fn delegate_get_declared_methods0<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef
             }
 
             // returnType
-            java_method.set_field(10, return_type);
+            java_method.set_field(METHOD_returnType_INDEX, return_type);
 
             // parameterTypes
-            java_method.set_field(11, Value::Reference(wrap_init!(vm, java_vm, vm.new_array(1, FieldType::Object("java/lang/Class".to_string()).to_array_field_type(1), RefCell::new(parameters.clone()))?)));
+            java_method.set_field(METHOD_parameterTypes_INDEX, Value::Reference(wrap_init!(vm, java_vm, vm.new_array(1, FieldType::Object("java/lang/Class".to_string()).to_array_field_type(1), RefCell::new(parameters.clone()))?)));
 
             // exceptionTypes
-            java_method.set_field(12, Value::Reference(wrap_init!(vm, java_vm, vm.new_array(1, FieldType::Object("java/lang/Class".to_string()).to_array_field_type(1), RefCell::new(exceptions.clone()))?)));
+            java_method.set_field(METHOD_exceptionTypes_INDEX, Value::Reference(wrap_init!(vm, java_vm, vm.new_array(1, FieldType::Object("java/lang/Class".to_string()).to_array_field_type(1), RefCell::new(exceptions.clone()))?)));
 
             // modifiers
-            java_method.set_field(13, Value::Integer(method.flags as i32));
+            java_method.set_field(METHOD_modifiers_INDEX, Value::Integer(method.flags as i32));
 
             content.push(Value::Reference(java_method));
         }
@@ -934,8 +935,8 @@ fn delegate_native_lib_load<'a>(vm: &VM<'a>, java_vm: &JavaVM,  _: ClassRef<'a>,
     debug!("nativeLib::load {:?}", object);
     if let Some(obj) = object {
         //handle
-        obj.set_field(0, Value::Long(1));
-        let name_field = obj.get_field(3);//args.get(0).unwrap();
+        obj.set_field(CLASSLOADER_NATIVELIBRARY_handle_INDEX, Value::Long(1));
+        let name_field = obj.get_field(CLASSLOADER_NATIVELIBRARY_name_INDEX);//args.get(0).unwrap();
         let name = VM::extract_string_from_object(&name_field)?;
         println!("name: {name}");
         println!("javavm: {:p}", java_vm);
@@ -957,7 +958,7 @@ fn delegate_native_lib_load<'a>(vm: &VM<'a>, java_vm: &JavaVM,  _: ClassRef<'a>,
             let res: i32 = cif.call(libffi::low::CodePtr::from_ptr(func_ptr), &[Arg::new(&vm_ptr), Arg::new(&reserved)]);
             println!("res: {:x}", res);
         }
-        obj.set_field(5, Value::from(true));
+        obj.set_field(CLASSLOADER_NATIVELIBRARY_loaded_INDEX, Value::from(true));
 
         non_failing_none()
     } else {
@@ -1084,9 +1085,9 @@ fn delegate_object_field_offset<'a>(vm: &VM<'a>, java_vm: &JavaVM, _ : ClassRef<
     debug!("delegate_object_field_offset: '{:?}'", args);
     if let Some(field) = args.get(0){
         let field_ref = field.expect_reference()?;
-        let clazz = field_ref.get_field(4).expect_reference()?;
+        let clazz = field_ref.get_field(FIELD_clazz_INDEX).expect_reference()?;
         let class_ref = vm.extract_class_from_class_object(clazz)?;
-        let name_val = field_ref.get_field(6);
+        let name_val = field_ref.get_field(FIELD_name_INDEX);
         let name = VM::extract_string_from_object(&name_val)?;
         if let Some((index, _)) = class_ref.find_field(name.as_str()){
             non_failing_some(Value::Long(index as i64))
@@ -1161,7 +1162,7 @@ fn delegate_static_field_base<'a>(_: &VM<'a>, _: &JavaVM, _: ClassRef<'a>, _: Op
     if let Some(field_object_value) = args.get(0){
         let field_object = field_object_value.expect_reference()?;
         trace!("staticFieldBase: on field: '{:?}'", field_object);
-        let class_object = field_object.get_field(4);
+        let class_object = field_object.get_field(FIELD_clazz_INDEX);
         non_failing_some(class_object)
     } else {
         Err(VmError::ValidationError("Expected a field reference".to_string()))
@@ -1368,25 +1369,25 @@ fn delegate_get_class_access_flags<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRe
 
 fn delegate_current_thread<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
     if vm.current_thread.borrow().is_none(){
+        // TODO call the private contructor directly
         let thread = wrap_init!(vm, java_vm, vm.new_object("java/lang/Thread")?);
         //let thread_init = vm.resolve_class_method("java/lang/Thread", "<init>", "()V")?;
         //vm.invoke(thread_init, Some(thread), vec![])?;
         let name_string = wrap_init!(vm, java_vm, vm.new_string_object("Main")?);
-        let name_char_array = name_string.get_field(0);
 
         let group_name = wrap_init!(vm, java_vm, vm.new_string_object("system")?);
         let group = wrap_init!(vm, java_vm, vm.new_object("java/lang/ThreadGroup")?);
-        group.set_field(6, Value::Integer(0));
-        group.set_field(1, Value::Reference(group_name));
-        group.set_field(2, Value::Integer(10));
-        group.set_field(0, vm.null());
+        group.set_field(THREADGROUP_nUnstartedThreads_INDEX, Value::Integer(0));
+        group.set_field(THREADGROUP_name_INDEX, Value::Reference(group_name));
+        group.set_field(THREADGROUP_maxPriority_INDEX, Value::Integer(10));
+        group.set_field(THREADGROUP_parent_INDEX, vm.null());
 
         //let group_init = vm.try_resolve_class_method("java/lang/ThreadGroup", "<init>", "()V")?;
         //vm.invoke_new_frame(group_init, Some(group), vec![])?;
 
-        thread.set_field(0, name_char_array);
-        thread.set_field(1, Value::Integer(10));
-        thread.set_field(8, Value::Reference(group));
+        thread.set_field(THREAD_name_INDEX, Value::Reference(name_string));
+        thread.set_field(THREAD_priority_INDEX, Value::Integer(10));
+        thread.set_field(THREAD_group_INDEX, Value::Reference(group));
         vm.current_thread.replace(Some(thread));
         non_failing_some(Value::Reference(thread))
     } else {
@@ -1395,7 +1396,8 @@ fn delegate_current_thread<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, _
 }
 
 fn delegate_is_alive<'a>(vm: &VM<'a>, _: &JavaVM, _: ClassRef<'a>, object: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
-    non_failing_some(object.unwrap().get_field(5))
+    //non_failing_some(object.unwrap().get_field(5))
+    unreachable!("FIXME")
 }
 
 fn delegate_available_processors<'a>(_: &VM<'a>, _: &JavaVM, _: ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
@@ -1483,9 +1485,9 @@ fn delegate_new_instance0<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, ob
     debug!("{:?}", args);
     if let Some(Value::Reference(constructor)) = args.get(0){
         //clazz
-        let clazz = constructor.get_field(7);
+        let clazz = constructor.get_field(CONSTRUCTOR_clazz_INDEX);
         //parameterTypes
-        let parameter_types = constructor.get_field(9);
+        let parameter_types = constructor.get_field(CONSTRUCTOR_parameterTypes_INDEX);
         if let (Value::Reference(class_ref), Value::Reference(parameter_array)) = (clazz, parameter_types){
             if let ReferenceType::Array(_, _, type_content) = &parameter_array.reference_type{
                 let class = vm.extract_class_from_class_object(class_ref)?;
@@ -1539,10 +1541,10 @@ fn delegate_invoke0<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, _: Optio
     debug!("invoke0");
     debug!("{:?}", args);
     if let (Some(Value::Reference(method)), Some(Value::Reference(obj))) = (args.get(0), args.get(1)) {
-        let clazz = method.get_field(4);
-        let method_name_val = method.get_field(6);
-        let return_type_val = method.get_field(7);
-        let parameter_types = method.get_field(8);
+        let clazz = method.get_field(METHOD_clazz_INDEX);
+        let method_name_val = method.get_field(METHOD_name_INDEX);
+        let return_type_val = method.get_field(METHOD_returnType_INDEX);
+        let parameter_types = method.get_field(METHOD_returnType_INDEX);
         if let (Value::Reference(class_ref), Value::Reference(return_type_ref), Value::Reference(parameter_array)) = (clazz, return_type_val, parameter_types) {
             if let ReferenceType::Array(_, _, type_content) = &parameter_array.reference_type {
                 let class = vm.extract_class_from_class_object(class_ref)?;
@@ -1648,7 +1650,7 @@ fn delegate_read_bytes<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, obj: 
         let io_exception_class = wrap_init!(vm, java_vm, vm.get_or_initialize_class("java/io/IOException")?);
 
         if let Some(file_input_stream) = obj{
-            let path = VM::extract_string_from_object(&file_input_stream.get_field(2))?;
+            let path = VM::extract_string_from_object(&file_input_stream.get_field(FILEINPUTSTREAM_path_INDEX))?;
 
             let existing_file = vm.currently_open_files.borrow_mut().remove(&path);
             if let Some((content, index)) = existing_file {
@@ -1734,7 +1736,7 @@ fn delegate_get_file_system<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, 
 
 fn delegate_last_modified_time<'a>(vm: &VM<'a>, _: &JavaVM, _: ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
     if let Some(Value::Reference(path_val)) = args.get(0){
-        let string_val = path_val.get_field(1);
+        let string_val = path_val.get_field(FILE_path_INDEX);
         let path = VM::extract_string_from_object(&string_val)?;
         let path = Path::new(&path);
         let last_modified = path.metadata().map(|m| m.modified().unwrap().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis() as i64).unwrap_or(0);
@@ -1750,8 +1752,9 @@ const BA_DIRECTORY: i32 = 4;
 const BA_HIDDEN: i32 = 8;
 
 fn delegate_get_boolean_attribute<'a>(vm: &VM<'a>, _: &JavaVM, _: ClassRef<'a>, object: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
+    // FIXME wtf did you do. clean this up
     let path = if let Some(Value::Reference(path_val)) = args.get(0){
-        let string_val = path_val.get_field(1);
+        let string_val = path_val.get_field(FILE_path_INDEX);
         VM::extract_string_from_object(&string_val)?
     } else {
         String::new()
@@ -1900,8 +1903,8 @@ fn delegate_mhn_get_named_con<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>
 
 fn resolve_signature<'a>(sig: Reference<'a>) -> VMResult<String>{
     if sig.class_name == "java/lang/invoke/MethodType"{
-        let args_ref = sig.get_field(2).expect_reference()?;
-        let rtype_ref = sig.get_field(1).expect_reference()?;
+        let args_ref = sig.get_field(METHODTYPE_ptypes_INDEX).expect_reference()?;
+        let rtype_ref = sig.get_field(METHODTYPE_rtype_INDEX).expect_reference()?;
         if let ReferenceType::Array(_, _, content) = &args_ref.reference_type{
             let mut signature = String::from("(");
             for class_obj in content.borrow().iter(){
@@ -1933,12 +1936,12 @@ fn resolve_signature<'a>(sig: Reference<'a>) -> VMResult<String>{
 
 fn delegate_mhn_resolve<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
     if let (Some(Value::Reference(selff)), Some(Value::Reference(caller))) = (args.get(0), args.get(1)){
-        let clazz = vm.extract_class_from_class_object(selff.get_field(0).expect_reference().unwrap())?;
+        let clazz = vm.extract_class_from_class_object(selff.get_field(MEMBERNAME_clazz_INDEX).expect_reference().unwrap())?;
         //let caller_clazz = vm.extract_class_from_class_object(caller)?; can be null apparently
-        let name = VM::extract_string_from_object(&selff.get_field(1))?;
-        let typ = selff.get_field(2).expect_reference()?;
+        let name = VM::extract_string_from_object(&selff.get_field(MEMBERNAME_name_INDEX))?;
+        let typ = selff.get_field(MEMBERNAME_type_INDEX).expect_reference()?;
         let sig = resolve_signature(typ)?;
-        let flags = &selff.get_field(3).expect_int()?;
+        let flags = &selff.get_field(MEMBERNAME_flags_INDEX).expect_int()?;
         let ref_kind = flags >> REFERENCE_KIND_SHIFT;
         match flags & ALL_KINDS {
             IS_METHOD => {
@@ -1971,7 +1974,7 @@ fn delegate_mhn_resolve<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, _: O
             }
             IS_FIELD => {
                 let (vmindex, field_info, holder_id) = clazz.find_field_static(name.as_str()).unwrap();
-                selff.set_field(3, Value::Integer(*flags | field_info.flags as i32));
+                selff.set_field(MEMBERNAME_flags_INDEX, Value::Integer(*flags | field_info.flags as i32));
                 member_name_init_field(vm, java_vm, selff, field_info)?;
             }
             other => todo!("Unsupported mh type: {:b}", other)
@@ -2024,16 +2027,16 @@ fn delegate_mhn_init<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, _: Opti
             // see https://github.com/openjdk/jdk8u/blob/master/hotspot/src/share/vm/prims/methodHandles.cpp#L129
             if target.class_name == "java/lang/reflect/Method"{
                 // clazz
-                let clazz = target.get_field(7).expect_reference()?;
+                let clazz = target.get_field(METHOD_clazz_INDEX).expect_reference()?;
                 // slot
-                let slot = target.get_field(8).expect_int()?;
+                let slot = target.get_field(METHOD_slot_INDEX).expect_int()?;
 
                 let class_ref = vm.extract_class_from_class_object(clazz)?;
                 let method_info = class_ref.get_method_in_slot(slot as usize).unwrap();
                 let info = CallInfo::new(&method_info, &class_ref);
 
                 // clazz
-                mname.set_field(0, Value::Reference(clazz));
+                mname.set_field(MEMBERNAME_clazz_INDEX, Value::Reference(clazz));
                 member_name_init_method(vm, java_vm, mname, &info)?;
 
                 non_failing_none()
@@ -2081,7 +2084,7 @@ fn member_name_init_method<'a>(vm: &VM<'a>, java_vm: &JavaVM, mname: Reference<'
     }
 
     // flags
-    mname.set_field(3, Value::Integer(flags));
+    mname.set_field(MEMBERNAME_flags_INDEX, Value::Integer(flags));
     // vmindex
     // vmtarget
     let vmindex = wrap_init!(vm, java_vm, vm.new_java_lang_long(Value::Long(vmindex as i64))?);
@@ -2101,7 +2104,7 @@ fn member_name_init_field<'a>(vm: &VM<'a>, java_vm: &JavaVM, mname: Reference<'a
     let old = vm.object_payloads.borrow_mut().insert(mname.id, vec![vmindex, Value::Reference(vmtarget)]);
 
     // flags
-    mname.set_field(3, Value::Integer(flags));
+    mname.set_field(MEMBERNAME_flags_INDEX, Value::Integer(flags));
     Ok(())
 }
 
@@ -2109,7 +2112,7 @@ fn delegate_mhn_field_offset<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>,
     if let Some(Value::Reference(mname)) = args.get(0) {
         if !mname.is_null() && let Some(payload) = vm.object_payloads.borrow().get(&mname.id) {
             // flags
-            let flags = mname.get_field(3).expect_int()?;
+            let flags = mname.get_field(MEMBERNAME_flags_INDEX).expect_int()?;
             if flags & IS_FIELD != 0 && flags & FieldFlag::Static as i32 == 0 {
                 non_failing_some(vm.extract_long(payload[0].clone())?)
             } else {

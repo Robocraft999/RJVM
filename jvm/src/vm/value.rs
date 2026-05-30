@@ -3,6 +3,7 @@ use crate::vm::class::ClassId;
 use crate::vm::{VmError, VM};
 use std::cell::RefCell;
 use std::fmt::{Debug, Display, Formatter, Pointer};
+use crate::vm::constants::STRING_value_INDEX;
 
 #[derive(PartialEq, Default, Clone)]
 pub enum Value<'a>{
@@ -190,7 +191,7 @@ impl<'a> ReferenceValue<'a>{
         match &self.reference_type {
             ReferenceType::Object(fields) => {
                 if self.class_name == "java/lang/String" {
-                    let internal = VM::extract_string_from_char_arr(&self.get_field(0)).unwrap_or("VMError".to_string());
+                    let internal = VM::extract_string_from_char_arr(&self.get_field(STRING_value_INDEX)).unwrap_or("VMError".to_string());
                     let mut components = Vec::new();
                     components.push(internal);
                     let mut other_fields = fields.borrow().iter().skip(1).map(object).collect();

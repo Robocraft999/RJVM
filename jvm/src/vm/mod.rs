@@ -32,6 +32,7 @@ use class_manager::ClassManager;
 use class_path::ClassPath;
 use value::Value;
 use crate::class_file::fields::primitive_to_wrapper_name;
+use crate::vm::constants::{CLASS_name_INDEX, LONG_value_INDEX, STRING_hash_INDEX, STRING_value_INDEX, THROWABLE_detailsMessage_INDEX};
 
 pub mod class_path;
 pub mod class_path_entry;
@@ -50,6 +51,7 @@ mod executor;
 mod debug;
 pub mod jni;
 mod call_info;
+mod constants;
 
 pub struct VM<'a>{
     pub class_manager: ClassManager<'a>,
@@ -384,9 +386,9 @@ impl<'a> VM<'a>{
         let string_object = get_or_init!(self.new_object("java/lang/String")?);
 
         //value
-        string_object.set_field(0, char_array);
+        string_object.set_field(STRING_value_INDEX, char_array);
         //hash
-        string_object.set_field(1, Value::Integer(0));
+        string_object.set_field(STRING_hash_INDEX, Value::Integer(0));
 
         self.string_objects.borrow_mut().insert(string.to_owned(), string_object);
         Ok(VMResultType::Successful(string_object))
@@ -395,7 +397,7 @@ impl<'a> VM<'a>{
     pub fn extract_string_from_object(value: &Value<'a>) -> VMResult<String>{
         if let Value::Reference(reference) = value{
             if !reference.is_null() {
-                let chars = reference.get_field(0);
+                let chars = reference.get_field(STRING_value_INDEX);
                 return Self::extract_string_from_char_arr(&chars);
             }
         }
@@ -420,7 +422,7 @@ impl<'a> VM<'a>{
             let string_object = get_or_init!(self.new_string_object(class_name.replace("/", ".").as_str())?);
 
             //name
-            class_object.set_field(5, Value::Reference(string_object));
+            class_object.set_field(CLASS_name_INDEX, Value::Reference(string_object));
 
             self.class_objects.borrow_mut().insert(class_id, class_object);
             Ok(VMResultType::Successful(class_object))
@@ -507,13 +509,13 @@ impl<'a> VM<'a>{
     pub fn new_java_lang_long(&self, value: Value<'a>) -> VMPartialResult<Value<'a>> {
         let long = get_or_init!(self.new_object("java/lang/Long")?);
         //value
-        long.set_field(4, value);
+        long.set_field(LONG_value_INDEX, value);
         Ok(VMResultType::Successful(Value::Reference(long)))
     }
 
     pub fn extract_long(&self, value: Value<'a>) -> VMResult<Value<'a>> {
         if let Value::Reference(long_ref) = value && long_ref.class_name == "java/lang/Long" {
-            let value = long_ref.get_field(4).expect_long()?;
+            let value = long_ref.get_field(LONG_value_INDEX).expect_long()?;
             Ok(Value::Long(value))
         } else {
             Err(VmError::ValidationError("expected a long reference".to_string()))
@@ -521,7 +523,7 @@ impl<'a> VM<'a>{
     }
 
     pub fn extract_class_from_class_object(&self, object: Reference<'a>) -> VMResult<ClassRef<'a>>{
-        let name_object = object.get_field(5);
+        let name_object = object.get_field(CLASS_name_INDEX);
         let name = VM::extract_string_from_object(&name_object)?;
         let name = name.replace(".", "/");
         let class = self.get_or_resolve_class(name.as_str())?;
@@ -530,7 +532,7 @@ impl<'a> VM<'a>{
     }
     
     pub fn extract_class_name_from_class_object(object: Reference<'a>) -> VMResult<String>{
-        let name_object = object.get_field(5);
+        let name_object = object.get_field(CLASS_name_INDEX);
         let name = VM::extract_string_from_object(&name_object)?;
         let name = name.replace(".", "/");
         Ok(name)
@@ -588,7 +590,7 @@ impl<'a> VM<'a>{
 
         let details = self.try_new_string_object(message.as_str())?;
         //detailsMessage
-        exception_object.set_field(2, Value::Reference(details));
+        exception_object.set_field(THROWABLE_detailsMessage_INDEX, Value::Reference(details));
 
         let prev = self.caught_exception.replace(
             Some((
