@@ -128,6 +128,12 @@ impl<'a> ClassManager<'a>{
                 }
             }
         }?;
+        
+        vm.debug_helper.bytecode_helper.push_class(class_name.as_str(), bytes);
+
+        if self.classes_by_name.borrow().contains_key(&class_name){
+            warn!("Duplicate class name {}", class_name);
+        }
 
         // shallow class
         let mut class = Class{
