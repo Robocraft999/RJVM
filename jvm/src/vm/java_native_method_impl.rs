@@ -491,7 +491,7 @@ fn delegate_init_system_props<'a>(vm: &VM<'a>, java_vm: &JavaVM, _ : ClassRef<'a
         ("path.separator", ":".to_string()),
         ("java.lang.Integer.IntegerCache.high", "127".to_string()),
         //("sun.boot.library.path", "/home/admin/.jdks/temurin-22.0.1/lib".to_string()),
-        ("java.home", format!("{}", env!("JAVA_HOME"))),
+        ("java.home", format!("{}/jre/", env!("JAVA_HOME"))),
         ("sun.boot.library.path", format!("{}/jre/lib/amd64/", env!("JAVA_HOME"))),
         ("sun.boot.class.path", "resources/rt.jar:resources/resources.jar".to_string()),
         ("user.dir", env::current_dir().unwrap().to_string_lossy().to_string()),
@@ -499,8 +499,6 @@ fn delegate_init_system_props<'a>(vm: &VM<'a>, java_vm: &JavaVM, _ : ClassRef<'a
         ("os.name", "Linux".to_string()),
         ("os.arch", "x86_64".to_string()),
         ("java.awt.graphicsenv", "sun.awt.X11GraphicsEnvironment".to_owned()),
-        ("sun.misc.URLClassPath.debug", "true".to_owned()),
-        ("sun.misc.URLClassPath.debugLookupCache", "true".to_owned()),
     ];
     if env::consts::OS == "windows"{
         props = vec![
