@@ -926,10 +926,10 @@ fn delegate_find_bootstrap_class<'a>(vm: &VM<'a>, java_vm: &JavaVM,  _: ClassRef
     if let Some(str_object) = args.get(0) {
         let class_name = VM::extract_string_from_object(&str_object)?;
         let class_name = class_name.replace(".", "/");
-        if vm.class_manager.find_class_by_name(class_name.as_str()).is_some() {
-            non_failing_some(Value::Reference(wrap_init!(vm, java_vm, vm.new_class_object_by_name(class_name.as_str())?)))
-        } else {
-            non_failing_some(vm.null())
+
+        match vm.get_or_resolve_class(class_name.as_str()) {
+            Ok(clazz) => non_failing_some(Value::Reference(wrap_init!(vm, java_vm, vm.new_class_object_by_class(clazz)?))),
+            Err(_) => non_failing_some(vm.null())
         }
     } else {
         Err(VmError::ValidationError("expected a string reference".to_string()))
