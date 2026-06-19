@@ -632,21 +632,20 @@ pub fn execute_current_block<'a>(vm: &VM<'a>, java_vm: &JavaVM) -> Option<VMPart
 
                 Instruction::PUTSTATIC(index) => {
                     let caf = class_and_method.get_constant_field_ref(&vm, *index).unwrap();
-                    let (field_index, info, class_id) = class_and_method.class.find_field_static(caf.field.name.as_str()).unwrap();
-                    if vm.class_manager.expect_class_state(class_id, ClassLoadingState::LOADED){
+                    let class = get_or_init_option!(vm.ensure_initialized(caf.class));
+                    if vm.class_manager.expect_class_state(class.id, ClassLoadingState::LOADED){
                         unimplemented!()
                     }
-                    debug!("PUTSTATIC {} {} {} {:?}", caf.field.name, caf.field.field_type.to_descriptor(), field_index, info);
                     let value = vm.call_stack.pop_operand_value().unwrap();
-                    //let class_id = vm.class_manager.find_class_by_name(class_name.as_str()).unwrap().id;
+
+                    let (field_index, info, class_id) = class.find_field_static(caf.field.name.as_str()).unwrap();
                     let object = vm.get_static_class_object(class_id).unwrap();
                     vm.debug_helper.tracker.push_object_event(object.id, format!("Set static field: {}: {:?} to:\n    {:?}", info.name, info.field_type, value));
+                    debug!("PUTSTATIC {} {} {} {:?}", caf.field.name, caf.field.field_type.to_descriptor(), field_index, info);
                     object.set_field(field_index, value);
                 }
                 Instruction::GETSTATIC(index) => {
                     let caf = class_and_method.get_constant_field_ref(&vm, *index).unwrap();
-                    //let (field_index, info) = self.class_and_method.class.find_field(field_name.as_str()).unwrap();
-                    //let class = vm.class_manager.find_class_by_name(class_name.as_str()).unwrap();
                     let class = get_or_init_option!(vm.ensure_initialized(caf.class));
                     if vm.class_manager.expect_class_state(class.id, ClassLoadingState::LOADED){
                         unimplemented!()
@@ -654,6 +653,7 @@ pub fn execute_current_block<'a>(vm: &VM<'a>, java_vm: &JavaVM) -> Option<VMPart
                     let (field_index, info, class_id) = class.find_field_static(caf.field.name.as_str()).unwrap();
                     let object = vm.get_static_class_object(class_id).unwrap();
                     debug!("GETSTATIC {} {} {} {:?}", caf.field.name, caf.field.field_type.to_descriptor(), field_index, info);
+
                     vm.call_stack.push_operand_value(object.get_field(field_index));
                 }
                 Instruction::GETFIELD(index) => {
