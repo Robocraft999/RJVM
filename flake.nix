@@ -34,8 +34,14 @@
             pkg-config
           ];
 
-          LD_LIBRARY_PATH =
-            pkgs.lib.makeLibraryPath [ pkgs.openssl ];
+          LD_LIBRARY_PATH = builtins.concatStringsSep ":" [
+            (pkgs.lib.makeLibraryPath [ pkgs.openssl ])
+            "target/debug"
+          ];
+
+          shellHook = ''
+            alias java=$JAVA_HOME/bin/java
+          '';
         };
       });
 }

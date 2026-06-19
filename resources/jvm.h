@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2022, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -34,6 +34,9 @@
 #endif
 #ifdef TARGET_OS_FAMILY_windows
 # include "jvm_windows.h"
+#endif
+#ifdef TARGET_OS_FAMILY_aix
+# include "jvm_aix.h"
 #endif
 #ifdef TARGET_OS_FAMILY_bsd
 # include "jvm_bsd.h"
@@ -142,10 +145,18 @@ JNIEXPORT void JNICALL
 JVM_OnExit(void (*func)(void));
 
 /*
+ * java.nio.Bits
+ */
+JNIEXPORT void JNICALL
+JVM_CopySwapMemory(JNIEnv *env, jobject srcObj, jlong srcOffset,
+                   jobject dstObj, jlong dstOffset, jlong size,
+                   jlong elemSize);
+
+/*
  * java.lang.Runtime
  */
 JNIEXPORT void JNICALL
-JVM_Exit(jint code);
+JVM_BeforeHalt();
 
 JNIEXPORT void JNICALL
 JVM_Halt(jint code);
@@ -187,6 +198,9 @@ JVM_MaxMemory(void);
 
 JNIEXPORT jint JNICALL
 JVM_ActiveProcessorCount(void);
+
+JNIEXPORT jboolean JNICALL
+JVM_IsUseContainerSupport(void);
 
 JNIEXPORT void * JNICALL
 JVM_LoadLibrary(const char *name);
@@ -415,6 +429,19 @@ JVM_FindClassFromClassLoader(JNIEnv *env, const char *name, jboolean init,
  */
 JNIEXPORT jclass JNICALL
 JVM_FindClassFromBootLoader(JNIEnv *env, const char *name);
+
+/*
+ * Find a class from a given class loader.  Throws ClassNotFoundException.
+ *  name:   name of class
+ *  init:   whether initialization is done
+ *  loader: class loader to look up the class. This may not be the same as the caller's
+ *          class loader.
+ *  caller: initiating class. The initiating class may be null when a security
+ *          manager is not installed.
+ */
+JNIEXPORT jclass JNICALL
+JVM_FindClassFromCaller(JNIEnv *env, const char *name, jboolean init,
+                        jobject loader, jclass caller);
 
 /*
  * Find a class from a given class.
@@ -1482,6 +1509,9 @@ JVM_GetManagement(jint version);
 JNIEXPORT jobject JNICALL
 JVM_InitAgentProperties(JNIEnv *env, jobject agent_props);
 
+JNIEXPORT jstring JNICALL
+JVM_GetTemporaryDirectory(JNIEnv *env);
+
 /* Generics reflection support.
  *
  * Returns information about the given class's EnclosingMethod
@@ -1529,6 +1559,31 @@ JVM_GetThreadStateValues(JNIEnv* env, jint javaThreadState);
 JNIEXPORT jobjectArray JNICALL
 JVM_GetThreadStateNames(JNIEnv* env, jint javaThreadState, jintArray values);
 
+/*
+ * Returns true if the JVM's lookup cache indicates that this class is
+ * known to NOT exist for the given loader.
+ */
+JNIEXPORT jboolean JNICALL
+JVM_KnownToNotExist(JNIEnv *env, jobject loader, const char *classname);
+
+/*
+ * Returns an array of all URLs that are stored in the JVM's lookup cache
+ * for the given loader. NULL if the lookup cache is unavailable.
+ */
+JNIEXPORT jobjectArray JNICALL
+JVM_GetResourceLookupCacheURLs(JNIEnv *env, jobject loader);
+
+/*
+ * Returns an array of all URLs that *may* contain the resource_name for the
+ * given loader. This function returns an integer array, each element
+ * of which can be used to index into the array returned by
+ * JVM_GetResourceLookupCacheURLs of the same loader to determine the
+ * URLs.
+ */
+JNIEXPORT jintArray JNICALL
+JVM_GetResourceLookupCache(JNIEnv *env, jobject loader, const char *resource_name);
+
+
 /* =========================================================================
  * The following defines a private JVM interface that the JDK can query
  * for the JVM version and capabilities.  sun.misc.Version defines
@@ -1573,9 +1628,9 @@ typedef struct {
 } jvm_version_info;
 
 #define JVM_VERSION_MAJOR(version) ((version & 0xFF000000) >> 24)
-#define JVM_VERSION_MINOR(version) ((version & 0x00FF0000) >> 16)
+#define JVM_VERSION_MINOR(version) ((version & 0x00FFFF00) >> 8)
 // Micro version is 0 in HotSpot Express VM (set in jvm.cpp).
-#define JVM_VERSION_MICRO(version) ((version & 0x0000FF00) >> 8)
+#define JVM_VERSION_MICRO(version) 0
 /* Build number is available in all HotSpot Express VM builds.
  * It is defined in make/hotspot_version file.
  */
@@ -1588,9 +1643,9 @@ typedef struct {
     // Naming convention of RE build version string: n.n.n[_uu[c]][-<identifier>]-bxx
     unsigned int jdk_version;   /* Consists of major, minor, micro (n.n.n) */
                                 /* and build number (xx) */
-    unsigned int update_version : 8;         /* Update release version (uu) */
+    unsigned int update_version : 16;        /* Update release version (uu) */
     unsigned int special_update_version : 8; /* Special update release version (c)*/
-    unsigned int reserved1 : 16;
+    unsigned int reserved1 : 8;
     unsigned int reserved2;
 
     /* The following bits represents new JDK supports that VM has dependency on.
