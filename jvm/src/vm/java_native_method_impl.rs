@@ -6,7 +6,7 @@ use crate::class_file::methods::descriptor::MethodDescriptor;
 use crate::class_file::nom::parse_class_file;
 use crate::error::ClassParseError;
 use crate::vm::class::{Class, ClassAndMethod, ClassRef};
-use crate::vm::class_manager::ClassLoadingState;
+use crate::vm::class_manager::{AnonClassInfo, ClassLoadingState};
 use crate::vm::java_error::JavaError;
 use crate::vm::jni::types::{jboolean, jbyte, jchar, jdouble, jfloat, jint, jlong, jobject, jshort, jvalue, JNIEnv, JavaVM};
 use crate::vm::result::{VMPartialResult, VMResult, VMResultType};
@@ -24,7 +24,7 @@ use std::ffi::{c_schar, c_uchar, c_ushort, c_void};
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
-use crate::class_file::methods::{INVALID_VTABLE_INDEX, NONVIRTUAL_VTABLE_INDEX};
+use crate::class_file::methods::{descriptor, INVALID_VTABLE_INDEX, NONVIRTUAL_VTABLE_INDEX};
 use crate::vm::call_info::{resolve_virtual_call, CallInfo, CallInfoKind};
 use crate::vm::constants::*;
 
@@ -149,7 +149,7 @@ impl <'a>NativeMethodRegistry<'a>{
         }
         false
     }
-    
+
     pub fn mark_exception(&self){
         warn!(target: "native", "Some native function marked as failed");
         self.exception_in_native.replace(true);
@@ -298,7 +298,8 @@ pub fn register_all_natives(registry: &mut NativeMethodRegistry){
     registry.register("java/lang/System", "mapLibraryName", "(Ljava/lang/String;)Ljava/lang/String;", delegate_system_map_library_name);
     registry.register("java/lang/Class", "getPrimitiveClass", "(Ljava/lang/String;)Ljava/lang/Class;", delegate_get_primitive_class);
     registry.register("java/lang/Class", "getComponentType", "()Ljava/lang/Class;", delegate_get_component_type);
-    registry.register("java/lang/Class", "getClassLoader0", "()Ljava/lang/ClassLoader;", delegate_get_classloader);
+    registry.register("java/lang/Class", "getClassLoader0", "()Ljava/lang/ClassLoader;", delegate_get_classloader0);
+    registry.register("java/lang/Class", "getProtectionDomain0", "()Ljava/security/ProtectionDomain;", delegate_get_protection_domain0);
     registry.register("java/lang/Class", "desiredAssertionStatus0", "(Ljava/lang/Class;)Z", delegate_desired_assertion_status);
     registry.register("java/lang/Class", "getDeclaredFields0", "(Z)[Ljava/lang/reflect/Field;", delegate_get_declared_fields0);
     registry.register("java/lang/Class", "getDeclaredConstructors0", "(Z)[Ljava/lang/reflect/Constructor;", delegate_get_declared_constructors0);
@@ -365,7 +366,9 @@ pub fn register_all_natives(registry: &mut NativeMethodRegistry){
     registry.register("java/security/AccessController", "doPrivileged", "(Ljava/security/PrivilegedExceptionAction;Ljava/security/AccessControlContext;)Ljava/lang/Object;", delegate_do_privileged);
     registry.register("java/lang/String", "intern", "()Ljava/lang/String;", delegate_string_intern);
     registry.register("java/lang/invoke/MethodHandle", "invoke", "([Ljava/lang/Object;)Ljava/lang/Object;", delegate_mh_invoke);
+    registry.register("java/lang/invoke/MethodHandle", "invokeBasic", "([Ljava/lang/Object;)Ljava/lang/Object;", delegate_mh_invoke_basic);
     registry.register("java/lang/invoke/MethodHandle", "invokeExact", "([Ljava/lang/Object;)Ljava/lang/Object;", delegate_mh_invoke_exact);
+    registry.register("java/lang/invoke/MethodHandle", "linkToStatic", "([Ljava/lang/Object;)Ljava/lang/Object;", delegate_mh_link_to_static);
     registry.register("sun/reflect/NativeConstructorAccessorImpl", "newInstance0", "(Ljava/lang/reflect/Constructor;[Ljava/lang/Object;)Ljava/lang/Object;", delegate_new_instance0);
     registry.register("sun/reflect/NativeMethodAccessorImpl", "invoke0", "(Ljava/lang/reflect/Method;Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;", delegate_invoke0);
     registry.register("java/io/FileOutputStream", "writeBytes", "([BIIZ)V", delegate_write_bytes);
@@ -494,7 +497,9 @@ fn delegate_init_system_props<'a>(vm: &VM<'a>, java_vm: &JavaVM, _ : ClassRef<'a
         ("user.home", env::home_dir().unwrap().to_string_lossy().to_string()),
         ("os.name", "Linux".to_string()),
         ("os.arch", "x86_64".to_string()),
-        ("java.awt.graphicsenv", "sun.awt.X11GraphicsEnvironment".to_owned())
+        ("java.awt.graphicsenv", "sun.awt.X11GraphicsEnvironment".to_owned()),
+        ("sun.misc.URLClassPath.debug", "true".to_owned()),
+        ("sun.misc.URLClassPath.debugLookupCache", "true".to_owned()),
     ];
     if env::consts::OS == "windows"{
         props = vec![
@@ -568,9 +573,14 @@ fn delegate_get_component_type<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a
     }
 }
 
-fn delegate_get_classloader<'a>(vm: &VM<'a>, _: &JavaVM, _ : ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
+fn delegate_get_classloader0<'a>(vm: &VM<'a>, _: &JavaVM, _ : ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
     //TODO check
     debug!("getClassLoader0");
+    non_failing_some(vm.null())
+}
+
+fn delegate_get_protection_domain0<'a>(vm: &VM<'a>, _: &JavaVM, _ : ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
+    debug!("getProtectionDomain0");
     non_failing_some(vm.null())
 }
 
@@ -1261,7 +1271,7 @@ fn delegate_put_ordered_object<'a>(vm: &VM<'a>, java_vm: &JavaVM, _ : ClassRef<'
         }
         if o.class_name == "java/lang/Class"{
             let class_ref = vm.extract_class_from_class_object(o)?;
-            let _ = wrap_init!(vm, java_vm, vm.get_or_initialize_class(class_ref.name.as_str())?);
+            let _ = wrap_init!(vm, java_vm, vm.ensure_initialized(class_ref)?);
             let static_object = vm.static_class_objects.borrow().get(&class_ref.id).unwrap().clone();
             static_object.set_field(*index as usize, x.clone());
         } else {
@@ -1303,9 +1313,10 @@ fn delegate_define_anon_class<'a>(vm: &VM<'a>, java_vm: &JavaVM, _ : ClassRef<'a
             };
 
             vm.class_manager.classes_by_id.borrow_mut().insert(class_ref.id, class_ref);
-            vm.class_manager.classes_by_name.borrow_mut().insert(class_ref.name.clone(), class_ref);
+            //vm.class_manager.classes_by_name.borrow_mut().insert(class_ref.name.clone(), class_ref);
             vm.class_manager.class_loading_states.borrow_mut().insert(class_ref.id, ClassLoadingState::LOADED);
             let class_obj = wrap_init!(vm, java_vm, vm.new_class_object_by_class(class_ref)?);
+            vm.class_manager.anonymous_classes.borrow_mut().insert(class_obj.id, AnonClassInfo { clazz: class_ref, host: host_class });
             non_failing_some(Value::Reference(class_obj))
         } else {
             Err(VmError::ValidationError(format!("define_anon_class: expected bytes array type but got: {:?}", byte_arr)))
@@ -1337,8 +1348,8 @@ fn delegate_should_be_initialized<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef
 
 fn delegate_ensure_initialized<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
     if let Some(Value::Reference(class_ref)) = args.get(0){
-        let class_name = VM::extract_class_name_from_class_object(class_ref)?;
-        let clazz = wrap_init!(vm, java_vm, vm.get_or_initialize_class(class_name.as_str())?);
+        let clazz = vm.extract_class_from_class_object(class_ref)?;
+        let clazz = wrap_init!(vm, java_vm, vm.ensure_initialized(clazz)?);
         non_failing_none()
     } else {
         Err(VmError::ValidationError(format!("Expected a class reference but got: {:?}", args)))
@@ -1393,8 +1404,9 @@ fn delegate_current_thread<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, _
 }
 
 fn delegate_is_alive<'a>(vm: &VM<'a>, _: &JavaVM, _: ClassRef<'a>, object: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
-    //non_failing_some(object.unwrap().get_field(5))
-    unreachable!("FIXME")
+    //non_failing_some(Value::Integer(1))
+    // FIXME threading
+    non_failing_some(object.unwrap().get_field(5))
 }
 
 fn delegate_available_processors<'a>(_: &VM<'a>, _: &JavaVM, _: ClassRef<'a>, _: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
@@ -1460,13 +1472,80 @@ fn delegate_string_intern<'a>(vm: &VM<'a>, _: &JavaVM, _: ClassRef<'a>, object: 
     }
 }
 
-fn delegate_mh_invoke<'a>(vm: &VM<'a>, _: &JavaVM, _: ClassRef<'a>, object: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>> {
+fn delegate_mh_invoke<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, object: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>> {
     if let Some(mh) = object {
         // form
         let lambda_form = mh.get_field(METHODHANDLE_form_INDEX).expect_reference()?;
         // vmentry
         let vmentry = lambda_form.get_field(LAMBDAFORM_vmentry_INDEX).expect_reference()?;
-        let blub = vm.object_payloads.borrow().get(&vmentry.id).unwrap();
+        let blub = vm.object_payloads.borrow().get(&vmentry.id).unwrap().clone();
+        if let (Some(Value::Reference(vmtarget_ref)), Some(Value::Reference(mname_ref))) = (blub.get(0), blub.get(1)) {
+            let vmtarget = vm.extract_long(Value::Reference(vmtarget_ref))?.expect_long()?;
+            let clazz = VM::extract_class_from_class_object(vm, mname_ref.get_field(MEMBERNAME_clazz_INDEX).expect_reference()?)? ;
+            let name = VM::extract_string_from_object(&mname_ref.get_field(MEMBERNAME_name_INDEX))?;
+
+            if vmtarget as isize == NONVIRTUAL_VTABLE_INDEX {
+                let typ_ref = mname_ref.get_field(MEMBERNAME_type_INDEX).expect_reference()?;
+
+                let mut desc = descriptor::from_method_type(typ_ref)?;
+
+                let method = clazz.find_method(name.as_str(), desc.as_str()).unwrap();
+                let cam = ClassAndMethod { class: clazz, method: method.clone() };
+                assert!(cam.method.flags & MethodFlag::Static as u16 > 0);
+                let mut delegate_args = vec![Value::Reference(mh)];
+                delegate_args.extend(args);
+                let current_frame_index = vm.call_stack.len() as isize - 1;
+                vm.call_stack.create_and_push_call_frame(cam, None, delegate_args, false);
+                let result = vm.invoke_frames_until(java_vm, current_frame_index);
+                return match result{
+                    Ok(any) => Ok(any),
+                    Err(VmError::JavaException(JavaError::JavaExceptionThrown(..))) => Ok(VMResultType::ExceptionThrown),
+                    Err(e) => Err(e),
+                };
+            } else {
+                todo!()
+            }
+        }
+        unimplemented!()
+    } else {
+        Err(VmError::ValidationError("Expected a MethodHandle object reference".to_string()))
+    }
+}
+
+fn delegate_mh_invoke_basic<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, object: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>> {
+    if let Some(mh) = object {
+        // form
+        let lambda_form = mh.get_field(METHODHANDLE_form_INDEX).expect_reference()?;
+        // vmentry
+        let vmentry = lambda_form.get_field(LAMBDAFORM_vmentry_INDEX).expect_reference()?;
+        let blub = vm.object_payloads.borrow().get(&vmentry.id).unwrap().clone();
+        if let (Some(Value::Reference(vmtarget_ref)), Some(Value::Reference(mname_ref))) = (blub.get(0), blub.get(1)) {
+            let vmtarget = vm.extract_long(Value::Reference(vmtarget_ref))?.expect_long()?;
+            let clazz = VM::extract_class_from_class_object(vm, mname_ref.get_field(MEMBERNAME_clazz_INDEX).expect_reference()?)? ;
+            let name = VM::extract_string_from_object(&mname_ref.get_field(MEMBERNAME_name_INDEX))?;
+
+            if vmtarget as isize == NONVIRTUAL_VTABLE_INDEX {
+                let typ_ref = mname_ref.get_field(MEMBERNAME_type_INDEX).expect_reference()?;
+
+                let mut desc = descriptor::from_method_type(typ_ref)?;
+
+                let method = clazz.find_method(name.as_str(), desc.as_str()).unwrap();
+                let cam = ClassAndMethod { class: clazz, method: method.clone() };
+                assert!(cam.method.flags & MethodFlag::Static as u16 > 0);
+                let mut delegate_args = vec![Value::Reference(mh)];
+                delegate_args.extend(args);
+                let current_frame_index = vm.call_stack.len() as isize - 1;
+                vm.call_stack.create_and_push_call_frame(cam, None, delegate_args, false);
+                let result = vm.invoke_frames_until(java_vm, current_frame_index);
+                return match result {
+                    Ok(any) => Ok(any),
+                    Err(VmError::JavaException(JavaError::JavaExceptionThrown(..))) => Ok(VMResultType::ExceptionThrown),
+                    Err(e) => Err(e),
+                }
+            } else {
+                todo!()
+            }
+        }
         unimplemented!()
     } else {
         Err(VmError::ValidationError("Expected a MethodHandle object reference".to_string()))
@@ -1474,6 +1553,38 @@ fn delegate_mh_invoke<'a>(vm: &VM<'a>, _: &JavaVM, _: ClassRef<'a>, object: Opti
 }
 
 fn delegate_mh_invoke_exact<'a>(vm: &VM<'a>, _: &JavaVM, _: ClassRef<'a>, object: Option<Reference<'a>>, _: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
+    unimplemented!()
+}
+
+fn delegate_mh_link_to_static<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, _: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>> {
+    // this apparently just casts the simplified arguments back up to their target types
+    // see: https://github.com/openjdk/jdk8u/blob/master/hotspot/src/share/vm/opto/callGenerator.cpp#L807
+    // FIXME check if the membername should stay in last or should be removed
+    if let Some(Value::Reference(mname_ref)) = args.get(args.len() - 1) {
+        let typ_ref = mname_ref.get_field(MEMBERNAME_type_INDEX).expect_reference()?;
+        let clazz = VM::extract_class_from_class_object(vm, mname_ref.get_field(MEMBERNAME_clazz_INDEX).expect_reference()?)? ;
+        let name = VM::extract_string_from_object(&mname_ref.get_field(MEMBERNAME_name_INDEX))?;
+        println!("LTS: {}", name);
+
+        let desc = descriptor::from_method_type(typ_ref)?;
+        let desc = MethodDescriptor::new(desc);
+        if desc.args.len() != args.len() - 1 {
+            unreachable!("Args count does not match: expected: {}, got: {:?}", desc.as_str(), args)
+        }
+
+        let method = clazz.find_method(name.as_str(), desc.as_str()).unwrap();
+        let cam = ClassAndMethod { class: clazz, method: method.clone() };
+
+        let args_only = args[..args.len() - 1].iter().cloned().collect::<Vec<_>>();
+        let current_frame_index = vm.call_stack.len() as isize - 1;
+        vm.call_stack.create_and_push_call_frame(cam, None, args_only, false);
+        let result = vm.invoke_frames_until(java_vm, current_frame_index);
+        return match result {
+            Ok(any) => Ok(any),
+            Err(VmError::JavaException(JavaError::JavaExceptionThrown(..))) => Ok(VMResultType::ExceptionThrown),
+            Err(e) => Err(e),
+        }
+    }
     unimplemented!()
 }
 
@@ -1518,7 +1629,7 @@ fn delegate_new_instance0<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, ob
                     let res = vm.invoke_frames_until(java_vm, current_frame_index);
                     // invoke_frames_until returns occurred exceptions as Err(VmError::JavaException(JavaError::JavaExceptionThrown))
                     // because it doesn't know whether it is a subroutine or not
-                    return match res { 
+                    return match res {
                         Ok(VMResultType::Successful(None)) => { non_failing_some(Value::Reference(object)) }
                         Ok(VMResultType::Successful(Some(value))) => { Err(VmError::ValidationError(format!("Constructor should not return anything: {:?}", value))) }
                         Ok(typ) => unreachable!("{:?} can't escape invoke_frames_until", typ),

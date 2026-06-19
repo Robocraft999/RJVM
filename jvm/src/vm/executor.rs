@@ -647,7 +647,7 @@ pub fn execute_current_block<'a>(vm: &VM<'a>, java_vm: &JavaVM) -> Option<VMPart
                     let caf = class_and_method.get_constant_field_ref(&vm, *index).unwrap();
                     //let (field_index, info) = self.class_and_method.class.find_field(field_name.as_str()).unwrap();
                     //let class = vm.class_manager.find_class_by_name(class_name.as_str()).unwrap();
-                    let class = get_or_init_option!(vm.get_or_initialize_class(caf.class.name.as_str()));
+                    let class = get_or_init_option!(vm.ensure_initialized(caf.class));
                     if vm.class_manager.expect_class_state(class.id, ClassLoadingState::LOADED){
                         unimplemented!()
                     }
@@ -696,7 +696,23 @@ pub fn execute_current_block<'a>(vm: &VM<'a>, java_vm: &JavaVM) -> Option<VMPart
                                 let name_obj = Value::Reference(get_or_init_option!(vm.new_string_object(cam.method.name.as_str())));
                                 let type_obj = Value::Reference(method_type_ref);
                                 let bootstrap_method_obj = get_or_init_option!(vm.new_method_handle(java_vm, class_and_method.class, kind, cam, method_type_ref)).unwrap();
-                                let info_obj = vm.null();
+                                let mut static_args = Vec::new();
+                                for index in bm.bootstrap_arguments.iter() {
+                                    let Some(val) = (match class_and_method.class.get_or_resolve_constant(vm, *index) {
+                                        Some(ConstantPoolEntry::MethodType(desc)) => get_or_init_option!(vm.new_method_type(java_vm, &desc)),
+                                        Some(ConstantPoolEntry::MethodHandleMethod(arg_kind, arg_cam)) => {
+                                            let Some(Value::Reference(arg_method_type)) = get_or_init_option!(vm.new_method_type(java_vm, &arg_cam.method.descriptor)) else {
+                                                return Some(Err(VmError::ValidationError("Could not create MethodType for static callsite arg".to_string())));
+                                            };
+                                            get_or_init_option!(vm.new_method_handle(java_vm, class_and_method.class, arg_kind, arg_cam, arg_method_type))
+                                        }
+                                        _ => unimplemented!()
+                                    }) else {
+                                        return Some(Err(VmError::ValidationError("Could not load static arg for invokedynamic".to_string())));
+                                    };
+                                    static_args.push(val);
+                                }
+                                let info_obj = Value::Reference(get_or_init_option!(vm.new_object_array_1(static_args)));
                                 let appendix_arr = Value::Reference(get_or_init_option!(vm.new_object_array_1(vec![vm.null()])));
 
                                 println!("schwubbel1");
@@ -720,7 +736,7 @@ pub fn execute_current_block<'a>(vm: &VM<'a>, java_vm: &JavaVM) -> Option<VMPart
 
                 Instruction::NEW(index) => {
                     let class = class_and_method.get_constant_class_ref(vm, *index).unwrap();
-                    let class_ref = get_or_init_option!(vm.get_or_initialize_class(class.name.as_str()));
+                    let class_ref = get_or_init_option!(vm.ensure_initialized(class));
                     if vm.class_manager.expect_class_state(class_ref.id, ClassLoadingState::LOADED){
                         unimplemented!("Cannot create instance of {:?} if not initializ-ed/-ing", class_ref.name);
                     }
@@ -983,7 +999,7 @@ fn aload<'a>(vm: &VM<'a>, index: usize) -> VMResult<()>{
         Value::Reference(reference) => {
             debug!("ALOAD{} {:?}", index, reference);
         }
-        _ => return Err(VmError::ValidationError(format!("ALOAD{} failed", index)))
+        p => return Err(VmError::ValidationError(format!("ALOAD{} failed: got '{:?}'", index, p)))
     }
     vm.call_stack.push_operand_value(popped);
     Ok(())
@@ -1083,7 +1099,7 @@ fn execute_invoke<'a>(vm: &VM<'a>, index: u16, kind: InvokeKind) -> VMPartialRes
     // error when trying to pop the receiver after
     let (cam, args_count) = get_constant_method_ref_and_args_count(calling_class_and_method, vm, index).expect("GIB MICH DIE METHODE");
     trace!("loading class to execute on: '{}'", cam.class.name.as_str());
-    let class = get_or_init!(vm.get_or_initialize_class(cam.class.name.as_str())?);
+    let class = get_or_init!(vm.ensure_initialized(cam.class)?);
     if vm.class_manager.expect_class_state(class.id, ClassLoadingState::LOADED) {
         unimplemented!()
     }
@@ -1156,9 +1172,11 @@ fn execute_invoke<'a>(vm: &VM<'a>, index: u16, kind: InvokeKind) -> VMPartialRes
     } else {
         vm.debug_helper.tracker.push_method_event(class_and_method.format(), format!("Calling static from {} with args: {}", calling_class_and_method.format(), args.iter().map(|v| format!("\n    {:?}", v)).collect::<Vec<_>>().join("") ));
     }
-    for (i, provided_arg) in args.iter().filter(|a| if let Value::Dummy = a {false} else {true}).enumerate(){
-        if !(&class_and_method.method.descriptor.args[i] == provided_arg){
-            return Err(VmError::ValidationError(format!("Expected arg type: {:?} but got value: {:?}", class_and_method.method.descriptor.args[i], provided_arg)));
+    if !class_and_method.class.has_method_polymorphic_signature(class_and_method.method) {
+        for (i, provided_arg) in args.iter().filter(|a| if let Value::Dummy = a {false} else {true}).enumerate(){
+            if !(&class_and_method.method.descriptor.args[i] == provided_arg){
+                return Err(VmError::ValidationError(format!("Expected arg type: {:?} but got value: {:?}", class_and_method.method.descriptor.args[i], provided_arg)));
+            }
         }
     }
     vm.call_stack.create_and_push_call_frame(class_and_method, receiver, args, true);

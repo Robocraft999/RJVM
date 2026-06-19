@@ -18,6 +18,7 @@ use std::cmp::PartialEq;
 use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
 use typed_arena::Arena;
+use crate::vm::value::Reference;
 
 #[derive(Debug, Clone)]
 pub(crate) enum ResolvedClass<'a> {
@@ -48,12 +49,17 @@ pub enum ClassLoadingState{
     INITIALIZED,
 }
 
+pub struct AnonClassInfo<'a> {
+    pub clazz: ClassRef<'a>,
+    pub host: Reference<'a>,
+}
 
 pub struct ClassManager<'a>{
     pub class_path: ClassPath,
     pub classes_by_name: RefCell<HashMap<String, ClassRef<'a>>>,
     pub classes_by_id: RefCell<HashMap<ClassId, ClassRef<'a>>>,
     pub class_loading_states: RefCell<HashMap<ClassId, ClassLoadingState>>,
+    pub anonymous_classes: RefCell<HashMap<u32, AnonClassInfo<'a>>>,
     pub classes: Arena<Class<'a>>,
     pub primitive_class_ids: RefCell<HashMap<String, ClassId>>,
     next_id: RefCell<u32>,
@@ -66,6 +72,7 @@ impl<'a> ClassManager<'a>{
             classes_by_name: RefCell::new(HashMap::new()),
             classes_by_id: RefCell::new(HashMap::new()),
             class_loading_states: RefCell::new(HashMap::new()),
+            anonymous_classes: RefCell::new(HashMap::new()),
             classes: Arena::with_capacity(100),
             primitive_class_ids: RefCell::new(HashMap::new()),
             next_id: RefCell::new(1),
@@ -109,7 +116,7 @@ impl<'a> ClassManager<'a>{
     }
 
     pub fn define_class(&self, vm: &VM<'a>, class_name: Option<&str>, array_info: Option<ArrayInfo>, bytes: Vec<u8>) -> VMResult<Class<'a>>{
-        let parsed_class = parse_class_file(bytes)?;
+        let parsed_class = parse_class_file(bytes.clone())?;
         let next_id = *self.next_id.borrow();
         *self.next_id.borrow_mut() += 1;
 

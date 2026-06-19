@@ -51,7 +51,7 @@ mod executor;
 mod debug;
 pub mod jni;
 mod call_info;
-mod constants;
+pub(crate) mod constants;
 
 pub struct VM<'a>{
     pub class_manager: ClassManager<'a>,
@@ -226,7 +226,14 @@ impl<'a> VM<'a>{
 
     pub fn get_or_initialize_class(&self, class_name: &str) -> VMPartialResult<ClassRef<'a>>{
         let resolved = self.get_or_resolve_class(class_name)?;
-        let to_init = self.class_manager.get_classes_to_initialize(resolved)?;
+        self.ensure_initialized(resolved)
+    }
+
+    pub fn ensure_initialized(&self, clazz: ClassRef<'a>) -> VMPartialResult<ClassRef<'a>> {
+        if self.class_manager.expect_class_state(clazz.id, ClassLoadingState::INITIALIZED) {
+            return Ok(VMResultType::Successful(clazz));
+        }
+        let to_init = self.class_manager.get_classes_to_initialize(clazz)?;
         if to_init.len() > 0{
             let count = to_init.iter()
                 .map(|clazz| {
@@ -238,10 +245,10 @@ impl<'a> VM<'a>{
             if count > 0{
                 Ok(VMResultType::Interrupted(count, true))
             } else {
-                Ok(VMResultType::Successful(resolved))
+                Ok(VMResultType::Successful(clazz))
             }
         } else {
-            Ok(VMResultType::Successful(resolved))
+            Ok(VMResultType::Successful(clazz))
         }
     }
 
@@ -488,8 +495,8 @@ impl<'a> VM<'a>{
     }
     
     /// does call a function which places the result in the current frame
-    pub fn new_method_handle(&self, java_vm: &JavaVM, pool_holder: ClassRef<'a>, kind: BytecodeBehavior, cam: ClassAndMethod, method_type_ref: Reference<'a>) -> VMPartialResult<Option<Value<'a>>>{
-        let callee = get_or_init!(self.get_or_initialize_class(cam.class.name.as_str())?);
+    pub fn new_method_handle(&self, java_vm: &JavaVM, pool_holder: ClassRef<'a>, kind: BytecodeBehavior, cam: ClassAndMethod<'a>, method_type_ref: Reference<'a>) -> VMPartialResult<Option<Value<'a>>>{
+        let callee = get_or_init!(self.ensure_initialized(cam.class)?);
         let callee = Value::Reference(get_or_init!(self.new_class_object_by_class(callee)?));
         let caller = Value::Reference(get_or_init!(self.new_class_object_by_class(pool_holder)?));
         let ref_kind = Value::Integer(kind as u8 as i32);
@@ -526,9 +533,16 @@ impl<'a> VM<'a>{
         let name_object = object.get_field(CLASS_name_INDEX);
         let name = VM::extract_string_from_object(&name_object)?;
         let name = name.replace(".", "/");
-        let class = self.get_or_resolve_class(name.as_str())?;
-
-        Ok(class)
+        let class = self.get_or_resolve_class(name.as_str());
+        match class {
+            Ok(class) => Ok(class),
+            Err(e) => {
+                match self.class_manager.anonymous_classes.borrow().get(&object.id) {
+                    Some(info) => Ok(info.clazz),
+                    None => Err(e),
+                }
+            }
+        }
     }
     
     pub fn extract_class_name_from_class_object(object: Reference<'a>) -> VMResult<String>{

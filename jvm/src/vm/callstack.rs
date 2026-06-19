@@ -31,17 +31,23 @@ impl<'a> CallStack<'a> {
     }
 
     pub fn create_and_push_call_frame(&self, class_and_method: ClassAndMethod<'a>, object: Option<Reference<'a>>, args: Vec<Value<'a>>, should_push_return: bool){
-        let mut locals = vec![Value::Uninitialized; class_and_method.get_max_locals() + if class_and_method.method.is_static() {1} else {0}];
+        let mut locals = vec![Value::Uninitialized; class_and_method.get_max_locals()];
         let mut offset = 0;
         if !class_and_method.method.is_static(){
             locals[0] = Value::Reference(object.unwrap());
             offset = 1;
         }
-        for (i, provided_arg) in args.iter().filter(|a| if let Value::Dummy = a {false} else {true}).enumerate(){
-            if !(&class_and_method.method.descriptor.args[i] == provided_arg){
-                //unreachable!("Expected arg type: {:?} but got value: {:?}", class_and_method.method.descriptor.args[i], provided_arg);
+        if !class_and_method.class.has_method_polymorphic_signature(class_and_method.method) {
+            for (i, provided_arg) in args.iter().filter(|a| if let Value::Dummy = a {false} else {true}).enumerate(){
+                if !(&class_and_method.method.descriptor.args[i] == provided_arg){
+                    //unreachable!("Expected arg type: {:?} but got value: {:?}", class_and_method.method.descriptor.args[i], provided_arg);
+                }
             }
+        } else {
+            locals.resize(offset + args.len(), Value::Uninitialized);
+            println!("cam: {}, ({}), args:\n    {:?}", class_and_method.format(), locals.len(), args);
         }
+
         for (dest, src) in locals[offset..].iter_mut().zip(args) {
             *dest = src;
         }

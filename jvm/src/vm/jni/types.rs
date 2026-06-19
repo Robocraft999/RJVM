@@ -330,7 +330,7 @@ impl JNINativeInterface_ {
         let stop_index = vm.call_stack.len() as isize -1;
         let javavm = unsafe{&*(*env).pvm};
 
-        let _ = native_init_wrap!(env, vm.get_or_initialize_class(class_and_method.class.name.as_str()));
+        let _ = native_init_wrap!(env, vm.ensure_initialized(class_and_method.class));
         let obj_ref = vm.new_object_from_class(class_and_method.class);
         debug!("NewObjectV: {} ({:?})", class_and_method.format(), args);
         vm.call_stack.create_and_push_call_frame(class_and_method, Some(obj_ref), args, false);
@@ -595,7 +595,7 @@ impl JNINativeInterface_ {
 
         let class_obj = vm.objects_by_id.borrow().get(&clazz).copied().unwrap();
         let class_ref = vm.extract_class_from_class_object(&class_obj).unwrap();
-        let class_ref = native_init_wrap!(env, vm.get_or_initialize_class(class_ref.name.as_str()));
+        let class_ref = native_init_wrap!(env, vm.ensure_initialized(class_ref));
         println!("NATIVE: GetStaticMethodID: {}::{}{}", class_ref.name, method_name, signature);
         //FIXME zero index results in NULL
         class_ref.find_method_index(method_name, signature).ok_or(VmError::Native(format!("GetStaticMethodID: {}::{}{} not found", class_ref.name, method_name, signature))).unwrap()

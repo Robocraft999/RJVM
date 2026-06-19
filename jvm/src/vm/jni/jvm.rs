@@ -13,6 +13,7 @@ use std::fs::{File, OpenOptions};
 use std::os::fd::{AsFd, AsRawFd, FromRawFd, IntoRawFd, OwnedFd, RawFd};
 use std::path::Path;
 use std::str::FromStr;
+use crate::vm::value::ReferenceType;
 
 pub const JVM_INTERFACE_VERSION: jint = 4;
 
@@ -389,8 +390,15 @@ pub unsafe extern "system-unwind" fn JVM_LoadClass0(env: *mut JNIEnv, obj: jobje
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "system-unwind" fn JVM_GetArrayLength(env: *mut JNIEnv, arr: jobject) -> jint{
-    unimplemented!();
+pub unsafe extern "system-unwind" fn JVM_GetArrayLength(env: *mut JNIEnv, arr: jobject) -> jint {
+    let vm = unsafe{&*(*env).vm};
+
+    let obj_ref = vm.objects_by_id.borrow().get(&arr).copied().unwrap();
+    if let ReferenceType::Array(_, _, content) = &obj_ref.reference_type {
+        content.borrow().len() as jint
+    } else {
+        unreachable!("fixme error handling")
+    }
 }
 
 #[unsafe(no_mangle)]
