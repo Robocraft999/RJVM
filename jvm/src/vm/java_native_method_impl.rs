@@ -1486,10 +1486,10 @@ fn delegate_mh_invoke<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, object
             if vmtarget as isize == NONVIRTUAL_VTABLE_INDEX {
                 let typ_ref = mname_ref.get_field(MEMBERNAME_type_INDEX).expect_reference()?;
 
-                let mut desc = descriptor::from_method_type(typ_ref)?;
+                let desc = descriptor::from_method_type(typ_ref)?;
 
                 let method = clazz.find_method(name.as_str(), desc.as_str()).unwrap();
-                let cam = ClassAndMethod { class: clazz, method: method.clone() };
+                let cam = ClassAndMethod { class: clazz, method };
                 assert!(cam.method.flags & MethodFlag::Static as u16 > 0);
                 let mut delegate_args = vec![Value::Reference(mh)];
                 delegate_args.extend(args);
@@ -1526,10 +1526,10 @@ fn delegate_mh_invoke_basic<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, 
             if vmtarget as isize == NONVIRTUAL_VTABLE_INDEX {
                 let typ_ref = mname_ref.get_field(MEMBERNAME_type_INDEX).expect_reference()?;
 
-                let mut desc = descriptor::from_method_type(typ_ref)?;
+                let desc = descriptor::from_method_type(typ_ref)?;
 
                 let method = clazz.find_method(name.as_str(), desc.as_str()).unwrap();
-                let cam = ClassAndMethod { class: clazz, method: method.clone() };
+                let cam = ClassAndMethod { class: clazz, method };
                 assert!(cam.method.flags & MethodFlag::Static as u16 > 0);
                 let mut delegate_args = vec![Value::Reference(mh)];
                 delegate_args.extend(args);
@@ -1622,7 +1622,10 @@ fn delegate_new_instance0<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, ob
                     } else {
                         Vec::new()
                     };
-                    let object = wrap_init!(vm, java_vm, vm.new_object(class_and_method.class.name.as_str())?);
+                    // we have to do this manually because vm.new_object() tries to resolve and init the class
+                    // the problem is that if the class is anonymous it can't be resolved and it crashes
+                    let class = wrap_init!(vm, java_vm, vm.ensure_initialized(class)?);
+                    let object = vm.new_object_from_class(class);
                     let current_frame_index = vm.call_stack.len() as isize - 1;
                     vm.call_stack.create_and_push_call_frame(class_and_method, Some(object), constructor_args, false);
                     let res = vm.invoke_frames_until(java_vm, current_frame_index);
