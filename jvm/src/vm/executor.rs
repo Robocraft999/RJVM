@@ -7,7 +7,9 @@ use crate::vm::jni::types::JavaVM;
 use crate::vm::result::{VMPartialResult, VMResultType};
 use crate::{bytecode::Instruction, get_or_init, get_or_init_option, vm::{bytecode::InstructionBlock, class::{ClassAndMethod, ClassRef}, java_error::JavaError, result::VMResult, value::{ReferenceType, Value}, VmError, VM}};
 use log::{debug, error, info, trace, warn};
-use crate::vm::constants::THROWABLE_detailsMessage_INDEX;
+use crate::class_file::methods::descriptor;
+use crate::class_file::methods::descriptor::MethodDescriptor;
+use crate::vm::constants::{MEMBERNAME_clazz_INDEX, MEMBERNAME_name_INDEX, MEMBERNAME_type_INDEX, THROWABLE_detailsMessage_INDEX};
 
 macro_rules! wrap_error {
     ($res:expr) => {
@@ -687,50 +689,58 @@ pub fn execute_current_block<'a>(vm: &VM<'a>, java_vm: &JavaVM) -> Option<VMPart
                 Instruction::INVOKESTATIC(index) => { return Some(execute_invoke(vm, *index, InvokeKind::STATIC)) }
                 Instruction::INVOKEINTERFACE(index, _, _) => { return Some(execute_invoke(vm, *index, InvokeKind::INTERFACE)) }
                 Instruction::INVOKEDYNAMIC(index, _, _) => {
-                    if let Some(ConstantPoolEntry::InvokeDynamic(bm, method_name, type_name)) = class_and_method.class.get_or_resolve_constant(vm, *index){
-                        if let Some(ConstantPoolEntry::MethodHandleMethod(kind, cam)) = class_and_method.class.get_or_resolve_constant(vm, bm.bootstrap_method_ref){
-                            let method_type_ref_option = get_or_init_option!(vm.new_method_type(java_vm, &cam.method.descriptor));
+                    let Some(ConstantPoolEntry::InvokeDynamic(bm, name, typ)) = class_and_method.class.get_or_resolve_constant(vm, *index) else { unreachable!("Do Errors") };
+                    let caller_obj = Value::Reference(get_or_init_option!(vm.new_class_object_by_class(class_and_method.class)));
 
-                            if let Some(Value::Reference(method_type_ref)) = method_type_ref_option{
-                                let caller = Value::Reference(get_or_init_option!(vm.new_class_object_by_class(class_and_method.class)));
-                                let name_obj = Value::Reference(get_or_init_option!(vm.new_string_object(cam.method.name.as_str())));
-                                let type_obj = Value::Reference(method_type_ref);
-                                let bootstrap_method_obj = get_or_init_option!(vm.new_method_handle(java_vm, class_and_method.class, kind, cam, method_type_ref)).unwrap();
-                                let mut static_args = Vec::new();
-                                for index in bm.bootstrap_arguments.iter() {
-                                    let Some(val) = (match class_and_method.class.get_or_resolve_constant(vm, *index) {
-                                        Some(ConstantPoolEntry::MethodType(desc)) => get_or_init_option!(vm.new_method_type(java_vm, &desc)),
-                                        Some(ConstantPoolEntry::MethodHandleMethod(arg_kind, arg_cam)) => {
-                                            let Some(Value::Reference(arg_method_type)) = get_or_init_option!(vm.new_method_type(java_vm, &arg_cam.method.descriptor)) else {
-                                                return Some(Err(VmError::ValidationError("Could not create MethodType for static callsite arg".to_string())));
-                                            };
-                                            get_or_init_option!(vm.new_method_handle(java_vm, class_and_method.class, arg_kind, arg_cam, arg_method_type))
-                                        }
-                                        _ => unimplemented!()
-                                    }) else {
-                                        return Some(Err(VmError::ValidationError("Could not load static arg for invokedynamic".to_string())));
-                                    };
-                                    static_args.push(val);
-                                }
-                                let info_obj = Value::Reference(get_or_init_option!(vm.new_object_array_1(static_args)));
-                                let appendix_arr = Value::Reference(get_or_init_option!(vm.new_object_array_1(vec![vm.null()])));
+                    let Some(ConstantPoolEntry::MethodHandleMethod(bm_kind, bootstrap_cam)) = class_and_method.class.get_or_resolve_constant(vm, bm.bootstrap_method_ref) else { unreachable!("Do Errors") };
+                    let Some(Value::Reference(bm_type_ref)) = get_or_init_option!(vm.new_method_type(java_vm, &bootstrap_cam.method.descriptor)) else { unreachable!("Do errors") };
+                    let bootstrap_method_obj = get_or_init_option!(vm.new_method_handle(java_vm, class_and_method.class, bm_kind, bootstrap_cam, bm_type_ref)).unwrap();
 
-                                println!("schwubbel1");
-                                let helper = vm.resolve_class_method(
-                                    "java/lang/invoke/MethodHandleNatives",
-                                    "linkCallSite",
-                                    "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/invoke/MemberName;"
-                                ).unwrap();
-                                let frame_index = vm.call_stack.len() as isize - 1;
-                                vm.call_stack.create_and_push_call_frame(helper, None, vec![caller, bootstrap_method_obj, name_obj, type_obj, info_obj, appendix_arr], false);
-                                let mname = get_or_init_option!(vm.invoke_frames_until(java_vm, frame_index));
-                                println!("schwubbel2");
+                    let name_obj = Value::Reference(get_or_init_option!(vm.new_string_object(name.as_str())));
+                    let Some(type_obj) = get_or_init_option!(vm.new_method_type(java_vm, &MethodDescriptor::new(typ))) else { unreachable!("Do Errors") };
 
-                                let additional_args: Vec<ConstantPoolEntry> = bm.bootstrap_arguments.iter().map(|i| class_and_method.class.get_or_resolve_constant(vm, *i)).try_collect().unwrap();
-                                unimplemented!()
+                    let mut static_args = Vec::new();
+                    for index in bm.bootstrap_arguments.iter() {
+                        let Some(val) = (match class_and_method.class.get_or_resolve_constant(vm, *index) {
+                            Some(ConstantPoolEntry::MethodType(desc)) => get_or_init_option!(vm.new_method_type(java_vm, &desc)),
+                            Some(ConstantPoolEntry::MethodHandleMethod(arg_kind, arg_cam)) => {
+                                let Some(Value::Reference(arg_method_type)) = get_or_init_option!(vm.new_method_type(java_vm, &arg_cam.method.descriptor)) else {
+                                    return Some(Err(VmError::ValidationError("Could not create MethodType for static callsite arg".to_string())));
+                                };
+                                get_or_init_option!(vm.new_method_handle(java_vm, class_and_method.class, arg_kind, arg_cam, arg_method_type))
                             }
-                        }
+                            _ => unimplemented!()
+                        }) else {
+                            return Some(Err(VmError::ValidationError("Could not load static arg for invokedynamic".to_string())));
+                        };
+                        static_args.push(val);
                     }
+                    let static_arguments = Value::Reference(get_or_init_option!(vm.new_object_array_1(static_args)));
+
+                    let appendix_result = Value::Reference(get_or_init_option!(vm.new_object_array_1(vec![vm.null()])));
+
+                    println!("schwubbel1");
+                    let helper = vm.resolve_class_method(
+                        "java/lang/invoke/MethodHandleNatives",
+                        "linkCallSite",
+                        "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/invoke/MemberName;"
+                    ).unwrap();
+                    let frame_index = vm.call_stack.len() as isize - 1;
+                    vm.call_stack.create_and_push_call_frame(helper, None, vec![caller_obj, bootstrap_method_obj, name_obj, type_obj, static_arguments, appendix_result], false);
+                    let Some(Value::Reference(mname_ref)) = get_or_init_option!(vm.invoke_frames_until(java_vm, frame_index)) else { unreachable!("DO ERRORs") };
+                    println!("schwubbel2");
+
+                    let typ_ref = mname_ref.get_field(MEMBERNAME_type_INDEX).expect_reference().unwrap();
+                    let clazz = VM::extract_class_from_class_object(vm, mname_ref.get_field(MEMBERNAME_clazz_INDEX).expect_reference().unwrap()).unwrap();
+                    let name = VM::extract_string_from_object(&mname_ref.get_field(MEMBERNAME_name_INDEX)).unwrap();
+                    println!("IVD: {}", name);
+
+                    let desc = descriptor::from_method_type(typ_ref).unwrap();
+                    let desc = MethodDescriptor::new(desc);
+
+                    let method = clazz.find_method(name.as_str(), desc.as_str()).unwrap();
+                    let cam = ClassAndMethod { class: clazz, method};
+
                     unimplemented!()
                 }
 
