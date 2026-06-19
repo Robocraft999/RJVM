@@ -375,6 +375,7 @@ pub fn register_all_natives(registry: &mut NativeMethodRegistry){
     //registry.register("java/io/FileInputStream", "initIDs", "()V", delegate_nop);
     registry.register("java/io/FileInputStream", "readBytes", "([BII)I", delegate_read_bytes);
     registry.register("java/io/FileInputStream","open0", "(Ljava/lang/String;)V", delegate_open0);
+    registry.register("java/io/FileInputStream","close0", "()V", delegate_close0);
     registry.register("java/io/FileSystem", "getFileSystem", "()Ljava/io/FileSystem;", delegate_get_file_system);
     registry.register("java/io/UnixFileSystem", "getBooleanAttributes0", "(Ljava/io/File;)I", delegate_get_boolean_attribute);
     registry.register("java/io/UnixFileSystem", "canonicalize0", "(Ljava/lang/String;)Ljava/lang/String;", delegate_canonicalize0);
@@ -1749,7 +1750,18 @@ fn delegate_open0<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, _: Option<
     } else {
         Err(VmError::ValidationError(format!("Expected a string for the path but got: {:?}", args.get(0))))
     }
+}
 
+fn delegate_close0<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, fis: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
+    let Some(fis_ref) = fis else {
+        return Err(VmError::ValidationError("Expected this".to_string()))
+    };
+    let path_val = fis_ref.get_field(FILEINPUTSTREAM_path_INDEX);
+    let path = VM::extract_string_from_object(&path_val)?;
+    if vm.currently_open_files.borrow_mut().remove(&path).is_none() {
+        warn!("Closing non existent file: '{}'", path)
+    }
+    non_failing_none()
 }
 
 fn delegate_read_bytes<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, obj: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
@@ -1767,7 +1779,8 @@ fn delegate_read_bytes<'a>(vm: &VM<'a>, java_vm: &JavaVM, _: ClassRef<'a>, obj: 
 
                 let start = *offset as usize;
                 let end = start + std::cmp::min(*length as usize, content.len() - index);
-                //println!("start={}, end={}, length={}, readable_bytes={}", start, end, length, content.len() - index);
+                //println!("XXX: {}", &path);
+                //println!("start={}, end={}, readable_bytes={}, reading={:X?}", start, end, content.len() - index, &content[index..(index+end-start)]);
                 (start..end).for_each(|i| data_ref.set_element(i, Value::Integer(content[i - start + index] as i32)));
 
                 let new_index = index + end - start;
