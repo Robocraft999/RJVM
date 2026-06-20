@@ -22,7 +22,6 @@ use crate::vm::class_manager::{ClassLoadingState, ResolvedClass};
 use crate::vm::debug::DebugHelper;
 use crate::vm::gc::ObjectAllocator;
 use crate::vm::java_error::JavaError;
-use crate::vm::java_native_method_impl::{register_all_natives, NativeMethodRegistry};
 use crate::vm::jni::types::JavaVM;
 use crate::vm::r#unsafe::Unsafe;
 use crate::vm::result::{VMPartialResult, VMResult, VMResultType};
@@ -33,6 +32,7 @@ use class_path::ClassPath;
 use value::Value;
 use crate::class_file::fields::primitive_to_wrapper_name;
 use crate::vm::constants::{CLASS_name_INDEX, LONG_value_INDEX, STRING_hash_INDEX, STRING_value_INDEX, THROWABLE_detailsMessage_INDEX};
+use crate::vm::native::{register_all_natives, NativeMethodRegistry};
 
 pub mod class_path;
 pub mod class_path_entry;
@@ -43,7 +43,6 @@ mod call_frame;
 mod callstack;
 pub mod class;
 mod gc;
-mod java_native_method_impl;
 mod r#unsafe;
 pub mod result;
 pub mod bytecode; //TODO move out from vm
@@ -52,6 +51,7 @@ mod debug;
 pub mod jni;
 mod call_info;
 pub(crate) mod constants;
+mod native;
 
 pub struct VM<'a>{
     pub class_manager: ClassManager<'a>,

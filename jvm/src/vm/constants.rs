@@ -81,3 +81,36 @@ pub const FIELD_type_INDEX: usize = 7;
 pub const FIELD_modifiers_INDEX: usize = 8;
 
 // CLASS NAMES
+pub mod classes {
+    pub const JAVA_IO_FILE_INPUT_STREAM: &str = "java/io/FileInputStream";
+    pub const JAVA_IO_FILE_OUTPUT_STREAM: &str = "java/io/FileOutputStream";
+    pub const JAVA_IO_UNIX_FILE_SYSTEM: &str = "java/io/UnixFileSystem";
+    pub const JAVA_LANG_CLASS: &str = "java/lang/Class";
+    pub const JAVA_LANG_CLASSLOADER: &str = "java/lang/ClassLoader";
+    pub const JAVA_LANG_DOUBLE: &str = "java/lang/Double";
+    pub const JAVA_LANG_FLOAT: &str = "java/lang/Float";
+    pub const JAVA_LANG_INVOKE_METHOD_HANDLE: &str = "java/lang/invoke/MethodHandle";
+    pub const JAVA_LANG_INVOKE_MHN: &str = "java/lang/invoke/MethodHandleNatives";
+    pub const JAVA_LANG_INVOKE_METHOD_TYPE: &str = "java/lang/invoke/MethodType";
+    pub const JAVA_LANG_LONG: &str = "java/lang/Long";
+    pub const JAVA_LANG_OBJECT: &str = "java/lang/Object";
+    pub const JAVA_LANG_OBJECT_ARR: &str = "[Ljava/lang/Object;";
+    pub const JAVA_LANG_PROCESS_ENVIRONMENT: &str = "java/lang/ProcessEnvironment";
+    pub const JAVA_LANG_REFLECT_CONSTRUCTOR: &str = "java/lang/reflect/Constructor";
+    pub const JAVA_LANG_REFLECT_FIELD: &str = "java/lang/reflect/Field";
+    pub const JAVA_LANG_REFLECT_METHOD: &str = "java/lang/reflect/Method";
+    pub const JAVA_LANG_RUNTIME: &str = "java/lang/Runtime";
+    pub const JAVA_LANG_STRING: &str = "java/lang/String";
+    pub const JAVA_LANG_SYSTEM: &str = "java/lang/System";
+    pub const JAVA_LANG_THREAD: &str = "java/lang/Thread";
+    pub const JAVA_LANG_THROWABLE: &str = "java/lang/Throwable";
+    pub const SUN_MISC_PERF: &str = "sun/misc/Perf";
+    pub const SUN_MISC_SIGNAL: &str = "sun/misc/Signal";
+    pub const SUN_MISC_UNSAFE: &str = "sun/misc/Unsafe";
+    pub const SUN_MISC_URL_CLASSPATH: &str = "sun/misc/URLClassPath";
+    pub const SUN_MISC_VM: &str = "sun/misc/VM";
+    pub const SUN_NIO_FS_UND: &str = "sun/nio/fs/UnixNativeDispatcher";
+    pub const SUN_REFLECT_REFLECTION: &str = "sun/reflect/Reflection";
+    pub const SUN_REFLECT_NCAI: &str = "sun/reflect/NativeConstructorAccessorImpl";
+    pub const SUN_REFLECT_NMAI: &str = "sun/reflect/NativeMethodAccessorImpl";
+}
