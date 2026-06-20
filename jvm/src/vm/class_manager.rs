@@ -1,24 +1,24 @@
 use crate::class_file::attributes::ClassFileAttributes;
-use crate::class_file::constant_pool::{BytecodeBehavior, ConstantPool, ConstantPoolEntry};
+use crate::class_file::constant_pool::{ConstantPoolEntry};
 use crate::class_file::fields::attributes::FieldInfoAttributes;
 use crate::class_file::fields::field_type::{extract_component_type_from_array_class, FieldType};
 use crate::class_file::fields::{primitive_to_wrapper_name, FieldInfo};
 use crate::class_file::methods::attributes::{CodeAttributes, MethodInfoAttributes};
 use crate::class_file::methods::descriptor::MethodDescriptor;
-use crate::class_file::methods::{MethodInfo, GARBAGE_VTABLE_INDEX, ITABLE_INDEX_MAX};
+use crate::class_file::methods::{MethodInfo, GARBAGE_VTABLE_INDEX};
 use crate::class_file::nom::parse_class_file;
 use crate::error::ClassParseError;
-use crate::vm::class::{ArrayInfo, Class, ClassAndField, ClassAndMethod, ClassId, ClassRef};
+use crate::vm::class::{ArrayInfo, Class, ClassId, ClassRef};
 use crate::vm::class_path::ClassPath;
 use crate::vm::result::VMResult;
-use crate::vm::{bytecode, class, VmError, VM};
+use crate::vm::value::Reference;
+use crate::vm::{bytecode, VmError, VM};
 use log::{info, warn};
 use std::cell::RefCell;
 use std::cmp::PartialEq;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap};
 use std::str::FromStr;
 use typed_arena::Arena;
-use crate::vm::value::Reference;
 
 #[derive(Debug, Clone)]
 pub(crate) enum ResolvedClass<'a> {

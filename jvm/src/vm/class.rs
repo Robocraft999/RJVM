@@ -6,14 +6,14 @@ use crate::class_file::fields::field_type::FieldType;
 use crate::class_file::fields::FieldInfo;
 use crate::class_file::methods::descriptor::MethodDescriptor;
 use crate::class_file::methods::{MethodInfo, ITABLE_INDEX_MAX, NONVIRTUAL_VTABLE_INDEX, PENDING_ITABLE_INDEX};
+use crate::error::ClassParseError;
+use crate::vm::result::VMResult;
 use crate::vm::value::Value;
-use crate::vm::{ProgramCounter, VmError};
 use crate::vm::VM;
+use crate::vm::{ProgramCounter, VmError};
 use std::cell::RefCell;
 use std::fmt::{Debug, Formatter};
 use std::hash::Hash;
-use crate::error::ClassParseError;
-use crate::vm::result::VMResult;
 
 #[derive()]
 pub struct Class<'a>{

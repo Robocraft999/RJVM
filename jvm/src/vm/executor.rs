@@ -1,15 +1,15 @@
 use std::{cell::RefCell, str::FromStr};
 
-use crate::class_file::constant_pool::{ConstantPool, ConstantPoolEntry};
+use crate::class_file::constant_pool::{ConstantPoolEntry};
 use crate::class_file::fields::field_type::{FieldType, PrimitiveType};
+use crate::class_file::methods::descriptor;
+use crate::class_file::methods::descriptor::MethodDescriptor;
 use crate::vm::class_manager::ClassLoadingState;
+use crate::vm::constants::{MEMBERNAME_clazz_INDEX, MEMBERNAME_name_INDEX, MEMBERNAME_type_INDEX, THROWABLE_detailsMessage_INDEX};
 use crate::vm::jni::types::JavaVM;
 use crate::vm::result::{VMPartialResult, VMResultType};
 use crate::{bytecode::Instruction, get_or_init, get_or_init_option, vm::{bytecode::InstructionBlock, class::{ClassAndMethod, ClassRef}, java_error::JavaError, result::VMResult, value::{ReferenceType, Value}, VmError, VM}};
 use log::{debug, error, info, trace, warn};
-use crate::class_file::methods::descriptor;
-use crate::class_file::methods::descriptor::MethodDescriptor;
-use crate::vm::constants::{MEMBERNAME_clazz_INDEX, MEMBERNAME_name_INDEX, MEMBERNAME_type_INDEX, THROWABLE_detailsMessage_INDEX};
 
 macro_rules! wrap_error {
     ($res:expr) => {

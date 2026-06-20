@@ -1,9 +1,9 @@
 use crate::class_file::fields::field_type::{FieldType, PrimitiveType};
 use crate::vm::class::ClassId;
+use crate::vm::constants::STRING_value_INDEX;
 use crate::vm::{VmError, VM};
 use std::cell::RefCell;
-use std::fmt::{Debug, Display, Formatter, Pointer};
-use crate::vm::constants::STRING_value_INDEX;
+use std::fmt::{Debug, Formatter};
 
 #[derive(PartialEq, Default, Clone)]
 pub enum Value<'a>{

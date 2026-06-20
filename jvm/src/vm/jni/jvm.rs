@@ -6,6 +6,7 @@
 use crate::class_file::fields::field_type::FieldType;
 use crate::native_init_wrap;
 use crate::vm::jni::types::*;
+use crate::vm::value::ReferenceType;
 use crate::vm::{VMResultType, VM};
 use log::debug;
 use std::cell::RefCell;
@@ -14,7 +15,6 @@ use std::fs::{File, OpenOptions};
 use std::os::fd::{AsFd, AsRawFd, FromRawFd, IntoRawFd, OwnedFd, RawFd};
 use std::path::Path;
 use std::str::FromStr;
-use crate::vm::value::ReferenceType;
 
 pub const JVM_INTERFACE_VERSION: jint = 4;
 

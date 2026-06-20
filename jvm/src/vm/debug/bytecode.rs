@@ -1,8 +1,8 @@
+use log::warn;
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::fs::File;
 use std::io::Write;
-use log::warn;
 
 pub struct BytecodeHelper {
     tracked_classes: HashSet<String>,
