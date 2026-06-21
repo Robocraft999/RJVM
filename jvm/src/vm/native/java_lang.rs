@@ -14,6 +14,7 @@ pub fn register_natives(registry: &mut NativeMethodRegistry) {
     registry.register(JAVA_LANG_STRING, "intern", "()Ljava/lang/String;", delegate_intern);
     registry.register(JAVA_LANG_THREAD, "currentThread", "()Ljava/lang/Thread;", delegate_current_thread);
     registry.register(JAVA_LANG_THREAD, "isAlive", "()Z", delegate_is_alive);
+    registry.register(JAVA_LANG_THREAD, "holdsLock", "(Ljava/lang/Object;)Z", delegate_holds_lock);
     registry.register(JAVA_LANG_RUNTIME, "availableProcessors", "()I", delegate_available_processors);
     registry.register(JAVA_LANG_RUNTIME, "freeMemory", "()J", delegate_free_memory);
     registry.register(JAVA_LANG_PROCESS_ENVIRONMENT, "environ", "()[[B", delegate_environ);
@@ -80,6 +81,13 @@ gen_delegate!(delegate_is_alive, |_vm, _java_vm, obj_ref, _args| {
     //non_failing_some(Value::Integer(1))
     // FIXME threading
     non_failing_some(obj_ref.unwrap().get_field(5))
+});
+
+gen_delegate!(delegate_holds_lock, |vm, _java_vm, _obj_ref, args| {
+    let Some(Value::Reference(lock_ref)) = args.get(0) else { return invalidation!("holdLock expected a potential lock"); };
+    let current_thread = vm.current_thread.borrow();
+    let Some(_current_thread) = current_thread.as_ref() else { return invalidation!("There is no thread lol"); };
+    non_failing_some(Value::from(vm.current_locks.borrow().contains_key(&lock_ref.id)))
 });
 
 gen_delegate!(delegate_available_processors, |_vm, _java_vm, _obj_ref, _args| {

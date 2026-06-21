@@ -1,7 +1,7 @@
 use crate::class_file::fields::get_class_descriptor;
 use crate::vm::class::ClassAndMethod;
 use crate::vm::constants::classes::{SUN_REFLECT_NCAI, SUN_REFLECT_NMAI, SUN_REFLECT_REFLECTION};
-use crate::vm::constants::{CONSTRUCTOR_clazz_INDEX, CONSTRUCTOR_parameterTypes_INDEX, METHOD_clazz_INDEX, METHOD_name_INDEX, METHOD_returnType_INDEX};
+use crate::vm::constants::{CONSTRUCTOR_clazz_INDEX, CONSTRUCTOR_parameterTypes_INDEX, METHOD_clazz_INDEX, METHOD_name_INDEX, METHOD_parameterTypes_INDEX, METHOD_returnType_INDEX};
 use crate::vm::java_error::JavaError;
 use crate::vm::jni::types::JavaVM;
 use crate::vm::native::{gen_delegate, invalidation, non_failing_some, wrap_init, NativeMethodRegistry};
@@ -99,14 +99,14 @@ gen_delegate!(delegate_new_instance0, |vm, java_vm, _obj_ref, args| {
 gen_delegate!(delegate_invoke0, |vm, java_vm, _obj_ref, args| {
     debug!("invoke0");
     debug!("{:?}", args);
-    if let (Some(Value::Reference(method)), Some(Value::Reference(obj))) = (args.get(0), args.get(1)) {
-        let clazz = method.get_field(METHOD_clazz_INDEX);
+    if let (Some(Value::Reference(method)), Some(Value::Reference(obj)), Some(Value::Reference(args_array_ref))) = (args.get(0), args.get(1), args.get(2)) {
+        let class_val = method.get_field(METHOD_clazz_INDEX);
         let method_name_val = method.get_field(METHOD_name_INDEX);
         let return_type_val = method.get_field(METHOD_returnType_INDEX);
-        let parameter_types = method.get_field(METHOD_returnType_INDEX);
-        if let (Value::Reference(class_ref), Value::Reference(return_type_ref), Value::Reference(parameter_array)) = (clazz, return_type_val, parameter_types) {
+        let parameter_types = method.get_field(METHOD_parameterTypes_INDEX);
+        if let (Value::Reference(class_ref), Value::Reference(return_type_ref), Value::Reference(parameter_array)) = (class_val, return_type_val, parameter_types) {
             if let ReferenceType::Array(_, _, type_content) = &parameter_array.reference_type {
-                let class = vm.extract_class_from_class_object(class_ref)?;
+                let clazz = vm.extract_class_from_class_object(class_ref)?;
                 let mut descriptor = String::from("(");
                 for method_parameter_type_val in type_content.borrow().iter() {
                     if let Value::Reference(parameter_type_ref) = method_parameter_type_val {
@@ -128,18 +128,16 @@ gen_delegate!(delegate_invoke0, |vm, java_vm, _obj_ref, args| {
                     }
                 }
                 let method_name = VM::extract_string_from_object(&method_name_val)?;
-                if let Some(method) = class.find_method(method_name.as_str(), descriptor.as_str()) {
+                if let Some(method) = clazz.find_method(method_name.as_str(), descriptor.as_str()) {
                     debug!("method: {:?}", method);
-                    let class_and_method = ClassAndMethod {class, method};
-                    let method_args = if let Some(Value::Reference(argument_array)) = args.get(1){
-                        if let ReferenceType::Array(_, _, args_content) = &argument_array.reference_type{
-                            args_content.borrow().clone()
-                        } else {
-                            Vec::new()
-                        }
+                    let class_and_method = ClassAndMethod {class: clazz, method};
+                    let method_args = if let ReferenceType::Array(_, _, args_content) = &args_array_ref.reference_type {
+                        args_content.borrow().clone()
                     } else {
                         Vec::new()
                     };
+                    let _clazz = wrap_init!(vm, java_vm, vm.ensure_initialized(clazz)?);
+
                     let current_frame_index = vm.call_stack.len() as isize - 1;
                     vm.call_stack.create_and_push_call_frame(class_and_method, if !obj.is_null() {Some(obj)} else {None}, method_args, false);
                     let res = vm.invoke_frames_until(java_vm, current_frame_index);
@@ -163,5 +161,5 @@ gen_delegate!(delegate_invoke0, |vm, java_vm, _obj_ref, args| {
             }
         }
     }
-    invalidation!("Expected a constructor object and a array reference")
+    invalidation!("Expected a method object, this object and a array reference")
 });

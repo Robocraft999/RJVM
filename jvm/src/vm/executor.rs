@@ -2,7 +2,7 @@ use std::{cell::RefCell, str::FromStr};
 
 use crate::class_file::constant_pool::{ConstantPoolEntry};
 use crate::class_file::fields::field_type::{FieldType, PrimitiveType};
-use crate::class_file::methods::descriptor;
+use crate::class_file::methods::{descriptor};
 use crate::class_file::methods::descriptor::MethodDescriptor;
 use crate::vm::class_manager::ClassLoadingState;
 use crate::vm::constants::{MEMBERNAME_clazz_INDEX, MEMBERNAME_name_INDEX, MEMBERNAME_type_INDEX, THROWABLE_detailsMessage_INDEX};
@@ -840,15 +840,24 @@ pub fn execute_current_block<'a>(vm: &VM<'a>, java_vm: &JavaVM) -> Option<VMPart
                 }
 
                 Instruction::MONITORENTER => {
-                    if let Some(Value::Reference(_)) = vm.call_stack.pop_operand_value(){
-                        debug!("MONITORENTER")
+                    if let Some(Value::Reference(lock_ref)) = vm.call_stack.pop_operand_value(){
+                        debug!("MONITORENTER");
+                        *vm.current_locks.borrow_mut().entry(lock_ref.id).or_default() += 1;
                     } else {
                         warn!("No object to lock")
                     }
                 }
                 Instruction::MONITOREXIT => {
-                    if let Some(Value::Reference(_)) = vm.call_stack.pop_operand_value(){
-                        debug!("MONITOREXIT")
+                    if let Some(Value::Reference(lock_ref)) = vm.call_stack.pop_operand_value(){
+                        debug!("MONITOREXIT");
+                        let mut locks = vm.current_locks.borrow_mut();
+                        let Some(current_lock_count) = locks.get_mut(&lock_ref.id) else {
+                            return Some(Err(VmError::ValidationError(format!("Cannot unlock {:?} in {:?} because it was not locked", lock_ref, vm.current_thread))));
+                        };
+                        *current_lock_count -= 1;
+                        if *current_lock_count == 0 {
+                            locks.remove(&lock_ref.id);
+                        }
                     } else {
                         warn!("No object to lock")
                     }

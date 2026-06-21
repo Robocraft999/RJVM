@@ -20,9 +20,10 @@ gen_delegate!(delegate_get_stack_access_control_context, |vm, _java_vm, _obj_ref
 });
 
 gen_delegate!(delegate_do_privileged, |vm, java_vm, _obj_ref, args| {
-    if let Some(Value::Reference(action)) = args.get(0){
-        let class_name = vm.find_class_by_id(action.class_id).unwrap().name.as_str();
-        let run = vm.resolve_class_method(class_name, "run", "()Ljava/lang/Object;")?;
+    if let Some(Value::Reference(action)) = args.get(0) {
+        let clazz = vm.find_class_by_id(action.class_id).unwrap();
+        // FIXME clazz.find_method should be sufficient here
+        let run = clazz.resolve_method_virtual("run", "()Ljava/lang/Object;").unwrap();
         let current_frame_index = vm.call_stack.len() as isize - 1;
         vm.call_stack.create_and_push_call_frame(run, Some(action), vec![], false);
         let res = vm.invoke_frames_until(java_vm, current_frame_index);

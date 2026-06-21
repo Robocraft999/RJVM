@@ -57,6 +57,7 @@ pub struct VM<'a>{
     pub native_method_registry: NativeMethodRegistry<'a>,
     pub currently_open_files: RefCell<HashMap<String, (Vec<u8>, usize)>>,
     pub current_thread: RefCell<Option<Reference<'a>>>,
+    pub current_locks: RefCell<HashMap<u32, usize>>,
     pub caught_exception: RefCell<Option<(String, String, Value<'a>)>>,
     pub debug_helper: DebugHelper,
 }
@@ -80,6 +81,7 @@ impl<'a> VM<'a>{
             native_method_registry,
             currently_open_files: RefCell::new(HashMap::new()),
             current_thread: RefCell::new(None),
+            current_locks: RefCell::new(HashMap::new()),
             caught_exception: RefCell::new(None),
             debug_helper: DebugHelper::new()
         }

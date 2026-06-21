@@ -177,7 +177,7 @@ const TABLE: JNINativeInterface = [
     not_implemented as _,
     not_implemented as _,
     JNINativeInterface_::CallStaticDoubleMethodA as _,
-    JNINativeInterface_::CallStaticVoidMethodV as _,
+    JNINativeInterface_::CallStaticVoidMethod as _,
     JNINativeInterface_::CallStaticVoidMethodV as _,
     JNINativeInterface_::CallStaticVoidMethodA as _,
 
@@ -223,9 +223,9 @@ const TABLE: JNINativeInterface = [
 
     //172
     //object array stuff
+    JNINativeInterface_::NewObjectArray as _,
     not_implemented as _,
-    not_implemented as _,
-    not_implemented as _,
+    JNINativeInterface_::SetObjectArrayElement as _,
 
     //175
     //NewPrimitiveArray
