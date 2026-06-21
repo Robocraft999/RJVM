@@ -717,7 +717,8 @@ pub fn execute_current_block<'a>(vm: &VM<'a>, java_vm: &JavaVM) -> Option<VMPart
                     }
                     let static_arguments = Value::Reference(get_or_init_option!(vm.new_object_array_1(static_args)));
 
-                    let appendix_result = Value::Reference(get_or_init_option!(vm.new_object_array_1(vec![vm.null()])));
+                    let appendix_ref = get_or_init_option!(vm.new_object_array_1(vec![vm.null()]));
+                    let appendix_result = Value::Reference(appendix_ref);
 
                     println!("schwubbel1");
                     let helper = vm.resolve_class_method(
@@ -741,7 +742,12 @@ pub fn execute_current_block<'a>(vm: &VM<'a>, java_vm: &JavaVM) -> Option<VMPart
                     let method = clazz.find_method(name.as_str(), desc.as_str()).unwrap();
                     let cam = ClassAndMethod { class: clazz, method};
 
-                    unimplemented!()
+                    let frame_index = vm.call_stack.len() as isize - 1;
+                    vm.call_stack.create_and_push_call_frame(cam, None, vec![appendix_ref.get_element(0)], false);
+                    if let Some(res) = get_or_init_option!(vm.invoke_frames_until(java_vm, frame_index)) {
+                        vm.call_stack.push_operand_value(res);
+                    }
+                    println!("schwubbel3");
                 }
 
                 Instruction::NEW(index) => {
