@@ -135,8 +135,6 @@ impl<'a> ClassManager<'a>{
                 }
             }
         }?;
-        
-        vm.debug_helper.bytecode_helper.push_class(class_name.as_str(), bytes);
 
         if self.classes_by_name.borrow().contains_key(&class_name){
             warn!("Duplicate class name {}", class_name);
@@ -253,6 +251,12 @@ impl<'a> ClassManager<'a>{
             })
             .try_collect::<Vec<MethodInfo>>()
             .ok_or(VmError::ParseError(ClassParseError::ConstantPoolError(format!("Method of class '{}' could not be loaded.", class.name))))?;
+
+        let class_ref = unsafe {
+            let class_ptr: *const Class<'a> = &class;
+            &*class_ptr
+        };
+        vm.debug_helper.bytecode_helper.push_class(class_ref, bytes);
 
         class.init_vtable();
         class.init_itable();

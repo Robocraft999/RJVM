@@ -3,15 +3,33 @@ use std::cell::RefCell;
 use std::collections::HashSet;
 use std::fs::File;
 use std::io::Write;
+use serde::Deserialize;
+use crate::vm::class::ClassRef;
+
+#[derive(Deserialize, Debug)]
+pub struct ClassFilter {
+    name: String,
+    methods: Option<Vec<(String, String)>>
+}
+
+impl PartialEq<ClassRef<'_>> for &ClassFilter {
+    fn eq(&self, other: &ClassRef) -> bool {
+        if self.name != other.name {
+            return false;
+        }
+        let Some(methods) = &self.methods else { return true };
+        methods.iter().map(|(name, desc)| other.find_method(name, desc)).try_collect::<Vec<_>>().is_some()
+    }
+}
 
 pub struct BytecodeHelper {
-    tracked_classes: HashSet<String>,
+    tracked_classes: Vec<ClassFilter>,
     cached_bytecode: RefCell<Vec<(String, Vec<u8>)>>,
 }
 
 impl BytecodeHelper {
     pub fn new() -> Self {
-        let mut tracked_classes = HashSet::new();
+        let mut tracked_classes = Vec::new();
         #[cfg(feature = "debug")]
         {
             use crate::vm::debug::loader;
@@ -26,11 +44,11 @@ impl BytecodeHelper {
         }
     }
 
-    pub fn push_class(&self, class_name: &str, bytecode: Vec<u8>) {
+    pub fn push_class(&self, class: ClassRef, bytecode: Vec<u8>) {
         #[cfg(feature = "debug")]
         {
-            if self.tracked_classes.contains(class_name) {
-                self.cached_bytecode.borrow_mut().push((class_name.to_owned(), bytecode));
+            if self.tracked_classes.iter().find(|f| f == &class).is_some() {
+                self.cached_bytecode.borrow_mut().push((class.name.clone(), bytecode));
             }
         }
     }

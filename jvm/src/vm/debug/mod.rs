@@ -44,6 +44,7 @@ mod loader{
     use std::collections::HashSet;
     use std::fs::File;
     use std::io::Read;
+    use crate::vm::debug::bytecode::ClassFilter;
 
     #[derive(Deserialize, Debug)]
     pub struct Config{
@@ -60,7 +61,7 @@ mod loader{
     
     #[derive(Deserialize, Debug)]
     pub struct BytecodeConfig {
-        pub classes: HashSet<String>,
+        pub classes: Vec<ClassFilter>,
     }
 
     pub fn load_config() -> Option<Config>{
