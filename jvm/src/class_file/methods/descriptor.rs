@@ -1,4 +1,9 @@
 use crate::class_file::fields::field_type::FieldType;
+use crate::class_file::fields::get_class_descriptor;
+use crate::vm::constants::{METHODTYPE_ptypes_INDEX, METHODTYPE_rtype_INDEX};
+use crate::vm::result::VMResult;
+use crate::vm::value::{Reference, ReferenceType};
+use crate::vm::VM;
 use lazy_regex::{lazy_regex, Lazy};
 use regex::Regex;
 use std::hash::{Hash, Hasher};
@@ -60,3 +65,26 @@ impl PartialEq for MethodDescriptor{
 }
 
 impl Eq for MethodDescriptor{}
+
+// TODO move to vm module, descriptor is independent
+pub fn from_method_type(method_type_ref: Reference) -> VMResult<String> {
+    let ptypes_array_ref = method_type_ref.get_field(METHODTYPE_ptypes_INDEX).expect_reference()?;
+
+    let mut desc = String::from("(");
+    if let ReferenceType::Array(_, _, content) = &ptypes_array_ref.reference_type {
+        content.borrow().iter().for_each(|p| {
+            let param_class_name = VM::extract_class_name_from_class_object(p.expect_reference().unwrap()).unwrap();
+            println!("{}", param_class_name);
+            desc += get_class_descriptor(param_class_name.as_str()).as_str();
+        });
+    }
+    desc.push_str(")");
+
+    let rtype_ref = method_type_ref.get_field(METHODTYPE_rtype_INDEX).expect_reference()?;
+    if rtype_ref.is_null() {
+        unreachable!("It seems like the return type cant actually be null")
+    }
+    let rtype = VM::extract_class_name_from_class_object(rtype_ref)?;
+    desc += get_class_descriptor(rtype.as_str()).as_str();
+    Ok(desc)
+}

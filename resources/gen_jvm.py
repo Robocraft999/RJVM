@@ -1,7 +1,7 @@
 import re
 
 def transform_type(typ):
-    if typ in ["jint", "jobject", "jintArray", "jobjectArray", "jboolean", "jlong", "jclass", "jbyteArray", "jstring", "jvalue", "jdouble", "jfieldID", "jmethodID", "jsize"]:
+    if typ in ["jint", "jobject", "jintArray", "jobjectArray", "jboolean", "jlong", "jclass", "jbyteArray", "jstring", "jvalue", "jdouble", "jfieldID", "jmethodID", "jsize", "jfloat"]:
         return typ
     elif typ == "int":
         return "i32"
@@ -45,7 +45,7 @@ def transform_type(typ):
 def main():
     with open("jvm.h") as f:
         content = f.read()
-        patt = re.compile(r"JNIEXPORT\s+([\w*\s]+)\s+JNICALL\s*(\w+)\(([\w*\s,]+)\);")
+        patt = re.compile(r"JNIEXPORT\s+([\w*\s]+)\s+JNICALL\s*(\w+)\s*\(([\w*\s,]*)\);")
         arg_patt = re.compile(r"(\w[\w\s]*[\s*]+)(\w+)")
 
         output = ""
@@ -65,10 +65,10 @@ def main():
             args_rust = args_rust[:-2]
 
             ret_rust = transform_type(ret)
-            output += f'pub extern "C" fn {name}({args_rust}) -> {ret_rust}{{\n'
+            output += f'pub unsafe extern "system-unwind" fn {name}({args_rust}) -> {ret_rust} {{\n'
             output += "    unimplemented!();\n}\n\n"
 
-        with open("jvm.rs", "w") as f:
+        with open("jvm_generated.rs", "w") as f:
             f.write(output)
 
 if __name__ == "__main__":

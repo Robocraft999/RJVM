@@ -1,8 +1,9 @@
-use crate::class_file::fields::field_type::FieldType;
+use crate::class_file::fields::field_type::{FieldType, PrimitiveType};
 use crate::vm::class::ClassId;
+use crate::vm::constants::STRING_value_INDEX;
 use crate::vm::{VmError, VM};
 use std::cell::RefCell;
-use std::fmt::{Debug, Display, Formatter, Pointer};
+use std::fmt::{Debug, Formatter};
 
 #[derive(PartialEq, Default, Clone)]
 pub enum Value<'a>{
@@ -177,6 +178,8 @@ impl<'a> ReferenceValue<'a>{
                     format!("{}:{}:{:?}->'{}'", rv.id, rv.class_name, rv.class_id.0, VM::extract_string_from_object(field).unwrap_or("VMError".to_string()))
                 } else if rv.class_name == "[C"{
                     format!("{}:{}:{:?}->'{}'", rv.id, rv.class_name, rv.class_id.0, VM::extract_string_from_char_arr(field).unwrap_or("VMError".to_string()))
+                } else if rv.class_name == "java/lang/Class" {
+                    format!("{}:{}:{:?}->'{}'", rv.id, rv.class_name, rv.class_id.0, VM::extract_class_name_from_class_object(rv).unwrap_or("VMError".to_string()))
                 } else if rv.id == 0{
                     "Null".to_string()
                 } else {
@@ -188,7 +191,7 @@ impl<'a> ReferenceValue<'a>{
         match &self.reference_type {
             ReferenceType::Object(fields) => {
                 if self.class_name == "java/lang/String" {
-                    let internal = VM::extract_string_from_char_arr(&self.get_field(0)).unwrap_or("VMError".to_string());
+                    let internal = VM::extract_string_from_char_arr(&self.get_field(STRING_value_INDEX)).unwrap_or("VMError".to_string());
                     let mut components = Vec::new();
                     components.push(internal);
                     let mut other_fields = fields.borrow().iter().skip(1).map(object).collect();
@@ -199,8 +202,8 @@ impl<'a> ReferenceValue<'a>{
                 }
             },
             ReferenceType::Array(_, field_type, content) => {
-                vec![String::from("<redacted>")]
-                /*if let FieldType::Primitive(PrimitiveType::Char) = field_type {
+                //vec![String::from("<redacted>")]
+                if let FieldType::Primitive(PrimitiveType::Char) = field_type {
                     let chars: Vec<char> = content.borrow().iter().map(|e| if let Value::Integer(val) = e {char::from_u32(*val as u32).unwrap()} else {'?'}).collect();
                     vec![chars.iter().collect::<String>()]
                 } else if let FieldType::Primitive(PrimitiveType::Byte) = field_type {
@@ -209,21 +212,21 @@ impl<'a> ReferenceValue<'a>{
                     let mut vec = Vec::new();
                     let mut null_counter = 0;
                     for value in content.borrow().iter(){
-                        if let Value::Null = value{
+                        if value.is_null() {
                             null_counter += 1;
                         } else {
                             if null_counter > 0{
-                                vec.push(format!("{}x{}", null_counter, object(&Value::Null)));
+                                vec.push(format!("{}xNull", null_counter));
                                 null_counter = 0;
                             }
                             vec.push(object(&value));
                         }
                     }
                     if null_counter > 0{
-                        vec.push(format!("{}x{}", null_counter, object(&Value::Null)));
+                        vec.push(format!("{}xNull", null_counter));
                     }
                     vec
-                }*/
+                }
             }
         }
     }

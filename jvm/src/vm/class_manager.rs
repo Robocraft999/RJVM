@@ -1,21 +1,22 @@
 use crate::class_file::attributes::ClassFileAttributes;
-use crate::class_file::constant_pool::{BytecodeBehavior, ConstantPool, ConstantPoolEntry};
+use crate::class_file::constant_pool::{ConstantPoolEntry};
 use crate::class_file::fields::attributes::FieldInfoAttributes;
 use crate::class_file::fields::field_type::{extract_component_type_from_array_class, FieldType};
 use crate::class_file::fields::{primitive_to_wrapper_name, FieldInfo};
 use crate::class_file::methods::attributes::{CodeAttributes, MethodInfoAttributes};
 use crate::class_file::methods::descriptor::MethodDescriptor;
-use crate::class_file::methods::MethodInfo;
+use crate::class_file::methods::{MethodInfo, GARBAGE_VTABLE_INDEX};
 use crate::class_file::nom::parse_class_file;
 use crate::error::ClassParseError;
-use crate::vm::class::{ArrayInfo, Class, ClassAndField, ClassAndMethod, ClassId, ClassRef};
+use crate::vm::class::{ArrayInfo, Class, ClassId, ClassRef};
 use crate::vm::class_path::ClassPath;
 use crate::vm::result::VMResult;
-use crate::vm::{bytecode, class, VmError, VM};
+use crate::vm::value::Reference;
+use crate::vm::{bytecode, VmError, VM};
 use log::{info, warn};
 use std::cell::RefCell;
 use std::cmp::PartialEq;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap};
 use std::str::FromStr;
 use typed_arena::Arena;
 
@@ -48,12 +49,17 @@ pub enum ClassLoadingState{
     INITIALIZED,
 }
 
+pub struct AnonClassInfo<'a> {
+    pub clazz: ClassRef<'a>,
+    pub host: Reference<'a>,
+}
 
 pub struct ClassManager<'a>{
     pub class_path: ClassPath,
     pub classes_by_name: RefCell<HashMap<String, ClassRef<'a>>>,
     pub classes_by_id: RefCell<HashMap<ClassId, ClassRef<'a>>>,
     pub class_loading_states: RefCell<HashMap<ClassId, ClassLoadingState>>,
+    pub anonymous_classes: RefCell<HashMap<u32, AnonClassInfo<'a>>>,
     pub classes: Arena<Class<'a>>,
     pub primitive_class_ids: RefCell<HashMap<String, ClassId>>,
     next_id: RefCell<u32>,
@@ -66,6 +72,7 @@ impl<'a> ClassManager<'a>{
             classes_by_name: RefCell::new(HashMap::new()),
             classes_by_id: RefCell::new(HashMap::new()),
             class_loading_states: RefCell::new(HashMap::new()),
+            anonymous_classes: RefCell::new(HashMap::new()),
             classes: Arena::with_capacity(100),
             primitive_class_ids: RefCell::new(HashMap::new()),
             next_id: RefCell::new(1),
@@ -87,21 +94,56 @@ impl<'a> ClassManager<'a>{
     }
 
     pub fn parse_and_load_class(&self, vm: &VM<'a>, class_name: &str, class_to_load_name: &str, array_info: Option<ArrayInfo>, bytes: Vec<u8>) -> VMResult<ClassRef<'a>>{
-        let parsed_class = parse_class_file(bytes)?;
+        let class = self.define_class(vm, Some(class_name), array_info, bytes)?;
+
+        if class.array_info.is_some(){
+            let _ = self.get_or_resolve_class(vm, class_to_load_name)?;
+        }
+
+        // alloc + register
+        let class_ref = self.classes.alloc(class);
+
+        let class_ref = unsafe {
+            let class_ptr: *const Class<'a> = class_ref;
+            &*class_ptr
+        };
+
+        self.classes_by_name.borrow_mut().insert(class_name.to_string(), class_ref);
+        self.classes_by_id.borrow_mut().insert(class_ref.id, class_ref);
+        self.class_loading_states.borrow_mut().insert(class_ref.id, ClassLoadingState::LOADED);
+
+        Ok(class_ref)
+    }
+
+    pub fn define_class(&self, vm: &VM<'a>, class_name: Option<&str>, array_info: Option<ArrayInfo>, bytes: Vec<u8>) -> VMResult<Class<'a>>{
+        let parsed_class = parse_class_file(bytes.clone())?;
         let next_id = *self.next_id.borrow();
         *self.next_id.borrow_mut() += 1;
 
-        // fix constant pool
-        let constants = parsed_class.constant_pool/*.into_iter().flat_map(|e| match e {
-            FastConstantPoolEntry::Double(v) => vec![FastConstantPoolEntry::Double(v), FastConstantPoolEntry::Dummy],
-            FastConstantPoolEntry::Long(v) => vec![FastConstantPoolEntry::Long(v), FastConstantPoolEntry::Dummy],
-            single => vec![single],
-        }).collect()*/;
+        let constants = parsed_class.constant_pool;
+        let class_name = match class_name {
+            Some(name) => Ok(name.to_owned()),
+            None => {
+                if let Some(ConstantPoolEntry::RawClass(name_index)) = constants.get(parsed_class.this_class as usize - 1){
+                    if let Some(ConstantPoolEntry::Utf8(name)) = constants.get(*name_index as usize - 1){
+                        Ok(name.clone())
+                    } else {
+                        Err(VmError::ParseError(ClassParseError::ConstantPoolError("Expected a utf entry".to_string())))
+                    }
+                } else {
+                    Err(VmError::ParseError(ClassParseError::ConstantPoolError("Expected a raw class entry".to_string())))
+                }
+            }
+        }?;
+
+        if self.classes_by_name.borrow().contains_key(&class_name){
+            warn!("Duplicate class name {}", class_name);
+        }
 
         // shallow class
         let mut class = Class{
             id: ClassId(next_id),
-            name: class_name.to_string(),
+            name: class_name,
             constants: RefCell::new(constants),
             flags: parsed_class.access_flags,
             superclass: None,
@@ -128,14 +170,14 @@ impl<'a> ClassManager<'a>{
                 .map(|e| if let ConstantPoolEntry::Class(clazz) = e {Some(clazz)} else {None}))
             .flatten()
             .try_collect::<Vec<ClassRef>>()
-            .ok_or(VmError::ParseError(ClassParseError::ConstantPoolError(format!("Interface of {} could not be loaded.", class_name))))?;
+            .ok_or(VmError::ParseError(ClassParseError::ConstantPoolError(format!("Interface of {} could not be loaded.", class.name))))?;
 
         // build class attributes
         for ra in parsed_class.attributes.into_iter(){
             if let Some(ConstantPoolEntry::Utf8(name)) = class.get_or_resolve_constant(&vm, ra.attribute_name_index){
                 class.attributes.set(name.as_str(), ra.info).unwrap();
             } else {
-                warn!("Attribute of {} ({}) could not be loaded.", class_name, ra.attribute_name_index);
+                warn!("Attribute of {} ({}) could not be loaded.", class.name, ra.attribute_name_index);
             }
         }
 
@@ -145,9 +187,10 @@ impl<'a> ClassManager<'a>{
             None => 0,
         };
         class.fields = parsed_class.fields.iter()
-            .map(|raw_field| (raw_field, class.get_or_resolve_constant(&vm, raw_field.name_index), class.get_or_resolve_constant(&vm, raw_field.descriptor_index)))
+            .enumerate()
+            .map(|(i, raw_field)| (i, raw_field, class.get_or_resolve_constant(&vm, raw_field.name_index), class.get_or_resolve_constant(&vm, raw_field.descriptor_index)))
             .map(|optional| match optional {
-                (raw_field, Some(ConstantPoolEntry::Utf8(name)), Some(ConstantPoolEntry::Utf8(descriptor))) => {
+                (i, raw_field, Some(ConstantPoolEntry::Utf8(name)), Some(ConstantPoolEntry::Utf8(descriptor))) => {
                     let mut field_attributes = FieldInfoAttributes::default();
                     for ra in raw_field.attributes.iter(){
                         if let Some(ConstantPoolEntry::Utf8(name)) = class.get_or_resolve_constant(&vm, ra.attribute_name_index){
@@ -159,13 +202,15 @@ impl<'a> ClassManager<'a>{
                         name,
                         attributes: field_attributes,
                         field_type,
+                        slot: i + super_class_field_count,
+                        holder_id: class.id,
                         flags: raw_field.access_flags,
                     })
                 }
                 _ => None,
             })
             .try_collect::<Vec<FieldInfo>>()
-            .ok_or(VmError::ParseError(ClassParseError::ConstantPoolError(format!("Field of class '{}' could not be loaded.", class_name))))?;
+            .ok_or(VmError::ParseError(ClassParseError::ConstantPoolError(format!("Field of class '{}' could not be loaded.", class.name))))?;
         class.transitive_field_count = super_class_field_count + class.fields.len();
         class.first_field_index = super_class_field_count;
 
@@ -194,8 +239,10 @@ impl<'a> ClassManager<'a>{
                     Some(MethodInfo{
                         name,
                         descriptor,
-                        slot: i,
+                        slot: i+1,
+                        vtable_index: GARBAGE_VTABLE_INDEX,
                         attributes: method_attributes,
+                        is_holder_interface: class.is_interface(),
                         code_blocks,
                         flags: raw_field.access_flags,
                     })
@@ -203,29 +250,22 @@ impl<'a> ClassManager<'a>{
                 _ => None,
             })
             .try_collect::<Vec<MethodInfo>>()
-            .ok_or(VmError::ParseError(ClassParseError::ConstantPoolError(format!("Method of class '{}' could not be loaded.", class_name))))?;
-
-        if class.array_info.is_some(){
-            let _ = self.get_or_resolve_class(vm, class_to_load_name)?;
-        }
-
-        // alloc + register
-        let class_ref = self.classes.alloc(class);
+            .ok_or(VmError::ParseError(ClassParseError::ConstantPoolError(format!("Method of class '{}' could not be loaded.", class.name))))?;
 
         let class_ref = unsafe {
-            let class_ptr: *const Class<'a> = class_ref;
+            let class_ptr: *const Class<'a> = &class;
             &*class_ptr
         };
+        vm.debug_helper.bytecode_helper.push_class(class_ref, bytes);
 
-        self.classes_by_name.borrow_mut().insert(class_name.to_string(), class_ref);
-        self.classes_by_id.borrow_mut().insert(class_ref.id, class_ref);
-        self.class_loading_states.borrow_mut().insert(class_ref.id, ClassLoadingState::LOADED);
+        class.init_vtable();
+        class.init_itable();
 
-        Ok(class_ref)
+        Ok(class)
     }
     
-    // Use this carefully! The is no ClassRef for this id
-    pub fn get_primitive_class(&self, vm: &VM<'a>, name: &str) -> ClassId{
+    /// Use this carefully! The is no ClassRef for this id
+    pub fn get_primitive_class(&self, vm: &VM<'a>, name: &str) -> ClassId {
         if !self.primitive_class_ids.borrow().contains_key(name){
             let id = *self.next_id.borrow();
             *self.next_id.borrow_mut() += 1;
@@ -265,7 +305,12 @@ impl<'a> ClassManager<'a>{
 
     fn try_create_array_class(&self, class_name: &str) -> VMResult<(String, Option<ArrayInfo>)>{
         if let Ok((component_type, dims)) = extract_component_type_from_array_class(class_name){
-            let new_class_name = component_type.to_class_name();
+            let new_class_name = if component_type.is_primitive() {
+                // 私はこれがすきじゃないです
+                primitive_to_wrapper_name(component_type.to_class_name().as_str())
+            } else {
+                component_type.to_class_name()
+            };
             info!("{}", new_class_name);
             let array_info = ArrayInfo{
                 dims,

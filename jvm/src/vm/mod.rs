@@ -1,29 +1,22 @@
 use callstack::CallStack;
-use cesu8::{from_java_cesu8, to_java_cesu8, Cesu8DecodingError};
+use cesu8::{from_java_cesu8, Cesu8DecodingError};
 use log::{debug, error, info, trace, warn};
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::fs::File;
-use std::rc::Rc;
-use std::str::Utf8Error;
 use thiserror::Error;
 
-use crate::access_flags::MethodFlag;
-use crate::bytecode::Instruction;
-use crate::class_file::constant_pool::{BytecodeBehavior, ConstantPoolEntry};
+use crate::class_file::constant_pool::{BytecodeBehavior};
 use crate::class_file::fields::field_type::{FieldType, PrimitiveType};
-use crate::class_file::methods::attributes::ExceptionTableEntry;
 use crate::class_file::methods::descriptor::MethodDescriptor;
 use crate::error::ClassParseError;
-use crate::vm::bytecode::InstructionBlock;
-use crate::vm::call_frame::CallFrame;
-use crate::vm::class::{Class, ClassAndMethod, ClassId, ClassRef};
-use crate::vm::class_manager::{ClassLoadingState, ResolvedClass};
+use crate::vm::class::{ClassAndMethod, ClassId, ClassRef};
+use crate::vm::class_manager::{ClassLoadingState};
+use crate::vm::constants::{CLASS_name_INDEX, LONG_value_INDEX, STRING_hash_INDEX, STRING_value_INDEX, THROWABLE_detailsMessage_INDEX};
 use crate::vm::debug::DebugHelper;
 use crate::vm::gc::ObjectAllocator;
 use crate::vm::java_error::JavaError;
-use crate::vm::java_native_method_impl::{register_all_natives, NativeMethodRegistry};
 use crate::vm::jni::types::JavaVM;
+use crate::vm::native::{register_all_natives, NativeMethodRegistry};
 use crate::vm::r#unsafe::Unsafe;
 use crate::vm::result::{VMPartialResult, VMResult, VMResultType};
 use crate::vm::value::{Reference, ReferenceType};
@@ -41,13 +34,15 @@ mod call_frame;
 mod callstack;
 pub mod class;
 mod gc;
-mod java_native_method_impl;
 mod r#unsafe;
 pub mod result;
 pub mod bytecode; //TODO move out from vm
 mod executor;
 mod debug;
 pub mod jni;
+mod call_info;
+pub(crate) mod constants;
+mod native;
 
 pub struct VM<'a>{
     pub class_manager: ClassManager<'a>,
@@ -62,6 +57,7 @@ pub struct VM<'a>{
     pub native_method_registry: NativeMethodRegistry<'a>,
     pub currently_open_files: RefCell<HashMap<String, (Vec<u8>, usize)>>,
     pub current_thread: RefCell<Option<Reference<'a>>>,
+    pub current_locks: RefCell<HashMap<u32, usize>>,
     pub caught_exception: RefCell<Option<(String, String, Value<'a>)>>,
     pub debug_helper: DebugHelper,
 }
@@ -85,6 +81,7 @@ impl<'a> VM<'a>{
             native_method_registry,
             currently_open_files: RefCell::new(HashMap::new()),
             current_thread: RefCell::new(None),
+            current_locks: RefCell::new(HashMap::new()),
             caught_exception: RefCell::new(None),
             debug_helper: DebugHelper::new()
         }
@@ -102,6 +99,7 @@ impl<'a> VM<'a>{
         self.invoke_frames_until(java_vm, current_index)
     }
 
+    /// Returns only Err() or Ok(Successful())
     pub fn invoke_frames_until(&self, java_vm: &JavaVM, stop_index: isize) -> VMPartialResult<Option<Value<'a>>> {
         loop {
             let frame_amount = self.call_stack.len();
@@ -221,7 +219,14 @@ impl<'a> VM<'a>{
 
     pub fn get_or_initialize_class(&self, class_name: &str) -> VMPartialResult<ClassRef<'a>>{
         let resolved = self.get_or_resolve_class(class_name)?;
-        let to_init = self.class_manager.get_classes_to_initialize(resolved)?;
+        self.ensure_initialized(resolved)
+    }
+
+    pub fn ensure_initialized(&self, clazz: ClassRef<'a>) -> VMPartialResult<ClassRef<'a>> {
+        if self.class_manager.expect_class_state(clazz.id, ClassLoadingState::INITIALIZED) {
+            return Ok(VMResultType::Successful(clazz));
+        }
+        let to_init = self.class_manager.get_classes_to_initialize(clazz)?;
         if to_init.len() > 0{
             let count = to_init.iter()
                 .map(|clazz| {
@@ -233,10 +238,10 @@ impl<'a> VM<'a>{
             if count > 0{
                 Ok(VMResultType::Interrupted(count, true))
             } else {
-                Ok(VMResultType::Successful(resolved))
+                Ok(VMResultType::Successful(clazz))
             }
         } else {
-            Ok(VMResultType::Successful(resolved))
+            Ok(VMResultType::Successful(clazz))
         }
     }
 
@@ -303,7 +308,7 @@ impl<'a> VM<'a>{
         let fields = class.get_fields(&self);
         let obj = self.object_allocator.allocate_object(class, fields);
         self.objects_by_id.borrow_mut().insert(obj.id, obj);
-        self.debug_helper.tracker.push_object_event(obj.id, format!("Object ({}) allocated", class.name));
+        self.debug_helper.tracker.push_object_event(obj.id, format!("Object ({}) allocated in {:?}", class.name, self.call_stack.frames.borrow().last().map(|f| f.class_and_method.format())));
         obj
     }
 
@@ -321,7 +326,7 @@ impl<'a> VM<'a>{
         let class = self.get_or_resolve_class(class_name.as_str())?;
         let obj = self.object_allocator.allocate_array(class, dims, *component_type, content);
         self.objects_by_id.borrow_mut().insert(obj.id, obj);
-        self.debug_helper.tracker.push_object_event(obj.id, format!("Array ({}) allocated", class.name));
+        self.debug_helper.tracker.push_object_event(obj.id, format!("Array allocated:   \n{:?}", obj));
         Ok(VMResultType::Successful(obj))
         /*get_or_init_special!(self.get_or_initialize_class(class_name.as_str())?,
             |class| {
@@ -359,8 +364,8 @@ impl<'a> VM<'a>{
         }
     }
 
-    pub fn try_new_class_object(&self, class_name: &str, class_id: ClassId) -> VMResult<Reference<'a>>{
-        let result = self.new_class_object(class_name, class_id)?;
+    pub fn try_new_class_object(&self, class: ClassRef<'a>) -> VMResult<Reference<'a>>{
+        let result = self.new_class_object_by_class(class)?;
         if let VMResultType::Successful(object) = result {
             Ok(object)
         } else {
@@ -381,9 +386,9 @@ impl<'a> VM<'a>{
         let string_object = get_or_init!(self.new_object("java/lang/String")?);
 
         //value
-        string_object.set_field(0, char_array);
+        string_object.set_field(STRING_value_INDEX, char_array);
         //hash
-        string_object.set_field(1, Value::Integer(0));
+        string_object.set_field(STRING_hash_INDEX, Value::Integer(0));
 
         self.string_objects.borrow_mut().insert(string.to_owned(), string_object);
         Ok(VMResultType::Successful(string_object))
@@ -392,7 +397,7 @@ impl<'a> VM<'a>{
     pub fn extract_string_from_object(value: &Value<'a>) -> VMResult<String>{
         if let Value::Reference(reference) = value{
             if !reference.is_null() {
-                let chars = reference.get_field(0);
+                let chars = reference.get_field(STRING_value_INDEX);
                 return Self::extract_string_from_char_arr(&chars);
             }
         }
@@ -411,13 +416,13 @@ impl<'a> VM<'a>{
     }
 
     // FIXME use only ClassRef instead
-    pub fn new_class_object(&self, class_name: &str, class_id: ClassId) -> VMPartialResult<Reference<'a>>{
+    fn new_class_object(&self, class_name: &str, class_id: ClassId) -> VMPartialResult<Reference<'a>>{
         if !self.class_objects.borrow().contains_key(&class_id){
             let class_object = get_or_init!(self.new_object("java/lang/Class")?);
             let string_object = get_or_init!(self.new_string_object(class_name.replace("/", ".").as_str())?);
 
             //name
-            class_object.set_field(5, Value::Reference(string_object));
+            class_object.set_field(CLASS_name_INDEX, Value::Reference(string_object));
 
             self.class_objects.borrow_mut().insert(class_id, class_object);
             Ok(VMResultType::Successful(class_object))
@@ -426,15 +431,23 @@ impl<'a> VM<'a>{
         }
     }
 
-    pub fn new_class_object_by_class(&self, class: ClassRef<'a>) -> VMPartialResult<Reference<'a>>{
-        let class_id = class.id;
-        let class_name = class.name.as_str();
-        self.new_class_object(class_name, class_id)
+    pub fn new_class_object_by_name(&self, class_name: &str) -> VMPartialResult<Reference<'a>> {
+        let class = self.get_or_resolve_class(class_name)?;
+        self.new_class_object(class_name, class.id)
     }
 
-    pub fn new_class_object_by_name(&self, class_name: &str) -> VMPartialResult<Reference<'a>> {
-        let class_id = self.get_or_resolve_class(class_name)?.id;
-        self.new_class_object(class_name, class_id)
+    pub fn new_class_object_by_class(&self, class: ClassRef<'a>) -> VMPartialResult<Reference<'a>> {
+        self.new_class_object(class.name.as_str(), class.id)
+    }
+
+    pub fn new_class_object_from_field_type(&self, field_type: &FieldType) -> VMPartialResult<Reference<'a>> {
+        let class_name = field_type.to_class_name();
+        if field_type.is_primitive() {
+            let class_id = self.class_manager.get_primitive_class(self, class_name.as_str());
+            self.new_class_object(class_name.as_str(), class_id)
+        } else {
+            self.new_class_object_by_name(class_name.as_str())
+        }
     }
 
     pub fn new_method_type(&self, java_vm: &JavaVM, descriptor: &MethodDescriptor) -> VMPartialResult<Option<Value<'a>>> {
@@ -442,12 +455,24 @@ impl<'a> VM<'a>{
 
         let mut b_args_classes = Vec::new();
         for ft in &descriptor.args{
-            let class_ref = get_or_init!(self.new_class_object_by_name(ft.to_class_name().as_str())?);
+            /*let class_name = if ft.is_primitive() {
+                primitive_to_wrapper_name(ft.to_class_name().as_str())
+            } else {
+                ft.to_class_name()
+            };
+            let class_ref = get_or_init!(self.new_class_object_by_name(class_name.as_str())?);*/
+            let class_ref = get_or_init!(self.new_class_object_from_field_type(ft)?);
             b_args_classes.push(Value::Reference(class_ref));
         }
-        let b_ret_type_class_name = descriptor.return_type.clone().map(|ft| ft.to_class_name());
-        let b_ret_type = if let Some(name) = b_ret_type_class_name{
-            Value::Reference(get_or_init!(self.new_class_object_by_name(name.as_str())?))
+        let b_ret_type_class_name = descriptor.return_type.clone();
+        let b_ret_type = if let Some(ft) = b_ret_type_class_name{
+            /*let class_name = if ft.is_primitive() {
+                primitive_to_wrapper_name(ft.to_class_name().as_str())
+            } else {
+                ft.to_class_name()
+            };
+            Value::Reference(get_or_init!(self.new_class_object_by_name(class_name.as_str())?))*/
+            Value::Reference(get_or_init!(self.new_class_object_from_field_type(&ft)?))
         } else {
             self.null()
         };
@@ -463,8 +488,8 @@ impl<'a> VM<'a>{
     }
     
     /// does call a function which places the result in the current frame
-    pub fn new_method_handle(&self, java_vm: &JavaVM, pool_holder: ClassRef<'a>, kind: BytecodeBehavior, cam: ClassAndMethod, method_type_ref: Reference<'a>) -> VMPartialResult<Option<Value<'a>>>{
-        let callee = get_or_init!(self.get_or_initialize_class(cam.class.name.as_str())?);
+    pub fn new_method_handle(&self, java_vm: &JavaVM, pool_holder: ClassRef<'a>, kind: BytecodeBehavior, cam: ClassAndMethod<'a>, method_type_ref: Reference<'a>) -> VMPartialResult<Option<Value<'a>>>{
+        let callee = get_or_init!(self.ensure_initialized(cam.class)?);
         let callee = Value::Reference(get_or_init!(self.new_class_object_by_class(callee)?));
         let caller = Value::Reference(get_or_init!(self.new_class_object_by_class(pool_holder)?));
         let ref_kind = Value::Integer(kind as u8 as i32);
@@ -484,21 +509,37 @@ impl<'a> VM<'a>{
     pub fn new_java_lang_long(&self, value: Value<'a>) -> VMPartialResult<Value<'a>> {
         let long = get_or_init!(self.new_object("java/lang/Long")?);
         //value
-        long.set_field(4, value);
+        long.set_field(LONG_value_INDEX, value);
         Ok(VMResultType::Successful(Value::Reference(long)))
     }
 
+    pub fn extract_long(&self, value: Value<'a>) -> VMResult<Value<'a>> {
+        if let Value::Reference(long_ref) = value && long_ref.class_name == "java/lang/Long" {
+            let value = long_ref.get_field(LONG_value_INDEX).expect_long()?;
+            Ok(Value::Long(value))
+        } else {
+            Err(VmError::ValidationError("expected a long reference".to_string()))
+        }
+    }
+
     pub fn extract_class_from_class_object(&self, object: Reference<'a>) -> VMResult<ClassRef<'a>>{
-        let name_object = object.get_field(5);
+        let name_object = object.get_field(CLASS_name_INDEX);
         let name = VM::extract_string_from_object(&name_object)?;
         let name = name.replace(".", "/");
-        let class = self.get_or_resolve_class(name.as_str())?;
-
-        Ok(class)
+        let class = self.get_or_resolve_class(name.as_str());
+        match class {
+            Ok(class) => Ok(class),
+            Err(e) => {
+                match self.class_manager.anonymous_classes.borrow().get(&object.id) {
+                    Some(info) => Ok(info.clazz),
+                    None => Err(e),
+                }
+            }
+        }
     }
     
     pub fn extract_class_name_from_class_object(object: Reference<'a>) -> VMResult<String>{
-        let name_object = object.get_field(5);
+        let name_object = object.get_field(CLASS_name_INDEX);
         let name = VM::extract_string_from_object(&name_object)?;
         let name = name.replace(".", "/");
         Ok(name)
@@ -545,6 +586,28 @@ impl<'a> VM<'a>{
     pub fn null(&self) -> Value<'a>{
         Value::Reference(self.object_allocator.null)
     }
+
+    /// Returns a `VMResultType::ExceptionThrown` and places the throwable into the exception slot
+    ///
+    /// `throwable_class` has to be initialized beforehand
+    ///
+    pub fn throw<T>(&self, throwable_class: ClassRef<'a>, message: String, origin: String) -> VMPartialResult<T> {
+        //let exception_class = self.get_or_initialize_class(&throwable_class_name)?;
+        let exception_object = self.new_object_from_class(throwable_class);
+
+        let details = self.try_new_string_object(message.as_str())?;
+        //detailsMessage
+        exception_object.set_field(THROWABLE_detailsMessage_INDEX, Value::Reference(details));
+
+        let prev = self.caught_exception.replace(
+            Some((
+                message,
+                origin,
+                Value::Reference(exception_object)
+            )));
+        assert!(prev.is_none());
+        Ok(VMResultType::ExceptionThrown)
+    }
 }
 
 impl !Unpin for VM<'_>{}
@@ -564,10 +627,10 @@ pub enum VmError{
     #[error("{0}")]
     JavaException(#[from] JavaError),
 
-    #[error("")]
+    #[error("{0}")]
     ParseError(#[from] ClassParseError),
 
-    #[error("")]
+    #[error("{0}")]
     NomError(#[from] nom::Err<nom::error::Error<&'static [u8]>>),
 
     #[error("Methodcall to {0} failed")]

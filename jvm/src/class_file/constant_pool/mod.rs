@@ -19,6 +19,7 @@ pub enum ConstantPoolEntry<'a>{
 
     RawMethodRef(u16, u16),
     MethodRef(ClassAndMethod<'a>),
+    MethodRefSigPoly(ClassAndMethod<'a>, MethodDescriptor),
 
     RawInterfaceMethodRef(u16, u16),
     InterfaceMethodRef(ClassAndMethod<'a>),

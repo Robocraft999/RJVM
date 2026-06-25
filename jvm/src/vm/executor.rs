@@ -1,8 +1,11 @@
 use std::{cell::RefCell, str::FromStr};
 
-use crate::class_file::constant_pool::{ConstantPool, ConstantPoolEntry};
+use crate::class_file::constant_pool::{ConstantPoolEntry};
 use crate::class_file::fields::field_type::{FieldType, PrimitiveType};
+use crate::class_file::methods::{descriptor};
+use crate::class_file::methods::descriptor::MethodDescriptor;
 use crate::vm::class_manager::ClassLoadingState;
+use crate::vm::constants::{MEMBERNAME_clazz_INDEX, MEMBERNAME_name_INDEX, MEMBERNAME_type_INDEX, THROWABLE_detailsMessage_INDEX};
 use crate::vm::jni::types::JavaVM;
 use crate::vm::result::{VMPartialResult, VMResultType};
 use crate::{bytecode::Instruction, get_or_init, get_or_init_option, vm::{bytecode::InstructionBlock, class::{ClassAndMethod, ClassRef}, java_error::JavaError, result::VMResult, value::{ReferenceType, Value}, VmError, VM}};
@@ -24,7 +27,7 @@ pub fn execute<'a>(vm: &VM<'a>, java_vm: &JavaVM) -> VMPartialResult<Option<Valu
     }
     info!("");
     info!("METHOD_NAME: {} at {}", class_and_method.format(), vm.call_stack.get_pc().0);
-    debug!("{:?}", class_and_method.method.code_blocks);
+    trace!("{:?}", class_and_method.method.code_blocks);
     if let Some(_) = &class_and_method.method.attributes.code{
         let mut result = execute_current_block(vm, java_vm);
         while let None = result{
@@ -137,6 +140,7 @@ pub fn execute_current_block<'a>(vm: &VM<'a>, java_vm: &JavaVM) -> Option<VMPart
                 Instruction::ISTORE(index) => wrap_error!(istore(vm, *index as usize)),
                 Instruction::LSTORE(index) => wrap_error!(lstore(vm, *index as usize)),
                 Instruction::FSTORE(index) => wrap_error!(fstore(vm, *index as usize)),
+                Instruction::DSTORE(index) => wrap_error!(dstore(vm, *index as usize)),
                 Instruction::ASTORE(index) => wrap_error!(astore(vm, *index as usize)),
 
                 Instruction::ISTORE0 => wrap_error!(istore(vm, 0)),
@@ -154,6 +158,11 @@ pub fn execute_current_block<'a>(vm: &VM<'a>, java_vm: &JavaVM) -> Option<VMPart
                 Instruction::FSTORE2 => wrap_error!(fstore(vm, 2)),
                 Instruction::FSTORE3 => wrap_error!(fstore(vm, 3)),
 
+                Instruction::DSTORE0 => wrap_error!(dstore(vm, 0)),
+                Instruction::DSTORE1 => wrap_error!(dstore(vm, 1)),
+                Instruction::DSTORE2 => wrap_error!(dstore(vm, 2)),
+                Instruction::DSTORE3 => wrap_error!(dstore(vm, 3)),
+
                 Instruction::ASTORE0 => wrap_error!(astore(vm, 0)),
                 Instruction::ASTORE1 => wrap_error!(astore(vm, 1)),
                 Instruction::ASTORE2 => wrap_error!(astore(vm, 2)),
@@ -166,6 +175,7 @@ pub fn execute_current_block<'a>(vm: &VM<'a>, java_vm: &JavaVM) -> Option<VMPart
                     let popped = vm.call_stack.pop_operand_value().unwrap();
                     debug!("XASTORE: {:?}[{}] <- {:?}", popped, index, value);
                     if let Value::Reference(array_ref) = popped{
+                        vm.debug_helper.tracker.push_object_event(array_ref.id, format!("Setting [{}] to:\n    {:?}", index, value));
                         array_ref.set_element(index as usize, value);
                     }
                 }
@@ -333,6 +343,10 @@ pub fn execute_current_block<'a>(vm: &VM<'a>, java_vm: &JavaVM) -> Option<VMPart
                 Instruction::INEG => {
                     let value = wrap_error!(vm.call_stack.pop_operand_value().unwrap().expect_int());
                     vm.call_stack.push_operand_value(Value::Integer(-value))
+                }
+                Instruction::LNEG => {
+                    let value = wrap_error!(vm.call_stack.pop_operand_value().unwrap().expect_long());
+                    vm.call_stack.push_operand_value(Value::Long(-value))
                 }
 
                 Instruction::ISHL => wrap_error!(execute_i_arithmetic(vm, |val1, val2| Ok(val1 << (val2 & 0x1f)))),
@@ -620,28 +634,28 @@ pub fn execute_current_block<'a>(vm: &VM<'a>, java_vm: &JavaVM) -> Option<VMPart
 
                 Instruction::PUTSTATIC(index) => {
                     let caf = class_and_method.get_constant_field_ref(&vm, *index).unwrap();
-                    let (field_index, info, class_id) = class_and_method.class.find_field_static(caf.field.name.as_str()).unwrap();
-                    if vm.class_manager.expect_class_state(class_id, ClassLoadingState::LOADED){
+                    let class = get_or_init_option!(vm.ensure_initialized(caf.class));
+                    if vm.class_manager.expect_class_state(class.id, ClassLoadingState::LOADED){
                         unimplemented!()
                     }
-                    debug!("PUTSTATIC {} {} {} {:?}", caf.field.name, caf.field.field_type.to_descriptor(), field_index, info);
                     let value = vm.call_stack.pop_operand_value().unwrap();
-                    //let class_id = vm.class_manager.find_class_by_name(class_name.as_str()).unwrap().id;
+
+                    let (field_index, info, class_id) = class.find_field_static(caf.field.name.as_str()).unwrap();
                     let object = vm.get_static_class_object(class_id).unwrap();
                     vm.debug_helper.tracker.push_object_event(object.id, format!("Set static field: {}: {:?} to:\n    {:?}", info.name, info.field_type, value));
+                    debug!("PUTSTATIC {} {} {} {:?}", caf.field.name, caf.field.field_type.to_descriptor(), field_index, info);
                     object.set_field(field_index, value);
                 }
                 Instruction::GETSTATIC(index) => {
                     let caf = class_and_method.get_constant_field_ref(&vm, *index).unwrap();
-                    //let (field_index, info) = self.class_and_method.class.find_field(field_name.as_str()).unwrap();
-                    //let class = vm.class_manager.find_class_by_name(class_name.as_str()).unwrap();
-                    let class = get_or_init_option!(vm.get_or_initialize_class(caf.class.name.as_str()));
+                    let class = get_or_init_option!(vm.ensure_initialized(caf.class));
                     if vm.class_manager.expect_class_state(class.id, ClassLoadingState::LOADED){
                         unimplemented!()
                     }
                     let (field_index, info, class_id) = class.find_field_static(caf.field.name.as_str()).unwrap();
                     let object = vm.get_static_class_object(class_id).unwrap();
                     debug!("GETSTATIC {} {} {} {:?}", caf.field.name, caf.field.field_type.to_descriptor(), field_index, info);
+
                     vm.call_stack.push_operand_value(object.get_field(field_index));
                 }
                 Instruction::GETFIELD(index) => {
@@ -675,22 +689,70 @@ pub fn execute_current_block<'a>(vm: &VM<'a>, java_vm: &JavaVM) -> Option<VMPart
                 Instruction::INVOKESTATIC(index) => { return Some(execute_invoke(vm, *index, InvokeKind::STATIC)) }
                 Instruction::INVOKEINTERFACE(index, _, _) => { return Some(execute_invoke(vm, *index, InvokeKind::INTERFACE)) }
                 Instruction::INVOKEDYNAMIC(index, _, _) => {
-                    if let Some(ConstantPoolEntry::InvokeDynamic(bm, method_name, type_name)) = class_and_method.class.get_or_resolve_constant(vm, *index){
-                        if let Some(ConstantPoolEntry::MethodHandleMethod(kind, cam)) = class_and_method.class.get_or_resolve_constant(vm, bm.bootstrap_method_ref){
-                            let method_type_ref_option = get_or_init_option!(vm.new_method_type(java_vm, &cam.method.descriptor));
+                    let Some(ConstantPoolEntry::InvokeDynamic(bm, name, typ)) = class_and_method.class.get_or_resolve_constant(vm, *index) else { unreachable!("Do Errors") };
+                    let caller_obj = Value::Reference(get_or_init_option!(vm.new_class_object_by_class(class_and_method.class)));
 
-                            if let Some(Value::Reference(method_type_ref)) = method_type_ref_option{
-                                let method_handle_option = get_or_init_option!(vm.new_method_handle(java_vm, class_and_method.class, kind, cam, method_type_ref));
-                                unimplemented!()
+                    let Some(ConstantPoolEntry::MethodHandleMethod(bm_kind, bootstrap_cam)) = class_and_method.class.get_or_resolve_constant(vm, bm.bootstrap_method_ref) else { unreachable!("Do Errors") };
+                    let Some(Value::Reference(bm_type_ref)) = get_or_init_option!(vm.new_method_type(java_vm, &bootstrap_cam.method.descriptor)) else { unreachable!("Do errors") };
+                    let bootstrap_method_obj = get_or_init_option!(vm.new_method_handle(java_vm, class_and_method.class, bm_kind, bootstrap_cam, bm_type_ref)).unwrap();
+
+                    let name_obj = Value::Reference(get_or_init_option!(vm.new_string_object(name.as_str())));
+                    let Some(type_obj) = get_or_init_option!(vm.new_method_type(java_vm, &MethodDescriptor::new(typ))) else { unreachable!("Do Errors") };
+
+                    let mut static_args = Vec::new();
+                    for index in bm.bootstrap_arguments.iter() {
+                        let Some(val) = (match class_and_method.class.get_or_resolve_constant(vm, *index) {
+                            Some(ConstantPoolEntry::MethodType(desc)) => get_or_init_option!(vm.new_method_type(java_vm, &desc)),
+                            Some(ConstantPoolEntry::MethodHandleMethod(arg_kind, arg_cam)) => {
+                                let Some(Value::Reference(arg_method_type)) = get_or_init_option!(vm.new_method_type(java_vm, &arg_cam.method.descriptor)) else {
+                                    return Some(Err(VmError::ValidationError("Could not create MethodType for static callsite arg".to_string())));
+                                };
+                                get_or_init_option!(vm.new_method_handle(java_vm, class_and_method.class, arg_kind, arg_cam, arg_method_type))
                             }
-                        }
+                            _ => unimplemented!()
+                        }) else {
+                            return Some(Err(VmError::ValidationError("Could not load static arg for invokedynamic".to_string())));
+                        };
+                        static_args.push(val);
                     }
-                    unimplemented!()
+                    let static_arguments = Value::Reference(get_or_init_option!(vm.new_object_array_1(static_args)));
+
+                    let appendix_ref = get_or_init_option!(vm.new_object_array_1(vec![vm.null()]));
+                    let appendix_result = Value::Reference(appendix_ref);
+
+                    println!("schwubbel1");
+                    let helper = vm.resolve_class_method(
+                        "java/lang/invoke/MethodHandleNatives",
+                        "linkCallSite",
+                        "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/invoke/MemberName;"
+                    ).unwrap();
+                    let frame_index = vm.call_stack.len() as isize - 1;
+                    vm.call_stack.create_and_push_call_frame(helper, None, vec![caller_obj, bootstrap_method_obj, name_obj, type_obj, static_arguments, appendix_result], false);
+                    let Some(Value::Reference(mname_ref)) = get_or_init_option!(vm.invoke_frames_until(java_vm, frame_index)) else { unreachable!("DO ERRORs") };
+                    println!("schwubbel2");
+
+                    let typ_ref = mname_ref.get_field(MEMBERNAME_type_INDEX).expect_reference().unwrap();
+                    let clazz = VM::extract_class_from_class_object(vm, mname_ref.get_field(MEMBERNAME_clazz_INDEX).expect_reference().unwrap()).unwrap();
+                    let name = VM::extract_string_from_object(&mname_ref.get_field(MEMBERNAME_name_INDEX)).unwrap();
+                    println!("IVD: {}", name);
+
+                    let desc = descriptor::from_method_type(typ_ref).unwrap();
+                    let desc = MethodDescriptor::new(desc);
+
+                    let method = clazz.find_method(name.as_str(), desc.as_str()).unwrap();
+                    let cam = ClassAndMethod { class: clazz, method};
+
+                    let frame_index = vm.call_stack.len() as isize - 1;
+                    vm.call_stack.create_and_push_call_frame(cam, None, vec![appendix_ref.get_element(0)], false);
+                    if let Some(res) = get_or_init_option!(vm.invoke_frames_until(java_vm, frame_index)) {
+                        vm.call_stack.push_operand_value(res);
+                    }
+                    println!("schwubbel3");
                 }
 
                 Instruction::NEW(index) => {
                     let class = class_and_method.get_constant_class_ref(vm, *index).unwrap();
-                    let class_ref = get_or_init_option!(vm.get_or_initialize_class(class.name.as_str()));
+                    let class_ref = get_or_init_option!(vm.ensure_initialized(class));
                     if vm.class_manager.expect_class_state(class_ref.id, ClassLoadingState::LOADED){
                         unimplemented!("Cannot create instance of {:?} if not initializ-ed/-ing", class_ref.name);
                     }
@@ -742,7 +804,7 @@ pub fn execute_current_block<'a>(vm: &VM<'a>, java_vm: &JavaVM) -> Option<VMPart
                 Instruction::ATHROW => {
                     debug!("ATHROW");
                     if let Some(Value::Reference(error)) = vm.call_stack.pop_operand_value(){
-                        let string_value = error.get_field(2);
+                        let string_value = error.get_field(THROWABLE_detailsMessage_INDEX);
                         let string = if !string_value.is_null() {VM::extract_string_from_object(&string_value).unwrap()} else {String::new()};
                         let exception_name = vm.class_manager.find_class_by_id(error.class_id).unwrap().name.clone();
                         vm.debug_helper.exception_helper.push(format!("Throw   {}: {}\n└-- thrown by {} at {}", exception_name, string, class_and_method.format(), vm.call_stack.get_pc().0));
@@ -778,15 +840,24 @@ pub fn execute_current_block<'a>(vm: &VM<'a>, java_vm: &JavaVM) -> Option<VMPart
                 }
 
                 Instruction::MONITORENTER => {
-                    if let Some(Value::Reference(_)) = vm.call_stack.pop_operand_value(){
-                        debug!("MONITORENTER")
+                    if let Some(Value::Reference(lock_ref)) = vm.call_stack.pop_operand_value(){
+                        debug!("MONITORENTER");
+                        *vm.current_locks.borrow_mut().entry(lock_ref.id).or_default() += 1;
                     } else {
                         warn!("No object to lock")
                     }
                 }
                 Instruction::MONITOREXIT => {
-                    if let Some(Value::Reference(_)) = vm.call_stack.pop_operand_value(){
-                        debug!("MONITOREXIT")
+                    if let Some(Value::Reference(lock_ref)) = vm.call_stack.pop_operand_value(){
+                        debug!("MONITOREXIT");
+                        let mut locks = vm.current_locks.borrow_mut();
+                        let Some(current_lock_count) = locks.get_mut(&lock_ref.id) else {
+                            return Some(Err(VmError::ValidationError(format!("Cannot unlock {:?} in {:?} because it was not locked", lock_ref, vm.current_thread))));
+                        };
+                        *current_lock_count -= 1;
+                        if *current_lock_count == 0 {
+                            locks.remove(&lock_ref.id);
+                        }
                     } else {
                         warn!("No object to lock")
                     }
@@ -883,6 +954,14 @@ fn fstore(vm: &VM, index: usize) -> VMResult<()> {
     Ok(())
 }
 
+fn dstore(vm: &VM, index: usize) -> VMResult<()> {
+    let value = vm.call_stack.pop_operand_value().unwrap();
+    debug!("DSTORE{} {:?}", index, value);
+    vm.call_stack.store_local(value, index);
+    vm.call_stack.store_local(Value::Dummy, index+1);
+    Ok(())
+}
+
 fn astore(vm: &VM, index: usize) -> VMResult<()> {
     let value = vm.call_stack.pop_operand_value().unwrap();
     debug!("ASTORE{} {:?}", index, value);
@@ -945,7 +1024,7 @@ fn aload<'a>(vm: &VM<'a>, index: usize) -> VMResult<()>{
         Value::Reference(reference) => {
             debug!("ALOAD{} {:?}", index, reference);
         }
-        _ => return Err(VmError::ValidationError(format!("ALOAD{} failed", index)))
+        p => return Err(VmError::ValidationError(format!("ALOAD{} failed: got '{:?}'", index, p)))
     }
     vm.call_stack.push_operand_value(popped);
     Ok(())
@@ -1040,15 +1119,17 @@ fn execute_ji_arithmetic<F: FnOnce(i64, i32) -> Result<i64, VmError>>(vm: &VM, f
 
 fn execute_invoke<'a>(vm: &VM<'a>, index: u16, kind: InvokeKind) -> VMPartialResult<Option<Value<'a>>> {
     let calling_class_and_method = &vm.call_stack.frames.borrow().last().unwrap().class_and_method.clone();
-    let cam = calling_class_and_method.get_constant_method_ref_fast(vm, index).expect("GIB MICH DIE METHODE");
+    // FIXME: signature polymorphic methods such as MethodHandle.invoke(Object... args) don't create an array of arguments before call.
+    // This means if calling MethodHandle.invoke() without arguments will pop 'this' as the parameter which is not needed and will cause a missing
+    // error when trying to pop the receiver after
+    let (cam, args_count) = get_constant_method_ref_and_args_count(calling_class_and_method, vm, index).expect("GIB MICH DIE METHODE");
     trace!("loading class to execute on: '{}'", cam.class.name.as_str());
-    let class = get_or_init!(vm.get_or_initialize_class(cam.class.name.as_str())?);
-    if vm.class_manager.expect_class_state(class.id, ClassLoadingState::LOADED){
+    let class = get_or_init!(vm.ensure_initialized(cam.class)?);
+    if vm.class_manager.expect_class_state(class.id, ClassLoadingState::LOADED) {
         unimplemented!()
     }
     trace!("loading state is: {:?}", vm.class_manager.class_loading_states.borrow().get(&class.id));
     trace!("finished loading class to execute on: '{}'", cam.class.name.as_str());
-    let args_count = cam.method.descriptor.args.len();
     trace!("args_count: {}", args_count);
     let mut args = Vec::new();
     for _ in 0..args_count{
@@ -1112,13 +1193,15 @@ fn execute_invoke<'a>(vm: &VM<'a>, index: u16, kind: InvokeKind) -> VMPartialRes
     debug!("INVOKE{:?}: {}{} on {:?}", kind, cam.method.name, cam.method.descriptor.as_str(), receiver);
     if let Some(rec) = receiver{
         vm.debug_helper.tracker.push_object_event(rec.id, format!("Preparing call {} with args:{}", class_and_method.format(), args.iter().map(|v| format!("\n    {:?}", v)).collect::<Vec<_>>().join("")));
-        vm.debug_helper.tracker.push_method_event(class_and_method.format(), format!("Calling on {:?} with args: {}", rec, args.iter().map(|v| format!("\n    {:?}", v)).collect::<Vec<_>>().join("") ));
+        vm.debug_helper.tracker.push_method_event(class_and_method.format(), format!("Calling on {:?} from {} with args: {}", rec, calling_class_and_method.format(), args.iter().map(|v| format!("\n    {:?}", v)).collect::<Vec<_>>().join("") ));
     } else {
-        vm.debug_helper.tracker.push_method_event(class_and_method.format(), format!("Calling static with args: {}", args.iter().map(|v| format!("\n    {:?}", v)).collect::<Vec<_>>().join("") ));
+        vm.debug_helper.tracker.push_method_event(class_and_method.format(), format!("Calling static from {} with args: {}", calling_class_and_method.format(), args.iter().map(|v| format!("\n    {:?}", v)).collect::<Vec<_>>().join("") ));
     }
-    for (i, provided_arg) in args.iter().filter(|a| if let Value::Dummy = a {false} else {true}).enumerate(){
-        if !(&class_and_method.method.descriptor.args[i] == provided_arg){
-            return Err(VmError::ValidationError(format!("Expected arg type: {:?} but got value: {:?}", class_and_method.method.descriptor.args[i], provided_arg)));
+    if !class_and_method.class.has_method_polymorphic_signature(class_and_method.method) {
+        for (i, provided_arg) in args.iter().filter(|a| if let Value::Dummy = a {false} else {true}).enumerate(){
+            if !(&class_and_method.method.descriptor.args[i] == provided_arg){
+                return Err(VmError::ValidationError(format!("Expected arg type: {:?} but got value: {:?}", class_and_method.method.descriptor.args[i], provided_arg)));
+            }
         }
     }
     vm.call_stack.create_and_push_call_frame(class_and_method, receiver, args, true);
@@ -1183,6 +1266,19 @@ fn get_method_interface_virtual<'a>(class: ClassRef<'a>, method_name: &str, desc
         } else {
             return Err(VmError::JavaException(JavaError::MethodNotFoundException(format!("{}{} in {}", method_name, descriptor, class.name))));
         }
+    }
+}
+
+fn get_constant_method_ref_and_args_count<'a>(calling: &ClassAndMethod<'a>, vm: &VM<'a>, index: u16) -> Option<(ClassAndMethod<'a>, usize)> {
+    match calling.class.get_or_resolve_constant(vm, index) {
+        Some(ConstantPoolEntry::MethodRef(cam)) | Some(ConstantPoolEntry::InterfaceMethodRef(cam)) => {
+            let args_count = cam.method.descriptor.args.len();
+            Some((cam, args_count))
+        }
+        Some(ConstantPoolEntry::MethodRefSigPoly(cam, desc)) => {
+            Some((cam, desc.args.len()))
+        }
+        _ => None
     }
 }
 

@@ -1,12 +1,15 @@
+use crate::vm::debug::bytecode::BytecodeHelper;
 use crate::vm::debug::exceptions::ExceptionHelper;
 use crate::vm::debug::tracker::Tracker;
 
 mod exceptions;
 mod tracker;
+mod bytecode;
 
 pub struct DebugHelper{
     pub exception_helper: ExceptionHelper,
     pub tracker: Tracker,
+    pub bytecode_helper: BytecodeHelper,
 }
 
 impl DebugHelper{
@@ -14,6 +17,7 @@ impl DebugHelper{
         Self{
             exception_helper: ExceptionHelper::new(),
             tracker: Tracker::new(None, None),
+            bytecode_helper: BytecodeHelper::new(),
         }
     }
 
@@ -23,9 +27,11 @@ impl DebugHelper{
             if let Some(config) = loader::load_config(){
                 if config.enabled_modules.contains("exceptions"){ self.exception_helper.print() }
                 if config.enabled_modules.contains("tracker"){ self.tracker.print() }
+                if config.enabled_modules.contains("bytecode"){ self.bytecode_helper.print() }
             } else {
                 self.exception_helper.print();
                 self.tracker.print();
+                self.bytecode_helper.print();
             }
         }
     }
@@ -38,17 +44,24 @@ mod loader{
     use std::collections::HashSet;
     use std::fs::File;
     use std::io::Read;
+    use crate::vm::debug::bytecode::ClassFilter;
 
     #[derive(Deserialize, Debug)]
     pub struct Config{
         pub enabled_modules: HashSet<String>,
-        pub tracker: TrackerConfig
+        pub tracker: TrackerConfig,
+        pub bytecode: BytecodeConfig,
     }
 
     #[derive(Deserialize, Debug)]
     pub struct TrackerConfig{
         pub ids: HashSet<u32>,
         pub descs: Vec<String>,
+    }
+    
+    #[derive(Deserialize, Debug)]
+    pub struct BytecodeConfig {
+        pub classes: Vec<ClassFilter>,
     }
 
     pub fn load_config() -> Option<Config>{

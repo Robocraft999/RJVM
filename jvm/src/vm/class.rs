@@ -5,10 +5,12 @@ use crate::class_file::field_info::{native_escape, native_escaped_descriptor};
 use crate::class_file::fields::field_type::FieldType;
 use crate::class_file::fields::FieldInfo;
 use crate::class_file::methods::descriptor::MethodDescriptor;
-use crate::class_file::methods::MethodInfo;
+use crate::class_file::methods::{MethodInfo, ITABLE_INDEX_MAX, NONVIRTUAL_VTABLE_INDEX, PENDING_ITABLE_INDEX};
+use crate::error::ClassParseError;
+use crate::vm::result::VMResult;
 use crate::vm::value::Value;
-use crate::vm::ProgramCounter;
 use crate::vm::VM;
+use crate::vm::{ProgramCounter, VmError};
 use std::cell::RefCell;
 use std::fmt::{Debug, Formatter};
 use std::hash::Hash;
@@ -35,7 +37,7 @@ impl<'a> Class<'a>{
     }
 
     //https://docs.oracle.com/javase/specs/jvms/se8/html/jvms-2.html#jvms-2.9
-    fn has_method_polymorphic_signature(&self, info: &MethodInfo) -> bool {
+    pub fn has_method_polymorphic_signature(&self, info: &MethodInfo) -> bool {
         info.flags & MethodFlag::Native as u16 > 0 && info.flags & MethodFlag::VarArgs as u16 > 0 &&
             info.descriptor.matches("([Ljava/lang/Object;)Ljava/lang/Object;") &&
             self.name == "java/lang/invoke/MethodHandle"
@@ -110,9 +112,12 @@ impl<'a> Class<'a>{
     pub fn is_interface(&self) -> bool {
         self.flags & ClassFlag::Interface as u16 > 0
     }
+    pub fn is_final(&self) -> bool {
+        self.flags & ClassFlag::Final as u16 > 0
+    }
 
     pub fn is_array(&self) -> bool {
-        self.name.starts_with("[")
+        self.array_info.is_some()
     }
 
     pub fn get_constant_as_value(&'a self, vm: &VM<'a>, index: u16) -> Value<'a>{
@@ -170,6 +175,99 @@ impl<'a> Class<'a>{
             self.fields.get(index - self.first_field_index)
         }
     }
+
+
+    pub fn init_vtable(&mut self) {
+        for i in 0..self.methods.len(){
+            let needs_vtable_entry = self.needs_vtable_entry(i);
+            if needs_vtable_entry {
+                let method = self.methods.get_mut(i).unwrap();
+                method.vtable_index = method.slot as isize;
+            }
+        }
+    }
+
+    fn needs_vtable_entry(&mut self, index: usize) -> bool {
+        let is_final = self.is_final();
+        let is_interface = self.is_interface();
+        let super_class = self.superclass.clone();
+
+        let mut allocate_new: bool = true;
+
+        let mut target_method = self.methods.get_mut(index).unwrap();
+
+        // TODO account for default methods
+        target_method.vtable_index = NONVIRTUAL_VTABLE_INDEX;
+
+        if target_method.is_static() || target_method.name == "<init>"{
+            return false;
+        }
+
+        if target_method.is_final() || is_final{
+            allocate_new = false;
+        } else if is_interface {
+            allocate_new = false;
+            if !target_method.has_itable_index() {
+                target_method.vtable_index = PENDING_ITABLE_INDEX;
+            }
+        }
+
+        if !super_class.is_some() {
+            return allocate_new;
+        }
+
+        if target_method.is_private() {
+            return allocate_new;
+        }
+
+        // https://github.com/openjdk/jdk8u/blob/master/hotspot/src/share/vm/oops/klassVtable.cpp#L341
+        let super_class = super_class.unwrap();
+        // FIXME only works one layer deep
+        for super_method in super_class.methods.iter() {
+            if target_method == super_method {
+                if !super_method.is_private() && true /* is_override */ {
+                    if !target_method.is_package_private() {
+                        allocate_new = false;
+                    }
+
+                    target_method.vtable_index = target_method.slot as isize;
+                }
+            }
+        }
+
+        allocate_new
+    }
+
+    pub fn init_itable(&mut self) {
+
+        // assign_itable_indices_for_interface
+        if self.is_interface() {
+            for target_method in self.methods.iter_mut(){
+                // interface_method_needs_itable_index
+                if !target_method.is_static() && !target_method.is_initializer() {
+                    if !target_method.has_vtable_index() {
+                        assert_eq!(target_method.vtable_index, PENDING_ITABLE_INDEX);
+                        target_method.vtable_index = ITABLE_INDEX_MAX - target_method.slot as isize;
+                    }
+                }
+            }
+            return;
+        }
+        let interfaces = self.interfaces.clone();
+        for interface in interfaces.iter() {
+            for interface_method in interface.methods.iter() {
+                if interface_method.has_itable_index() {
+                    //let cam = self.resolve_interface_method_virtual(interface_method.name.as_str(), interface_method.descriptor.as_str()).unwrap();
+                    // FIXME only one layer deep
+                    for target_method in self.methods.iter_mut(){
+                        if target_method == interface_method {
+                            target_method.vtable_index = ITABLE_INDEX_MAX - target_method.slot as isize;
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 impl<'a> Debug for Class<'a>{
@@ -177,7 +275,6 @@ impl<'a> Debug for Class<'a>{
         f.debug_struct("Class")
             .field("id", &self.id)
             .field("name", &self.name)
-            .field("constants", &self.constants)
             .field("flags", &self.flags)
             .field("array_info", &self.array_info)
             .field("attributes", &self.attributes)
@@ -211,6 +308,7 @@ impl <'a> Class<'a>{
             ConstantPoolEntry::Class(..) |
             ConstantPoolEntry::FieldRef(..) |
             ConstantPoolEntry::MethodRef(..) |
+            ConstantPoolEntry::MethodRefSigPoly(..) |
             ConstantPoolEntry::InterfaceMethodRef(..) |
             ConstantPoolEntry::String(..) |
             ConstantPoolEntry::Integer(..) |
@@ -242,8 +340,14 @@ impl <'a> Class<'a>{
                 self.constants.borrow_mut()[index as usize - 1] = ConstantPoolEntry::FieldRef(caf);
             }
             ConstantPoolEntry::RawMethodRef(class_index, name_and_type_index) => {
-                let cam = resolve_class_and_method(&vm, &self.constants.borrow(), class_index, name_and_type_index, false)?;
-                self.constants.borrow_mut()[index as usize - 1] = ConstantPoolEntry::MethodRef(cam);
+                //let cam = resolve_class_and_method(&vm, &self.constants.borrow(), class_index, name_and_type_index, false)?;
+                let (clazz, method_name, method_descriptor) = resolve_class_and_name_and_type(vm, &self.constants.borrow(), class_index, name_and_type_index)?;
+                let cam = clazz.resolve_method_virtual(method_name.as_str(), method_descriptor.as_str()).unwrap();
+                if cam.class.has_method_polymorphic_signature(cam.method) {
+                    self.constants.borrow_mut()[index as usize - 1] = ConstantPoolEntry::MethodRefSigPoly(cam, MethodDescriptor::new(method_descriptor));
+                } else {
+                    self.constants.borrow_mut()[index as usize - 1] = ConstantPoolEntry::MethodRef(cam);
+                }
             }
             ConstantPoolEntry::RawInterfaceMethodRef(class_index, name_and_type_index) => {
                 let cam = resolve_class_and_method(&vm, &self.constants.borrow(), class_index, name_and_type_index, true)?;
@@ -293,6 +397,18 @@ impl <'a> Class<'a>{
             }
         }
         self.constants.borrow().get(index as usize - 1).cloned()
+    }
+    
+    pub fn get_constant(&self, index: u16) -> Option<ConstantPoolEntry<'a>> {
+        self.constants.borrow().get(index as usize - 1).cloned()
+    }
+    
+    pub fn get_utf_constant(&self, index: u16) -> VMResult<String> {
+        match self.get_constant(index) {
+            Some(ConstantPoolEntry::Utf8(string)) => Ok(string),
+            Some(entry) => Err(VmError::ParseError(ClassParseError::ConstantPoolError(format!("CP entry at {} is not of type UTF8 but: {:?}", index, entry)))),
+            None => Err(VmError::ParseError(ClassParseError::ConstantPoolError(format!("CP entry at {} is not present", index)))),
+        }
     }
 }
 
