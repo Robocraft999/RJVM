@@ -16,43 +16,43 @@ pub fn register_natives(registry: &mut NativeMethodRegistry) {
     registry.register("java/lang/ClassLoader$NativeLibrary", "load", "(Ljava/lang/String;Z)V", delegate_native_lib_load);
 }
 
-gen_delegate!(delegate_find_loaded_class0, |vm, java_vm, _obj_ref, args| {
+gen_delegate!(delegate_find_loaded_class0, |ctx, _obj_ref, args| {
     debug!("findLoadedClass0 {:?}", args);
     if let Some(str_object) = args.get(0) {
         let class_name = VM::extract_string_from_object(&str_object)?;
         let class_name = class_name.replace(".", "/");
-        if vm.class_manager.find_class_by_name(class_name.as_str()).is_some() {
-            non_failing_some(Value::Reference(wrap_init!(vm, java_vm, vm.new_class_object_by_name(class_name.as_str())?)))
+        if ctx.vm.class_manager.find_class_by_name(class_name.as_str()).is_some() {
+            non_failing_some(Value::Reference(wrap_init!(ctx, ctx.vm.new_class_object_by_name(class_name.as_str())?)))
         } else {
-            non_failing_some(vm.null())
+            non_failing_some(ctx.vm.null())
         }
     } else {
         invalidation!("expected a string reference")
     }
 });
 
-gen_delegate!(delegate_find_bootstrap_class, |vm, java_vm, _obj_ref, args| {
+gen_delegate!(delegate_find_bootstrap_class, |ctx, _obj_ref, args| {
     debug!("findBootstrapClass {:?}", args);
     if let Some(str_object) = args.get(0) {
         let class_name = VM::extract_string_from_object(&str_object)?;
         let class_name = class_name.replace(".", "/");
 
-        match vm.get_or_resolve_class(class_name.as_str()) {
-            Ok(clazz) => non_failing_some(Value::Reference(wrap_init!(vm, java_vm, vm.new_class_object_by_class(clazz)?))),
-            Err(_) => non_failing_some(vm.null())
+        match ctx.vm.get_or_resolve_class(class_name.as_str()) {
+            Ok(clazz) => non_failing_some(Value::Reference(wrap_init!(ctx, ctx.vm.new_class_object_by_class(clazz)?))),
+            Err(_) => non_failing_some(ctx.vm.null())
         }
     } else {
         invalidation!("expected a string reference")
     }
 });
 
-gen_delegate!(delegate_find_builtin_lib, |vm, _java_vm, _obj_ref, args| {
+gen_delegate!(delegate_find_builtin_lib, |ctx, _obj_ref, args| {
     debug!("findBuiltinLib {:?}", args);
     //FIXME here we have to check if the library with the given name is builtin -> exports the function JNI_OnLoad_<libname>
-    non_failing_some(vm.null())
+    non_failing_some(ctx.vm.null())
 });
 
-gen_delegate!(delegate_native_lib_load, |vm, java_vm, obj_ref, _args| {
+gen_delegate!(delegate_native_lib_load, |ctx, obj_ref, _args| {
     debug!("nativeLib::load {:?}", obj_ref);
     if let Some(obj_ref) = obj_ref {
         //handle
@@ -60,7 +60,7 @@ gen_delegate!(delegate_native_lib_load, |vm, java_vm, obj_ref, _args| {
         let name_val = obj_ref.get_field(CLASSLOADER_NATIVELIBRARY_name_INDEX);//args.get(0).unwrap();
         let name = VM::extract_string_from_object(&name_val)?;
         println!("name: {name}");
-        println!("javavm: {:p}", java_vm);
+        println!("javavm: {:p}", ctx.java_vm);
 
         unsafe {
             use libffi::middle::{Arg, Cif, Type};
@@ -70,9 +70,9 @@ gen_delegate!(delegate_native_lib_load, |vm, java_vm, obj_ref, _args| {
             let sym: Symbol<*const ()> = lib.get(b"JNI_OnLoad").unwrap();
 
             let func_ptr = *sym as * const c_void;
-            vm.native_method_registry.add_loaded_library(lib);
+            ctx.vm.native_method_registry.add_loaded_library(lib);
 
-            let vm_ptr = ptr::from_ref(java_vm) as *const c_void;
+            let vm_ptr = ptr::from_ref(ctx.java_vm) as *const c_void;
             println!("javavmp: {:p}", vm_ptr);
             let reserved = std::ptr::null() as *const c_void;
             let cif = Cif::new(vec![Type::pointer(), Type::pointer()], Type::i32()); //JNI_OnLoad

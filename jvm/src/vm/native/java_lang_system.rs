@@ -9,6 +9,7 @@ use log::trace;
 use std::env;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::time::{SystemTime, UNIX_EPOCH};
+use crate::vm::java_thread::JavaThread;
 
 pub fn register_natives(registry: &mut NativeMethodRegistry) {
     let mut register = |method_name, sig, delegate|registry.register(JAVA_LANG_SYSTEM, method_name, sig, delegate);
@@ -22,17 +23,17 @@ pub fn register_natives(registry: &mut NativeMethodRegistry) {
     register("mapLibraryName", "(Ljava/lang/String;)Ljava/lang/String;", delegate_system_map_library_name);
 }
 
-gen_delegate!(delegate_nano_time, |_vm, _java_vm, _obj_ref, _args| {
+gen_delegate!(delegate_nano_time, |_ctx, _obj_ref, _args| {
     let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos() as i64;
     non_failing_some(Value::Long(nanos))
 });
 
-gen_delegate!(delegate_time_millis, |_vm, _java_vm, _obj_ref, _args| {
+gen_delegate!(delegate_time_millis, |_ctx, _obj_ref, _args| {
     let millis = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as i64;
     non_failing_some(Value::Long(millis))
 });
 
-gen_delegate!(delegate_identity_hash_code, |_vm, _java_vm, _obj_ref, args| {
+gen_delegate!(delegate_identity_hash_code, |_ctx, _obj_ref, args| {
     if let Some(Value::Reference(object)) = args.get(0){
         let mut hasher = DefaultHasher::new();
         object.id.hash(&mut hasher);
@@ -44,9 +45,9 @@ gen_delegate!(delegate_identity_hash_code, |_vm, _java_vm, _obj_ref, args| {
     }
 });
 
-gen_delegate!(delegate_set_out0, |vm, _java_vm, _obj_ref, args| {
-    let clazz = vm.get_or_resolve_class(JAVA_LANG_SYSTEM)?;
-    if let Some(static_obj_refect) = vm.get_static_class_object(clazz.id){
+gen_delegate!(delegate_set_out0, |ctx, _obj_ref, args| {
+    let clazz = ctx.vm.get_or_resolve_class(JAVA_LANG_SYSTEM)?;
+    if let Some(static_obj_refect) = ctx.vm.get_static_class_object(clazz.id){
         if let Some(Value::Reference(object)) = args.get(0){
             static_obj_refect.set_field(SYSTEM_out_INDEX, Value::Reference(object));
             non_failing_none()
@@ -58,9 +59,9 @@ gen_delegate!(delegate_set_out0, |vm, _java_vm, _obj_ref, args| {
     }
 });
 
-gen_delegate!(delegate_set_err0, |vm, _java_vm, _obj_ref, args| {
-    let clazz = vm.get_or_resolve_class(JAVA_LANG_SYSTEM)?;
-    if let Some(static_obj_refect) = vm.get_static_class_object(clazz.id){
+gen_delegate!(delegate_set_err0, |ctx, _obj_ref, args| {
+    let clazz = ctx.vm.get_or_resolve_class(JAVA_LANG_SYSTEM)?;
+    if let Some(static_obj_refect) = ctx.vm.get_static_class_object(clazz.id){
         if let Some(Value::Reference(object)) = args.get(0){
             static_obj_refect.set_field(SYSTEM_err_INDEX, Value::Reference(object));
             non_failing_none()
@@ -73,7 +74,7 @@ gen_delegate!(delegate_set_err0, |vm, _java_vm, _obj_ref, args| {
 });
 
 // TODO real arraycopy
-gen_delegate!(delegate_arraycopy, |vm, _java_vm, _obj_ref, args| {
+gen_delegate!(delegate_arraycopy, |ctx, _obj_ref, args| {
     if let (
         Some(Value::Reference(src_ref)),
         Some(Value::Integer(src_pos)),
@@ -88,14 +89,14 @@ gen_delegate!(delegate_arraycopy, |vm, _java_vm, _obj_ref, args| {
             // if src and dst are the same, we must preserve the original content before we start copying.
             let src_content = src.borrow()[src_pos..src_pos + length].to_vec();
             dst.borrow_mut()[dst_pos..dst_pos+length].clone_from_slice(&src_content);
-            vm.debug_helper.tracker.push_object_event(dst_ref.id, format!("Arraycopy from {} [{}:{}]->[{}:{}] :\n    {:?}", src_ref.id, src_pos, src_pos+length, dst_pos, dst_pos+length, dst_ref));
+            ctx.vm.vm_debug_helper.tracker.push_object_event(dst_ref.id, format!("Arraycopy from {} [{}:{}]->[{}:{}] :\n    {:?}", src_ref.id, src_pos, src_pos+length, dst_pos, dst_pos+length, dst_ref));
             return non_failing_none()
         }
     }
     invalidation!("Expected two arrays with indices")
 });
 
-gen_delegate!(delegate_init_properties, |vm, java_vm, _obj_ref, args| {
+gen_delegate!(delegate_init_properties, |ctx, _obj_ref, args| {
     let properties_obj_refect = args.get(0).unwrap().expect_reference()?;
     let mut props = vec![
         ("file.encoding", "UTF-8".to_string()),
@@ -126,20 +127,20 @@ gen_delegate!(delegate_init_properties, |vm, java_vm, _obj_ref, args| {
             ("os.name", "Windows".to_string()),
         ];
     }
-    let properties_set_method = vm.resolve_class_method("java/util/Properties", "setProperty", "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/Object;")?;
-    let current_frame_index = vm.call_stack.frames.borrow().len() as isize - 1;
+    let properties_set_method = ctx.vm.resolve_class_method("java/util/Properties", "setProperty", "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/Object;")?;
+    let current_frame_index = ctx.thread.call_stack.frames.borrow().len() as isize - 1;
     for (key, value) in props.into_iter(){
         //FIXME could be bad to unwrap
-        let arg1 = vm.try_new_string_object(key)?;
-        let arg2 = vm.try_new_string_object(value.as_str())?;
-        vm.call_stack.create_and_push_call_frame(properties_set_method.clone(), Some(properties_obj_refect), vec![Value::Reference(arg1), Value::Reference(arg2)], false)
+        let arg1 = ctx.vm.try_new_string_object(key)?;
+        let arg2 = ctx.vm.try_new_string_object(value.as_str())?;
+        ctx.thread.call_stack.create_and_push_call_frame(properties_set_method.clone(), Some(properties_obj_refect), vec![Value::Reference(arg1), Value::Reference(arg2)], false)
     }
-    let _res = vm.invoke_frames_until(java_vm, current_frame_index)?;
+    let _res = JavaThread::invoke_frames_until(ctx, current_frame_index)?;
     //Ok(VMResultType::NeedsClassInit(frames, false))
-    non_failing_some(vm.null())
+    non_failing_some(ctx.vm.null())
 });
 
-gen_delegate!(delegate_system_map_library_name, |vm, java_vm, _obj_ref, args| {
+gen_delegate!(delegate_system_map_library_name, |ctx, _obj_ref, args| {
     if let Some(string) = args.get(0) {
         let name = VM::extract_string_from_object(string)?;
         let new_name = match env::consts::OS{
@@ -147,7 +148,7 @@ gen_delegate!(delegate_system_map_library_name, |vm, java_vm, _obj_ref, args| {
             "linux" => format!("lib{name}.so"),
             _ => name
         };
-        non_failing_some(Value::Reference(wrap_init!(vm, java_vm, vm.new_string_object(new_name.as_str())?)))
+        non_failing_some(Value::Reference(wrap_init!(ctx, ctx.vm.new_string_object(new_name.as_str())?)))
     } else {
         invalidation!("Expected Reference but found '{:?}'", args.get(0))
     }

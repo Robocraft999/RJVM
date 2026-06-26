@@ -11,7 +11,7 @@ pub fn register_natives(registry: &mut NativeMethodRegistry) {
     registry.register(JAVA_LANG_DOUBLE, "longBitsToDouble", "(J)D", delegate_long_bits_to_double);
 }
 
-gen_delegate!(delegate_float_to_raw_bits, |_vm, _java_vm, _obj_ref, args| {
+gen_delegate!(delegate_float_to_raw_bits, |_ctx, _obj_ref, args| {
     if let Some(Value::Float(value)) = args.get(0){
         non_failing_some(Value::Integer(value.to_bits() as i32))
     } else {
@@ -19,7 +19,7 @@ gen_delegate!(delegate_float_to_raw_bits, |_vm, _java_vm, _obj_ref, args| {
     }
 });
 
-gen_delegate!(delegate_double_to_raw_bits, |_vm, _java_vm, _obj_ref, args| {
+gen_delegate!(delegate_double_to_raw_bits, |_ctx, _obj_ref, args| {
     if let Some(Value::Double(value)) = args.get(0){
         non_failing_some(Value::Long(value.to_bits() as i64))
     } else {
@@ -27,7 +27,7 @@ gen_delegate!(delegate_double_to_raw_bits, |_vm, _java_vm, _obj_ref, args| {
     }
 });
 
-gen_delegate!(delegate_long_bits_to_double, |_vm, _java_vm, _obj_ref, args| {
+gen_delegate!(delegate_long_bits_to_double, |_ctx, _obj_ref, args| {
     if let Some(Value::Long(value)) = args.get(0){
         non_failing_some(Value::Double(f64::from_bits(*value as u64)))
     } else {

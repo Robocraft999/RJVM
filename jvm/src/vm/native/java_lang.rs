@@ -20,7 +20,7 @@ pub fn register_natives(registry: &mut NativeMethodRegistry) {
     registry.register(JAVA_LANG_PROCESS_ENVIRONMENT, "environ", "()[[B", delegate_environ);
 }
 
-gen_delegate!(delegate_fill_in_stacktrace, |_vm, _java_vm, obj_ref, _args| {
+gen_delegate!(delegate_fill_in_stacktrace, |_ctx, obj_ref, _args| {
     if let Some(obj_ref) = obj_ref{
         non_failing_some(Value::Reference(obj_ref))
     } else {
@@ -28,7 +28,7 @@ gen_delegate!(delegate_fill_in_stacktrace, |_vm, _java_vm, obj_ref, _args| {
     }
 });
 
-gen_delegate!(delegate_stack_trace_depth, |_vm, _java_vm, obj_ref, _args| {
+gen_delegate!(delegate_stack_trace_depth, |_ctx, obj_ref, _args| {
     if let Some(_obj_ref) = obj_ref{
         non_failing_some(Value::Integer(0))
     } else {
@@ -36,11 +36,11 @@ gen_delegate!(delegate_stack_trace_depth, |_vm, _java_vm, obj_ref, _args| {
     }
 });
 
-gen_delegate!(delegate_intern, |vm, _java_vm, obj_ref, _args| {
+gen_delegate!(delegate_intern, |ctx, obj_ref, _args| {
     if let Some(obj) = obj_ref{
         let content = VM::extract_string_from_object(&Value::Reference(obj))?;
-        if vm.string_objects.borrow().contains_key(&content){
-            non_failing_some(Value::Reference(vm.string_objects.borrow()[&content]))
+        if ctx.vm.string_objects.borrow().contains_key(&content){
+            non_failing_some(Value::Reference(ctx.vm.string_objects.borrow()[&content]))
         } else {
             non_failing_some(Value::Reference(obj))
         }
@@ -49,69 +49,47 @@ gen_delegate!(delegate_intern, |vm, _java_vm, obj_ref, _args| {
     }
 });
 
-gen_delegate!(delegate_current_thread, |vm, java_vm, _obj_ref, _args| {
-    if vm.current_thread.borrow().is_none(){
-        let thread = wrap_init!(vm, java_vm, vm.new_object(JAVA_LANG_THREAD)?);
-        //let thread_init = vm.resolve_class_method("java/lang/Thread", "<init>", "()V")?;
-        //vm.invoke(thread_init, Some(thread), vec![])?;
-        let name_string = wrap_init!(vm, java_vm, vm.new_string_object("Main")?);
-
-        // TODO call the private contructor directly
-        let group_name = wrap_init!(vm, java_vm, vm.new_string_object("system")?);
-        let group = wrap_init!(vm, java_vm, vm.new_object("java/lang/ThreadGroup")?);
-        group.set_field(THREADGROUP_nUnstartedThreads_INDEX, Value::Integer(0));
-        group.set_field(THREADGROUP_name_INDEX, Value::Reference(group_name));
-        group.set_field(THREADGROUP_maxPriority_INDEX, Value::Integer(10));
-        group.set_field(THREADGROUP_parent_INDEX, vm.null());
-
-        //let group_init = vm.try_resolve_class_method("java/lang/ThreadGroup", "<init>", "()V")?;
-        //vm.invoke_new_frame(group_init, Some(group), vec![])?;
-
-        thread.set_field(THREAD_name_INDEX, Value::Reference(name_string));
-        thread.set_field(THREAD_priority_INDEX, Value::Integer(10));
-        thread.set_field(THREAD_group_INDEX, Value::Reference(group));
-        let _ = vm.current_thread.replace(Some(thread));
-        non_failing_some(Value::Reference(thread))
-    } else {
-        non_failing_some(Value::Reference(vm.current_thread.borrow().unwrap()))
-    }
+gen_delegate!(delegate_current_thread, |ctx, _obj_ref, _args| {
+    let Some(thread_ref_id) = ctx.thread.thread_obj_id else { return invalidation!("Thread object id has to be set by now") };
+    let thread_ref = ctx.vm.objects_by_id.borrow().get(&thread_ref_id).copied().unwrap();
+    non_failing_some(Value::Reference(thread_ref))
 });
 
-gen_delegate!(delegate_is_alive, |_vm, _java_vm, obj_ref, _args| {
+gen_delegate!(delegate_is_alive, |_ctx, obj_ref, _args| {
     //non_failing_some(Value::Integer(1))
     // FIXME threading
     non_failing_some(obj_ref.unwrap().get_field(5))
 });
 
-gen_delegate!(delegate_holds_lock, |vm, _java_vm, _obj_ref, args| {
+gen_delegate!(delegate_holds_lock, |ctx, _obj_ref, args| {
     let Some(Value::Reference(lock_ref)) = args.get(0) else { return invalidation!("holdLock expected a potential lock"); };
-    let current_thread = vm.current_thread.borrow();
-    let Some(_current_thread) = current_thread.as_ref() else { return invalidation!("There is no thread lol"); };
-    non_failing_some(Value::from(vm.current_locks.borrow().contains_key(&lock_ref.id)))
+    //let current_thread = ctx.vm.current_thread.borrow();
+    //let Some(_current_thread) = current_thread.as_ref() else { return invalidation!("There is no thread lol"); };
+    non_failing_some(Value::from(ctx.vm.current_locks.borrow().contains_key(&lock_ref.id)))
 });
 
-gen_delegate!(delegate_available_processors, |_vm, _java_vm, _obj_ref, _args| {
+gen_delegate!(delegate_available_processors, |_ctx, _obj_ref, _args| {
     non_failing_some(Value::Integer(1))
 });
 
-gen_delegate!(delegate_free_memory, |_vm, _java_vm, _obj_ref, _args| {
+gen_delegate!(delegate_free_memory, |_ctx, _obj_ref, _args| {
     non_failing_some(Value::Long(1024 * 1024 * 20))
 });
 
-gen_delegate!(delegate_environ, |vm, java_vm, _obj_ref, _args| {
+gen_delegate!(delegate_environ, |ctx, _obj_ref, _args| {
     let vars = vec![
         ("DISPLAY", ":0")
     ];
     fn byte_array_from_str<'s>(vm: &VM<'s>, string: &str) -> VMResult<Reference<'s>>{
         vm.try_new_array(1, FieldType::Primitive(PrimitiveType::Byte).to_array_field_type(1), RefCell::new(string.as_bytes().iter().map(|c| Value::Integer(*c as i32)).collect()))
     }
-    let _ = wrap_init!(vm, java_vm, vm.new_array(1, FieldType::Primitive(PrimitiveType::Byte).to_array_field_type(1), RefCell::new(Vec::new()))?);
+    let _ = wrap_init!(ctx, ctx.vm.new_array(1, FieldType::Primitive(PrimitiveType::Byte).to_array_field_type(1), RefCell::new(Vec::new()))?);
     let values: Vec<Value> = vars.iter()
         .flat_map(|(k, v)| vec![
-            Value::Reference(byte_array_from_str(vm, k).unwrap()),
-            Value::Reference(byte_array_from_str(vm, v).unwrap()),
+            Value::Reference(byte_array_from_str(ctx.vm, k).unwrap()),
+            Value::Reference(byte_array_from_str(ctx.vm, v).unwrap()),
         ])
         .collect();
-    let array_ref = wrap_init!(vm, java_vm, vm.new_array(2, FieldType::Primitive(PrimitiveType::Byte).to_array_field_type(2), RefCell::new(values.clone()))?);
+    let array_ref = wrap_init!(ctx, ctx.vm.new_array(2, FieldType::Primitive(PrimitiveType::Byte).to_array_field_type(2), RefCell::new(values.clone()))?);
     non_failing_some(Value::Reference(array_ref))
 });

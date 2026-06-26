@@ -8,6 +8,7 @@ use crate::vm::{VmError, VM};
 use log::debug;
 use std::cell::RefCell;
 use std::env;
+use crate::vm::java_thread::JavaThread;
 
 pub fn register_natives(registry: &mut NativeMethodRegistry) {
     registry.register(SUN_MISC_VM, "initialize", "()V", delegate_initialize);
@@ -19,8 +20,8 @@ pub fn register_natives(registry: &mut NativeMethodRegistry) {
     registry.register(SUN_NIO_FS_UND, "getcwd", "()[B", delegate_und_getcwd);
 }
 
-gen_delegate!(delegate_initialize, |vm, _java_vm, _obj_ref, _args| {
-    let _vm_class_id = vm.find_class_by_name(SUN_MISC_VM).unwrap().id;
+gen_delegate!(delegate_initialize, |ctx, _obj_ref, _args| {
+    let _vm_class_id = ctx.vm.find_class_by_name(SUN_MISC_VM).unwrap().id;
     /*let arg1 = wrap_init!(vm, java_vm, vm.new_string_object("java.lang.Integer.IntegerCache.high".to_string())?);
     let arg2 = wrap_init!(vm, java_vm, vm.new_string_object("127".to_string())?);
     let static_vm_object = vm.get_static_class_object(vm_class_id).unwrap();
@@ -35,7 +36,7 @@ gen_delegate!(delegate_initialize, |vm, _java_vm, _obj_ref, _args| {
 });
 
 
-gen_delegate!(delegate_find_signal, |_vm, _java_vm, _obj_ref, args| {
+gen_delegate!(delegate_find_signal, |_ctx, _obj_ref, args| {
     if let Some(string) = args.get(0){
         let name = VM::extract_string_from_object(string)?;
         let result = match name.as_str() {
@@ -52,23 +53,21 @@ gen_delegate!(delegate_find_signal, |_vm, _java_vm, _obj_ref, args| {
     unimplemented!();
 });
 
-gen_delegate!(delegate_handle0, |_vm, _java_vm, _obj_ref, _args| {
+gen_delegate!(delegate_handle0, |_ctx, _obj_ref, _args| {
     non_failing_some(Value::Long(0))
 });
 
-gen_delegate!(delegate_lookup_cache_urls, |vm, _java_vm, _obj_ref, _args| {
+gen_delegate!(delegate_lookup_cache_urls, |ctx, _obj_ref, _args| {
     //FIXME add cache, idk how to get this
-    non_failing_some(vm.null())
+    non_failing_some(ctx.vm.null())
 });
 
-gen_delegate!(delegate_create_long, |vm, java_vm, _obj_ref, _args| {
+gen_delegate!(delegate_create_long, |ctx, _obj_ref, _args| {
     let class_name = "java/nio/DirectByteBuffer";
-    let byte_buffer = wrap_init!(vm, java_vm, vm.new_object(class_name)?);
-    let constructor = vm.resolve_class_method(class_name, "<init>", "(JI)V")?;
-    let frame_index = vm.call_stack.frames.borrow().len() as isize - 1;
-    let addr = vm.unsafe_allocator.allocate_memory(8);
-    vm.call_stack.create_and_push_call_frame(constructor, Some(byte_buffer), vec![Value::Long(addr), Value::Dummy, Value::Integer(8)], false);
-    let res = vm.invoke_frames_until(java_vm, frame_index)?;
+    let byte_buffer = wrap_init!(ctx, ctx.new_object(class_name)?);
+    let constructor = ctx.vm.resolve_class_method(class_name, "<init>", "(JI)V")?;
+    let addr = ctx.vm.unsafe_allocator.allocate_memory(8);
+    let res = JavaThread::invoke_subroutine(ctx, constructor, Some(byte_buffer), vec![Value::Long(addr), Value::Dummy, Value::Integer(8)])?;
     if let VMResultType::Successful(None) = res{
         non_failing_some(Value::Reference(byte_buffer))
     } else {
@@ -76,14 +75,14 @@ gen_delegate!(delegate_create_long, |vm, java_vm, _obj_ref, _args| {
     }
 });
 
-gen_delegate!(delegate_und_init, |_vm, _java_vm, _obj_ref, _args| {
+gen_delegate!(delegate_und_init, |_ctx, _obj_ref, _args| {
     non_failing_some(Value::Integer(0))
 });
 
-gen_delegate!(delegate_und_getcwd, |vm, java_vm, _obj_ref, _args| {
+gen_delegate!(delegate_und_getcwd, |ctx, _obj_ref, _args| {
     let current_working_dir = env::current_dir().unwrap();
     debug!("getcwd -> '{}'", current_working_dir.display());
     let bytes = current_working_dir.into_os_string().as_encoded_bytes().iter().map(|b| Value::Integer(*b as i32)).collect::<Vec<_>>();
-    let path_ref = wrap_init!(vm, java_vm, vm.new_array(1, FieldType::Primitive(PrimitiveType::Byte).to_array_field_type(1), RefCell::new(bytes.clone()))?);
+    let path_ref = wrap_init!(ctx, ctx.vm.new_array(1, FieldType::Primitive(PrimitiveType::Byte).to_array_field_type(1), RefCell::new(bytes.clone()))?);
     non_failing_some(Value::Reference(path_ref))
 });

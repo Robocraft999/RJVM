@@ -443,7 +443,7 @@ pub unsafe extern "system-unwind" fn JVM_SetPrimitiveArrayElement(env: *mut JNIE
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "system-unwind" fn JVM_NewArray(env: *mut JNIEnv, eltClass: jclass, length: jint) -> jobject {
+pub unsafe extern "system-unwind" fn JVM_NewArray(env: *mut JNIEnv<'static>, eltClass: jclass, length: jint) -> jobject {
     let vm = unsafe{&*(*env).vm};
     let class_obj = vm.objects_by_id.borrow().get(&eltClass).copied().unwrap();
     let class_name = VM::extract_class_name_from_class_object(class_obj).unwrap();
