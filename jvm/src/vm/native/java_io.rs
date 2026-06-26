@@ -8,6 +8,7 @@ use crate::vm::{VmError, VM};
 use log::{debug, warn};
 use std::path::Path;
 use std::time::SystemTime;
+use crate::vm::java_thread::JavaThread;
 
 pub fn register_natives(registry: &mut NativeMethodRegistry) {
     registry.register(JAVA_IO_FILE_OUTPUT_STREAM, "writeBytes", "([BIIZ)V", delegate_write_bytes);
@@ -19,7 +20,7 @@ pub fn register_natives(registry: &mut NativeMethodRegistry) {
     registry.register(JAVA_IO_UNIX_FILE_SYSTEM, "getLastModifiedTime", "(Ljava/io/File;)J", delegate_last_modified_time);
 }
 
-gen_delegate!(delegate_write_bytes, |_vm, _java_vm, _obj_ref, args| {
+gen_delegate!(delegate_write_bytes, |_ctx, _obj_ref, args| {
     if let (
         Some(Value::Reference(bytes_ref)),
         Some(Value::Integer(offset)),
@@ -39,14 +40,14 @@ gen_delegate!(delegate_write_bytes, |_vm, _java_vm, _obj_ref, args| {
     }
 });
 
-gen_delegate!(delegate_read_bytes, |vm, java_vm, obj_ref, args| {
+gen_delegate!(delegate_read_bytes, |ctx, obj_ref, args| {
     if let (Some(Value::Reference(data_ref)), Some(Value::Integer(offset)), Some(Value::Integer(length))) = (args.get(0), args.get(1), args.get(2)) {
-        let io_exception_class = wrap_init!(vm, java_vm, vm.get_or_initialize_class("java/io/IOException")?);
+        let io_exception_class = wrap_init!(ctx, ctx.get_or_initialize_class("java/io/IOException")?);
 
         if let Some(fis_ref) = obj_ref{
             let path = VM::extract_string_from_object(&fis_ref.get_field(FILEINPUTSTREAM_path_INDEX))?;
 
-            let existing_file = vm.currently_open_files.borrow_mut().remove(&path);
+            let existing_file = ctx.vm.currently_open_files.borrow_mut().remove(&path);
             if let Some((content, index)) = existing_file {
                 //file: len 20, i 5
                 //buffer: blen 30, o 10, length 20
@@ -62,24 +63,24 @@ gen_delegate!(delegate_read_bytes, |vm, java_vm, obj_ref, args| {
                 if new_index > index{
                     if new_index == content.len(){
                         //read >0 bytes to end
-                        vm.currently_open_files.borrow_mut().insert(path.clone(), (content, new_index));
+                        ctx.vm.currently_open_files.borrow_mut().insert(path.clone(), (content, new_index));
                         //println!("read >0 bytes to end");
                         non_failing_some(Value::Integer((new_index - index) as i32))
                     } else {
                         //read >0 bytes
-                        vm.currently_open_files.borrow_mut().insert(path.clone(), (content, new_index));
+                        ctx.vm.currently_open_files.borrow_mut().insert(path.clone(), (content, new_index));
                         //println!("read >0 bytes");
                         non_failing_some(Value::Integer((end - start) as i32))
                     }
                 } else {
                     if new_index == content.len(){
                         //read 0 bytes from end to end
-                        vm.currently_open_files.borrow_mut().insert(path.clone(), (content, new_index));
+                        ctx.vm.currently_open_files.borrow_mut().insert(path.clone(), (content, new_index));
                         //println!("read 0 bytes from end to end");
                         non_failing_some(Value::Integer(-1))
                     } else {
                         //read 0 bytes
-                        vm.currently_open_files.borrow_mut().insert(path.clone(), (content, new_index));
+                        ctx.vm.currently_open_files.borrow_mut().insert(path.clone(), (content, new_index));
                         //println!("read 0 bytes");
                         non_failing_some(Value::Integer(0))
                     }
@@ -94,7 +95,8 @@ gen_delegate!(delegate_read_bytes, |vm, java_vm, obj_ref, args| {
                     Ok(Some(Value::Integer((end - start) as i32)))
                 }*/
             } else {
-                vm.throw(
+                JavaThread::throw(
+                    ctx,
                     io_exception_class,
                     format!("File {} was not found", path),
                     String::from("java/io/FileInputStream.readBytes([BII)I")
@@ -109,13 +111,13 @@ gen_delegate!(delegate_read_bytes, |vm, java_vm, obj_ref, args| {
 });
 
 //obsolete because libjava.so is loaded
-gen_delegate!(delegate_open0, |vm, _java_vm, _obj_ref, args| {
+gen_delegate!(delegate_open0, |ctx, _obj_ref, args| {
     if let Some(Value::Reference(path_ref)) = args.get(0) && !path_ref.is_null(){
         let path = VM::extract_string_from_object(&Value::Reference(path_ref))?;
-        if !vm.currently_open_files.borrow().contains_key(&path) {
-            let file_content = vm.class_manager.class_path.resolve_file(path.as_str())?;
+        if !ctx.vm.currently_open_files.borrow().contains_key(&path) {
+            let file_content = ctx.vm.class_manager.class_path.resolve_file(path.as_str())?;
             if let Some(file_content) = file_content {
-                vm.currently_open_files.borrow_mut().insert(path.clone(), (file_content, 0));
+                ctx.vm.currently_open_files.borrow_mut().insert(path.clone(), (file_content, 0));
             }
         }
         non_failing_none()
@@ -124,13 +126,13 @@ gen_delegate!(delegate_open0, |vm, _java_vm, _obj_ref, args| {
     }
 });
 
-gen_delegate!(delegate_close0, |vm, _java_vm, obj_ref, _args| {
+gen_delegate!(delegate_close0, |ctx, obj_ref, _args| {
     let Some(fis_ref) = obj_ref else {
         return invalidation!("Expected this")
     };
     let path_val = fis_ref.get_field(FILEINPUTSTREAM_path_INDEX);
     let path = VM::extract_string_from_object(&path_val)?;
-    if vm.currently_open_files.borrow_mut().remove(&path).is_none() {
+    if ctx.vm.currently_open_files.borrow_mut().remove(&path).is_none() {
         warn!("Closing non existent file: '{}'", path)
     }
     non_failing_none()
@@ -141,7 +143,7 @@ const BA_REGULAR: i32 = 2;
 const BA_DIRECTORY: i32 = 4;
 const BA_HIDDEN: i32 = 8;
 
-gen_delegate!(delegate_get_boolean_attribute, |_vm, _java_vm, _obj_ref, args| {
+gen_delegate!(delegate_get_boolean_attribute, |_ctx, _obj_ref, args| {
     if let Some(Value::Reference(path_val)) = args.get(0){
         let string_val = path_val.get_field(FILE_path_INDEX);
         let path = VM::extract_string_from_object(&string_val)?;
@@ -160,20 +162,20 @@ gen_delegate!(delegate_get_boolean_attribute, |_vm, _java_vm, _obj_ref, args| {
     }
 });
 
-gen_delegate!(delegate_canonicalize0, |vm, java_vm, _obj_ref, args| {
+gen_delegate!(delegate_canonicalize0, |ctx, _obj_ref, args| {
     debug!("canonicalize0");
     if let Some(string_val) = args.get(0){
         let path = VM::extract_string_from_object(string_val)?;
         let path = Path::new(&path);
         let path = path.canonicalize().unwrap().into_os_string().into_string().unwrap();
-        let new_path = wrap_init!(vm, java_vm, vm.new_string_object(path.as_str())?);
+        let new_path = wrap_init!(ctx, ctx.vm.new_string_object(path.as_str())?);
         non_failing_some(Value::Reference(new_path))
     } else {
         invalidation!("Can't canonicalize 0 arguments")
     }
 });
 
-gen_delegate!(delegate_last_modified_time, |_vm, _java_vm, _obj_ref, args| {
+gen_delegate!(delegate_last_modified_time, |_ctx, _obj_ref, args| {
     if let Some(Value::Reference(path_val)) = args.get(0){
         let string_val = path_val.get_field(FILE_path_INDEX);
         let path = VM::extract_string_from_object(&string_val)?;

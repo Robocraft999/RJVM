@@ -1,0 +1,180 @@
+use std::cell::RefCell;
+use log::{debug, warn};
+use crate::vm::callstack::CallStack;
+use crate::vm::class::{ClassAndMethod, ClassRef};
+use crate::vm::java_error::JavaError;
+use crate::vm::jni::types::JavaVM;
+use crate::vm::result::{VMPartialResult, VMResultType};
+use crate::vm::value::{Reference, Value};
+use crate::vm::{executor, Context, ProgramCounter, VmError, VM};
+use crate::vm::constants::THROWABLE_detailsMessage_INDEX;
+use crate::vm::debug::DebugHelper;
+use crate::vm::native::NativeMethodRegistry;
+
+pub type TID = u32;
+pub const NORM_PRIORITY: i32 = 5;
+pub const RUNNABLE: i32 = 1 + 4; //jvmti: alive + runnable
+
+pub struct JavaThread<'a> {
+    pub id: TID,
+    pub thread_obj_id: Option<u32>,
+
+    pub call_stack: CallStack<'a>,
+    pub debug_helper: DebugHelper,
+    pub caught_exception: RefCell<Option<(String, String, Value<'a>)>>,
+}
+
+impl<'a> JavaThread<'a> {
+    pub fn new(id: TID) -> Self {
+        Self {
+            id,
+            thread_obj_id: None,
+            call_stack: CallStack::new(),
+            debug_helper: DebugHelper::new(),
+            caught_exception: RefCell::new(None),
+        }
+    }
+
+    pub fn invoke_subroutine(ctx: Context<'a, '_>, class_and_method: ClassAndMethod<'a>, object: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
+        let current_index = ctx.thread.call_stack.len() as isize -1;
+        ctx.thread.call_stack.create_and_push_call_frame(class_and_method, object, args, false);
+        Self::invoke_frames_until(ctx, current_index)
+    }
+
+    /// Returns only Err() or Ok(Successful())
+    pub fn invoke_frames_until(ctx: Context<'a, '_>, stop_index: isize) -> VMPartialResult<Option<Value<'a>>> {
+        loop {
+            let frame_amount = ctx.thread.call_stack.len();
+
+            // if an exception is caught, try to let the current frame handle it
+            let mut clear_exception = false;
+            if let Some((message, origin, throwable)) = ctx.thread.caught_exception.borrow().as_ref(){
+                let thrown_class_name = throwable.expect_reference().map(|r| r.class_name.clone())?;
+                if frame_amount as isize - 1 == stop_index {
+                    ctx.thread.debug_helper.exception_helper.push(format!("Subroutine could not handle {} thrown by function {} with message: {}", thrown_class_name, origin, message));
+                    return Err(VmError::JavaException(JavaError::JavaExceptionThrown(thrown_class_name, message.to_owned(), origin.to_owned())));
+                }
+
+                let class_and_method = ctx.thread.call_stack.get_class_and_method_cloned();
+                if class_and_method.method.is_native(){
+                    ctx.thread.call_stack.pop_call_frame();
+                    debug!("Exception handler not in this native function {}", class_and_method.format());
+                    continue;
+                }
+                let current_pc = &ctx.thread.call_stack.get_pc();
+                //[unchecked] class already loaded by method
+                if let Some(handler_pc) = class_and_method.resolve_exception_handler(ctx.vm, current_pc, thrown_class_name.as_str()){
+                    ctx.thread.call_stack.set_pc(handler_pc);
+                    ctx.thread.call_stack.push_operand_value(throwable.clone());
+                    ctx.thread.debug_helper.exception_helper.push(format!("Handled {} by {}\n└-- thrown by {} with message: {}", thrown_class_name, class_and_method.format(), origin, message));
+                    debug!("Exception thrown handled by {}", class_and_method.format());
+                    clear_exception = true;
+                } else {
+                    ctx.thread.call_stack.pop_call_frame();
+                    debug!("Exception handler not in this function {}", class_and_method.format());
+                    continue;
+                }
+            }
+
+            let class_and_method = ctx.thread.call_stack.get_class_and_method_cloned();
+            if clear_exception {
+                ctx.thread.caught_exception.replace(None);
+            }
+
+            let call_result = if class_and_method.method.is_native(){
+                Self::execute_native(ctx, class_and_method)?
+            } else {
+                executor::execute(ctx)?
+            };
+
+            match call_result {
+                // borde alltid och bara vara på return av non-native och native funktioner
+                // så den här frame är alltid den översta
+                VMResultType::Successful(result) => {
+                    let frame = ctx.thread.call_stack.pop_call_frame();
+                    if frame_amount as isize -2 == stop_index{
+                        return Ok(VMResultType::Successful(result));
+                    }
+                    if let Some(value) = result{
+                        if frame.should_push_return{
+                            ctx.thread.call_stack.push_operand_value(value);
+                        }
+                    }
+                }
+                // returned by both non-native and native functions
+                VMResultType::ExceptionThrown => {
+                    // thrown exception should be in self.caught_exception
+                    // nothing more to do here
+                    continue;
+                }
+                // should only be returned by non-native functions
+                VMResultType::Interrupted(frame_amount, reset_pc) => {
+                    if reset_pc{
+                        let last_frame_index = ctx.thread.call_stack.pcs.borrow().len() - frame_amount - 1;
+                        let current_pc = ctx.thread.call_stack.pcs.borrow()[last_frame_index];
+                        let previous_pc = ctx.thread.call_stack.frames.borrow()[last_frame_index].class_and_method.method.previous_pc(current_pc);
+                        *ctx.thread.call_stack.pcs.borrow_mut().get_mut(last_frame_index).unwrap() = ProgramCounter(previous_pc);
+                    }
+                }
+            }
+        }
+    }
+
+    fn execute_native(ctx: Context<'a, '_>, class_and_method: ClassAndMethod<'a>) -> VMPartialResult<Option<Value<'a>>> {
+        //let call_frame = self.call_stack.pop_call_frame();
+
+        let object = if class_and_method.method.is_static() {
+            None
+        } else {
+            match ctx.thread.call_stack.load_local(0) {
+                Some(local) => {
+                    Some(local.expect_reference()?)
+                },
+                None => None
+            }
+        };
+        let args = ctx.thread.call_stack.locals_stack.borrow().last().unwrap()
+            .iter()
+            .cloned()
+            .skip(if object.is_none() {0} else {1})
+            .take_while(|value| value != &Value::Uninitialized)
+            .collect::<Vec<_>>();
+        let try_native = NativeMethodRegistry::invoke(ctx, &class_and_method, object, args);
+        debug!("TTT native[{}] returned: {:?}", class_and_method.format(), try_native);
+        if let Some(native) = try_native {
+            native
+        } else {
+            debug!("native not found");
+            if class_and_method.method.descriptor.return_type.is_some(){
+                Err(VmError::MethodCallError(format!("native {} returns a value which is probably used", class_and_method.format())))
+            } else {
+                warn!(target: "native", "Native function: {} not found. Skipping", class_and_method.format());
+                Ok(VMResultType::Successful(None))
+            }
+        }
+    }
+
+    /// Returns a `VMResultType::ExceptionThrown` and places the throwable into the exception slot
+    ///
+    /// `throwable_class` has to be initialized beforehand
+    ///
+    pub fn throw<T>(ctx: Context<'a, '_>, throwable_class: ClassRef<'a>, message: String, origin: String) -> VMPartialResult<T> {
+        //let exception_class = self.get_or_initialize_class(&throwable_class_name)?;
+        let exception_object = ctx.vm.new_object_from_class(throwable_class);
+
+        let details = ctx.vm.try_new_string_object(message.as_str())?;
+        //detailsMessage
+        exception_object.set_field(THROWABLE_detailsMessage_INDEX, Value::Reference(details));
+
+        let prev = ctx.thread.caught_exception.replace(
+            Some((
+                message,
+                origin,
+                Value::Reference(exception_object)
+            )));
+        assert!(prev.is_none());
+        Ok(VMResultType::ExceptionThrown)
+    }
+}
+
+impl !Unpin for JavaThread<'_> {}

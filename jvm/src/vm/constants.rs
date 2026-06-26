@@ -29,8 +29,10 @@ pub const SYSTEM_err_INDEX: usize = 2;
 // java.lang.Thread
 pub const THREAD_name_INDEX: usize = 0;
 pub const THREAD_priority_INDEX: usize = 1;
+pub const THREAD_eetop_INDEX: usize = 3;
 pub const THREAD_stillborn_INDEX: usize = 6;
 pub const THREAD_group_INDEX: usize = 8;
+pub const THREAD_threadStatus_INDEX: usize = 18;
 
 // java.lang.ThreadGroup
 pub const THREADGROUP_parent_INDEX: usize = 0;
@@ -103,6 +105,7 @@ pub mod classes {
     pub const JAVA_LANG_STRING: &str = "java/lang/String";
     pub const JAVA_LANG_SYSTEM: &str = "java/lang/System";
     pub const JAVA_LANG_THREAD: &str = "java/lang/Thread";
+    pub const JAVA_LANG_THREAD_GROUP: &str = "java/lang/ThreadGroup";
     pub const JAVA_LANG_THROWABLE: &str = "java/lang/Throwable";
     pub const SUN_MISC_PERF: &str = "sun/misc/Perf";
     pub const SUN_MISC_SIGNAL: &str = "sun/misc/Signal";

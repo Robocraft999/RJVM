@@ -9,13 +9,15 @@ use crate::native_init_wrap;
 use crate::vm::class::{ClassAndMethod, ClassId};
 use crate::vm::result::{VMPartialResult, VMResult, VMResultType};
 use crate::vm::value::{ReferenceType, Value};
-use crate::vm::{jni::{env_function_table::JNINativeInterface, vm_function_table::JNIInvokeInterface}, VmError, VM};
+use crate::vm::{jni::{env_function_table::JNINativeInterface, vm_function_table::JNIInvokeInterface}, Context, VmError, VM};
 use log::{debug, error, warn};
 use std::cell::RefCell;
 use std::ffi::{c_char, c_double, c_float, c_int, c_long, c_schar, c_short, c_uchar, c_ushort, c_void, CStr, CString, OsStr, VaList};
 use std::fmt::Debug;
 use std::os::unix::ffi::OsStrExt;
 use std::slice;
+use crate::vm::application::thread;
+use crate::vm::java_thread::JavaThread;
 
 //Platform dependent
 pub type jint = c_int;
@@ -208,7 +210,7 @@ impl JNINativeInterface_ {
     pub fn DefineClass(env: *mut JNIEnv, name: *const c_char, loader: jobject, buf: *const jbyte, len: jsize) -> jclass {
         unimplemented!()
     }
-    pub unsafe extern "system-unwind" fn FindClass(env: *mut JNIEnv, name: *const c_char) -> jclass {
+    pub unsafe extern "system-unwind" fn FindClass(env: *mut JNIEnv<'static>, name: *const c_char) -> jclass {
         let name = unsafe{CStr::from_ptr(name)}.to_str().map_err(|e| VmError::Native(e.to_string())).unwrap();
         let name = name.replace(".", "/");
         debug!(target: "native", "NATIVE: FindClass: '{}'", name);
@@ -248,11 +250,11 @@ impl JNINativeInterface_ {
         unimplemented!()
     }
 
-    pub unsafe extern "system-unwind" fn Throw(env: *mut JNIEnv, obj: jthrowable) -> jint{
+    pub unsafe extern "system-unwind" fn Throw(env: *mut JNIEnv<'static>, obj: jthrowable) -> jint{
         let vm: &VM = unsafe{&*(*env).vm};
         debug!(target: "native", "NATIVE: Throw");
         if let Some(object) = vm.objects_by_id.borrow().get(&obj).copied() {
-            let prev = vm.caught_exception.replace(Some(("NativeException".to_string(), "Unknown".to_string(), Value::Reference(object))));
+            let prev = thread().caught_exception.replace(Some(("NativeException".to_string(), "Unknown".to_string(), Value::Reference(object))));
             assert!(prev.is_none());
             0 as jint
         } else {
@@ -264,7 +266,7 @@ impl JNINativeInterface_ {
     }
     pub fn ExceptionOccurred(env: *mut JNIEnv) -> jthrowable{
         let vm: &VM = unsafe{&*(*env).vm};
-        if let Some((_, _, Value::Reference(throwable))) = &vm.caught_exception.borrow().as_ref(){
+        if let Some((_, _, Value::Reference(throwable))) = &thread().caught_exception.borrow().as_ref(){
             throwable.id as jthrowable
         } else {
             0 as jthrowable
@@ -275,7 +277,7 @@ impl JNINativeInterface_ {
     }
     pub fn ExceptionClear(env: *mut JNIEnv){
         let vm: &VM = unsafe{&*(*env).vm};
-        let old = vm.caught_exception.replace(None);
+        let old = thread().caught_exception.replace(None);
         if let Some(e) = old{
             warn!(target: "native", "an Exception was cleared: {:?}", e)
         }
@@ -319,22 +321,21 @@ impl JNINativeInterface_ {
     pub fn AllocObject(env: *mut JNIEnv, clazz: jclass) -> jobject{
         unimplemented!()
     }
-    pub unsafe extern "C-unwind" fn NewObject(env: *mut JNIEnv, clazz: jclass, methodID: jmethodID, mut args: ...) -> jobject{
+    pub unsafe extern "C-unwind" fn NewObject(env: *mut JNIEnv<'static>, clazz: jclass, methodID: jmethodID, mut args: ...) -> jobject{
         unsafe{Self::NewObjectV(env, clazz, methodID, args)}
     }
-    pub unsafe extern "system-unwind" fn NewObjectV(env: *mut JNIEnv, clazz: jclass, methodID: jmethodID, args: VaList) -> jobject{
+    pub unsafe extern "system-unwind" fn NewObjectV(env: *mut JNIEnv<'static>, clazz: jclass, methodID: jmethodID, args: VaList) -> jobject{
         let vm = unsafe{&*(*env).vm};
         let class_and_method = unsafe{ resolve_static_class_and_method(env, clazz, methodID)};
         let args = unsafe{resolve_function_args(env, &class_and_method, args)};
 
-        let stop_index = vm.call_stack.len() as isize -1;
-        let javavm = unsafe{&*(*env).pvm};
+        let java_vm = unsafe{&*(*env).pvm};
+        let ctx = Context { vm, java_vm, thread: thread() };
 
-        let _ = native_init_wrap!(env, vm.ensure_initialized(class_and_method.class));
+        let _ = native_init_wrap!(env, ctx.ensure_initialized(class_and_method.class));
         let obj_ref = vm.new_object_from_class(class_and_method.class);
         debug!("NewObjectV: {} ({:?})", class_and_method.format(), args);
-        vm.call_stack.create_and_push_call_frame(class_and_method, Some(obj_ref), args, false);
-        let res = match vm.invoke_frames_until(javavm, stop_index) {
+        let res = match JavaThread::invoke_subroutine(ctx, class_and_method, Some(obj_ref), args) {
             Ok(result) => result,
             Err(e) => {
                 error!(target: "native", "Java error: {:?}", e);
@@ -352,7 +353,7 @@ impl JNINativeInterface_ {
         unimplemented!()
     }
 
-    pub unsafe extern "system-unwind" fn GetObjectClass(env: *mut JNIEnv, obj: jobject) -> jclass{
+    pub unsafe extern "system-unwind" fn GetObjectClass(env: *mut JNIEnv<'static>, obj: jobject) -> jclass{
         let vm: &VM = unsafe{&*(*env).vm};
         if let Some(object) = vm.objects_by_id.borrow().get(&obj){
             let class_obj = native_init_wrap!(env, vm.new_class_object(object.class_name.as_str(), object.class_id));
@@ -389,26 +390,25 @@ impl JNINativeInterface_ {
         class_ref.find_method_index(method_name, signature).ok_or(VmError::Native(format!("GetMethodID: {}::{}{} not found", class_ref.name, method_name, signature))).unwrap()
     }
 
-    pub unsafe extern "C-unwind" fn CallObjectMethod(env: *mut JNIEnv, obj: jobject, methodID: jmethodID, mut params: ...) -> jobject{
+    pub unsafe extern "C-unwind" fn CallObjectMethod(env: *mut JNIEnv<'static>, obj: jobject, methodID: jmethodID, mut params: ...) -> jobject{
         unsafe{Self::CallObjectMethodV(env, obj, methodID, params)}
     }
 
-    pub unsafe extern "system-unwind" fn CallObjectMethodV(env: *mut JNIEnv, obj: jobject, methodID: jmethodID, args: VaList) -> jobject{
+    pub unsafe extern "system-unwind" fn CallObjectMethodV(env: *mut JNIEnv<'static>, obj: jobject, methodID: jmethodID, args: VaList) -> jobject{
         let vm = unsafe{&*(*env).vm};
         let class_and_method = unsafe{ resolve_class_and_method(env, obj, methodID)};
         let args = unsafe{resolve_function_args(env, &class_and_method, args)};
 
-        let stop_index = vm.call_stack.len() as isize -1;
-        let javavm = unsafe{&*(*env).pvm};
+        let java_vm = unsafe{&*(*env).pvm};
+        let ctx = Context { vm, java_vm,  thread: thread()};
 
         let obj_ref = vm.objects_by_id.borrow().get(&obj).copied().unwrap();
         debug!("CallObjectMethodV: {} ({:?})", class_and_method.format(), args);
-        vm.call_stack.create_and_push_call_frame(class_and_method, Some(obj_ref), args, false);
-        let res = match vm.invoke_frames_until(javavm, stop_index) {
+        let res = match JavaThread::invoke_subroutine(ctx, class_and_method, Some(obj_ref), args) {
             Ok(result) => result,
             Err(e) => {
                 error!(target: "native", "Java error: {:?}", e);
-                vm.debug_helper.print();
+                ctx.thread.debug_helper.print();
                 vm.native_method_registry.mark_exception();
                 return 0;
             }
@@ -448,26 +448,25 @@ impl JNINativeInterface_ {
         unimplemented!()
     }
 
-    pub unsafe extern "C-unwind" fn CallVoidMethod(env: *mut JNIEnv, obj: jobject, methodID: jmethodID, mut params: ...){
+    pub unsafe extern "C-unwind" fn CallVoidMethod(env: *mut JNIEnv<'static>, obj: jobject, methodID: jmethodID, mut params: ...){
         unsafe{Self::CallVoidMethodV(env, obj, methodID, params)}
     }
 
-    pub unsafe extern "system-unwind" fn CallVoidMethodV(env: *mut JNIEnv, obj: jobject, methodID: jmethodID, args: VaList){
+    pub unsafe extern "system-unwind" fn CallVoidMethodV(env: *mut JNIEnv<'static>, obj: jobject, methodID: jmethodID, args: VaList){
         let vm = unsafe{&*(*env).vm};
         let class_and_method = unsafe{ resolve_class_and_method(env, obj, methodID)};
         let args = unsafe{resolve_function_args(env, &class_and_method, args)};
 
-        let stop_index = vm.call_stack.len() as isize -1;
-        let javavm = unsafe{&*(*env).pvm};
+        let java_vm = unsafe{&*(*env).pvm};
+        let ctx = Context { vm, java_vm, thread: thread()};
 
         let obj_ref = vm.objects_by_id.borrow().get(&obj).copied().unwrap();
         debug!("CallVoidMethodV: {} ({:?})", class_and_method.format(), args);
-        vm.call_stack.create_and_push_call_frame(class_and_method, Some(obj_ref), args, false);
-        let res = match vm.invoke_frames_until(javavm, stop_index) {
+        let res = match JavaThread::invoke_subroutine(ctx, class_and_method, Some(obj_ref), args) {
             Ok(result) => result,
             Err(e) => {
                 error!(target: "native", "Java error: {:?}", e);
-                vm.debug_helper.print();
+                ctx.thread.debug_helper.print();
                 vm.native_method_registry.mark_exception();
                 return;
             }
@@ -513,7 +512,7 @@ impl JNINativeInterface_ {
         unimplemented!()
     }
 
-    pub unsafe extern "system-unwind" fn GetFieldID(env: *mut JNIEnv, clazz: jclass, name: *const c_char, sig: *const c_char) -> jfieldID{
+    pub unsafe extern "system-unwind" fn GetFieldID(env: *mut JNIEnv<'static>, clazz: jclass, name: *const c_char, sig: *const c_char) -> jfieldID{
         let field_name = unsafe{CStr::from_ptr(name)}.to_str().map_err(|e| VmError::Native(e.to_string())).unwrap();
         let signature = unsafe{CStr::from_ptr(sig)}.to_str().map_err(|e| VmError::Native(e.to_string())).unwrap();
         let vm = unsafe{&*(*env).vm};
@@ -527,7 +526,7 @@ impl JNINativeInterface_ {
         } else {
             let message = format!("GetMethodID: {}::{} not found", class_ref.name, field_name);
             // NoSuchFieldError
-            let prev = vm.caught_exception.replace(Some((message, "JNI_GetFieldID".to_string(), vm.null())));
+            let prev = thread().caught_exception.replace(Some((message, "JNI_GetFieldID".to_string(), vm.null())));
             0 as jfieldID
         }
     }
@@ -602,35 +601,36 @@ impl JNINativeInterface_ {
         unsafe { Self::SetField(env, obj, fieldID, Value::Double(val as f64)) }
     }
 
-    pub unsafe extern "system-unwind" fn GetStaticMethodID(env: *mut JNIEnv, clazz: jclass, name: *const c_char, sig: *const c_char) -> jmethodID{
+    pub unsafe extern "system-unwind" fn GetStaticMethodID(env: *mut JNIEnv<'static>, clazz: jclass, name: *const c_char, sig: *const c_char) -> jmethodID{
         let method_name = unsafe{CStr::from_ptr(name)}.to_str().map_err(|e| VmError::Native(e.to_string())).unwrap();
         let signature = unsafe{CStr::from_ptr(sig)}.to_str().map_err(|e| VmError::Native(e.to_string())).unwrap();
         let vm = unsafe{&*(*env).vm};
+        let java_vm = unsafe{&*(*env).pvm};
+        let ctx = Context { vm, java_vm, thread: thread() };
 
         let class_obj = vm.objects_by_id.borrow().get(&clazz).copied().unwrap();
         let class_ref = vm.extract_class_from_class_object(&class_obj).unwrap();
-        let class_ref = native_init_wrap!(env, vm.ensure_initialized(class_ref));
+        native_init_wrap!(env, ctx.ensure_initialized(class_ref));
         println!("NATIVE: GetStaticMethodID: {}::{}{}", class_ref.name, method_name, signature);
         //FIXME zero index results in NULL
         class_ref.find_method_index(method_name, signature).ok_or(VmError::Native(format!("GetStaticMethodID: {}::{}{} not found", class_ref.name, method_name, signature))).unwrap()
     }
 
-    pub unsafe extern "system-unwind" fn CallStaticObjectMethodV(env: *mut JNIEnv, clazz: jclass, methodID: jmethodID, mut args: VaList) -> jobject{
+    pub unsafe extern "system-unwind" fn CallStaticObjectMethodV(env: *mut JNIEnv<'static>, clazz: jclass, methodID: jmethodID, mut args: VaList) -> jobject{
         let vm = unsafe{&*(*env).vm};
 
         let class_and_method = unsafe{ resolve_static_class_and_method(env, clazz, methodID)};
         let args = unsafe{resolve_function_args(env, &class_and_method, args)};
 
-        let stop_index = vm.call_stack.len() as isize -1;
-        let javavm = unsafe{&*(*env).pvm};
+        let java_vm = unsafe{&*(*env).pvm};
+        let ctx = Context { vm, java_vm, thread: thread() };
 
         debug!("CallStaticObjectMethodV: {} ({:?})", class_and_method.format(), args);
-        vm.call_stack.create_and_push_call_frame(class_and_method, None, args, false);
-        let res = match vm.invoke_frames_until(javavm, stop_index) {
+        let res = match JavaThread::invoke_subroutine(ctx, class_and_method, None, args) {
             Ok(result) => result,
             Err(e) => {
                 error!(target: "native", "Java error: {:?}", e);
-                vm.debug_helper.print();
+                ctx.thread.debug_helper.print();
                 vm.native_method_registry.mark_exception();
                 return 0;
             }
@@ -650,21 +650,20 @@ impl JNINativeInterface_ {
         unimplemented!()
     }
 
-    pub unsafe extern "system-unwind" fn CallStaticBooleanMethodV(env: *mut JNIEnv, clazz: jclass, methodID: jmethodID, args: VaList) -> jboolean{
+    pub unsafe extern "system-unwind" fn CallStaticBooleanMethodV(env: *mut JNIEnv<'static>, clazz: jclass, methodID: jmethodID, args: VaList) -> jboolean{
         let vm = unsafe{&*(*env).vm};
         let class_and_method = unsafe{ resolve_static_class_and_method(env, clazz, methodID)};
         let args = unsafe{resolve_function_args(env, &class_and_method, args)};
 
-        let stop_index = vm.call_stack.len() as isize -1;
-        let javavm = unsafe{&*(*env).pvm};
+        let java_vm = unsafe{&*(*env).pvm};
+        let ctx = Context {vm, java_vm, thread: thread() };
 
         debug!("CallStaticBooleanMethod: {} ({:?})", class_and_method.format(), args);
-        vm.call_stack.create_and_push_call_frame(class_and_method, None, args, false);
-        let res = match vm.invoke_frames_until(javavm, stop_index) {
+        let res = match JavaThread::invoke_subroutine(ctx, class_and_method, None, args) {
             Ok(result) => result,
             Err(e) => {
                 error!(target: "native", "Java error: {:?}", e);
-                vm.debug_helper.print();
+                ctx.thread.debug_helper.print();
                 vm.native_method_registry.mark_exception();
                 return 0;
             }
@@ -705,24 +704,23 @@ impl JNINativeInterface_ {
     pub fn CallStaticDoubleMethodA(clazz: jclass, methodID: jmethodID, args: *const jvalue) -> jdouble{
         unimplemented!()
     }
-    pub unsafe extern "C-unwind" fn CallStaticVoidMethod(env: *mut JNIEnv, obj: jobject, methodID: jmethodID, mut params: ...){
+    pub unsafe extern "C-unwind" fn CallStaticVoidMethod(env: *mut JNIEnv<'static>, obj: jobject, methodID: jmethodID, mut params: ...){
         unsafe{Self::CallStaticVoidMethodV(env, obj, methodID, params)}
     }
-    pub unsafe extern "system-unwind" fn CallStaticVoidMethodV(env: *mut JNIEnv, clazz: jclass, methodID: jmethodID, args: VaList){
+    pub unsafe extern "system-unwind" fn CallStaticVoidMethodV(env: *mut JNIEnv<'static>, clazz: jclass, methodID: jmethodID, args: VaList){
         let vm = unsafe{&*(*env).vm};
         let class_and_method = unsafe{ resolve_static_class_and_method(env, clazz, methodID)};
         let args = unsafe{resolve_function_args(env, &class_and_method, args)};
 
-        let stop_index = vm.call_stack.len() as isize -1;
-        let javavm = unsafe{&*(*env).pvm};
+        let java_vm = unsafe{&*(*env).pvm};
+        let ctx = Context { vm, java_vm, thread: thread() };
 
         debug!("CallStaticVoidMethod: {} ({:?})", class_and_method.format(), args);
-        vm.call_stack.create_and_push_call_frame(class_and_method, None, args, false);
-        let res = match vm.invoke_frames_until(javavm, stop_index) {
+        let res = match JavaThread::invoke_subroutine(ctx, class_and_method, None, args) {
             Ok(result) => result,
             Err(e) => {
                 error!(target: "native", "Java error: {:?}", e);
-                vm.debug_helper.print();
+                ctx.thread.debug_helper.print();
                 vm.native_method_registry.mark_exception();
                 return;
             }
@@ -737,7 +735,7 @@ impl JNINativeInterface_ {
         unimplemented!()
     }
 
-    pub unsafe extern "system-unwind" fn GetStaticFieldID(env: *mut JNIEnv, clazz: jclass, name: *mut c_char, sig: *const c_char) -> jfieldID{
+    pub unsafe extern "system-unwind" fn GetStaticFieldID(env: *mut JNIEnv<'static>, clazz: jclass, name: *mut c_char, sig: *const c_char) -> jfieldID{
         let field_name = unsafe{CStr::from_ptr(name)}.to_str().map_err(|e| VmError::Native(e.to_string())).unwrap();
         let signature = unsafe{CStr::from_ptr(sig)}.to_str().map_err(|e| VmError::Native(e.to_string())).unwrap();
         let vm = unsafe{&*(*env).vm};
@@ -751,7 +749,7 @@ impl JNINativeInterface_ {
         } else {
             let message = format!("GetStaticFieldID: {}::{} not found", clazz.name, field_name);
             // NoSuchFieldError
-            let prev = vm.caught_exception.replace(Some((message, "JNI_GetStaticFieldID".to_string(), vm.null())));
+            let prev = thread().caught_exception.replace(Some((message, "JNI_GetStaticFieldID".to_string(), vm.null())));
             0 as jfieldID
         }
     }
@@ -879,7 +877,7 @@ impl JNINativeInterface_ {
         }
     }
 
-    pub unsafe extern "system-unwind" fn NewObjectArray(env: *mut JNIEnv, length: jsize, clazz: jclass, init: jobject) -> jobjectArray{
+    pub unsafe extern "system-unwind" fn NewObjectArray(env: *mut JNIEnv<'static>, length: jsize, clazz: jclass, init: jobject) -> jobjectArray{
         let vm: &VM = unsafe{&*(*env).vm};
         let class_ref = vm.objects_by_id.borrow().get(&clazz).copied().unwrap();
         let clazz = vm.extract_class_from_class_object(class_ref).unwrap();
@@ -909,7 +907,7 @@ impl JNINativeInterface_ {
         array_ref.set_element(index as usize, value_ref);
     }
 
-    pub unsafe extern "system-unwind" fn NewByteArray(env: *mut JNIEnv, length: jsize) -> jbyteArray{
+    pub unsafe extern "system-unwind" fn NewByteArray(env: *mut JNIEnv<'static>, length: jsize) -> jbyteArray{
         let vm: &VM = unsafe{&*(*env).vm};
         let content = vec![Value::Integer(0); length as usize];
         let array_ref = native_init_wrap!(env, vm.new_array(
@@ -970,7 +968,7 @@ impl JNINativeInterface_ {
 
     pub unsafe extern "system-unwind" fn ExceptionCheck(env: *mut JNIEnv) -> jboolean{
         let vm: &VM = unsafe{&*(*env).vm};
-        if vm.caught_exception.borrow().is_some() {JNI_TRUE} else {JNI_FALSE}
+        if thread().caught_exception.borrow().is_some() {JNI_TRUE} else {JNI_FALSE}
     }
 
     pub unsafe extern "system-unwind" fn NewDirectByteBuffer(env: *mut JNIEnv, address: *const c_void, capacity: jlong) -> jobject{

@@ -8,12 +8,11 @@ use std::cell::RefCell;
 use std::env;
 use vm::class_path::ClassPath;
 
-use crate::application::Application;
+use vm::application::Application;
 use crate::class_file::fields::field_type::FieldType;
 use crate::vm::value::Value;
 use crate::vm::{VmError, VM};
 
-mod application;
 mod bytes;
 mod access_flags;
 mod vm;
@@ -69,9 +68,8 @@ pub fn run() {
     class_path.push("resources/rt.jar;resources/LogicSim.jar;resources/lib/unix;resources/lib").expect("TODO: panic message");
 
     println!("Booting up VM");
-    let vm = Box::pin(VM::new(class_path));
 
-    //simple_logger::SimpleLogger::new().with_level(LevelFilter::Error).without_timestamps().init().unwrap();
+    //simple_logger::SimpleLogger::new().with_level(LevelFilter::Info).without_timestamps().init().unwrap();
 
     /*unsafe {
         use libffi::middle::{Closure, Cif, Type, Arg};
@@ -88,7 +86,7 @@ pub fn run() {
         let res: i32 = cif.call(libffi::low::CodePtr::from_ptr(func_ptr), &[Arg::new(&vm_ptr), Arg::new(&reserved)]);
         
     }*/
-    let app = Application::new(vm);
+    let mut app = Application::new(class_path);
     app.startup();
 
     simple_logger::SimpleLogger::new()

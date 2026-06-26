@@ -1,11 +1,12 @@
 use crate::class_file::fields::field_type::{FieldType, PrimitiveType};
 use crate::class_file::methods::descriptor::MethodDescriptor;
 use crate::vm::class::ClassAndMethod;
+use crate::vm::java_thread::JavaThread;
 use crate::vm::jni::types::{jvalue, JavaVM};
 use crate::vm::native::external::ExternNativeMethod;
 use crate::vm::result::{VMPartialResult, VMResultType};
 use crate::vm::value::{Reference, Value};
-use crate::vm::{VmError, VM};
+use crate::vm::{Context, VmError, VM};
 use libffi::high::CodePtr;
 use libloading::Library;
 use log::{info, warn};
@@ -28,21 +29,13 @@ mod misc;
 mod method_handles;
 
 macro_rules! wrap_init{
-    ($macro_vm:expr, $macro_java_vm:expr, $x:expr) => {
+    ($macro_context:expr, $x:expr) => {
         {
-            let macro_current_frame_index: isize = $macro_vm.call_stack.len() as isize -1;
-            let mut macro_counter = 0;
+            let macro_current_frame_index: isize = $macro_context.thread.call_stack.len() as isize -1;
             let mut current_res = $x;
-            while let crate::vm::VMResultType::Interrupted(..) = current_res {
-                if macro_counter >= 10{
-                    panic!("[wrap_init]: irschendewann is och mal schluss")
-                }
-                let init_res = $macro_vm.invoke_frames_until($macro_java_vm, macro_current_frame_index)?;
-                if let crate::vm::VMResultType::ExceptionThrown = init_res{
-                    panic!("[wrap_init]: exception thrown: {:?}", $macro_vm.caught_exception.borrow());
-                }
-                current_res = $x;
-                macro_counter += 1;
+            if let crate::vm::VMResultType::Interrupted(..) = current_res {
+                let _ = crate::vm::java_thread::JavaThread::invoke_frames_until($macro_context, macro_current_frame_index)?;
+                current_res = $x
             }
             match current_res {
                 crate::vm::VMResultType::Successful(t) => t,
@@ -55,10 +48,9 @@ macro_rules! wrap_init{
 use wrap_init;
 
 macro_rules! gen_delegate {
-    ($name:ident, |$vm:ident, $java_vm:ident, $obj:ident, $args:ident| $body:block) => {
+    ($name:ident, |$context:ident, $obj:ident, $args:ident| $body:block) => {
         fn $name<'a>(
-            $vm: &VM<'a>,
-            $java_vm: &JavaVM,
+            $context: crate::vm::Context<'a, '_>,
             $obj: Option<Reference<'a>>,
             $args: Vec<Value<'a>>,
         ) -> VMPartialResult<Option<Value<'a>>> {
@@ -123,29 +115,29 @@ impl <'a> NativeMethodRegistry<'a> {
         self.exception_in_native.replace(true);
     }
 
-    pub fn invoke(vm: &VM<'a>, java_vm: &JavaVM, cam: &ClassAndMethod<'a>, object: Option<Reference<'a>>, args: Vec<Value<'a>>) -> Option<VMPartialResult<Option<Value<'a>>>>{
-        for method in &vm.native_method_registry.methods{
+    pub fn invoke(ctx: Context<'a, '_>, cam: &ClassAndMethod<'a>, object: Option<Reference<'a>>, args: Vec<Value<'a>>) -> Option<VMPartialResult<Option<Value<'a>>>>{
+        for method in &ctx.vm.native_method_registry.methods{
             if method.method_name == cam.method.name && method.method_descriptor == cam.method.descriptor && cam.class.name == method.class_name{
                 let needed_arg_count = cam.method.descriptor.args.len();
                 let provided_arg_count = args.iter().filter(|v| v != &&Value::Dummy).count();
                 info!("METHOD_NAME (custom native): {}", cam.format());
                 if needed_arg_count == provided_arg_count || cam.class.has_method_polymorphic_signature(cam.method){
-                    return Some((method.delegate)(vm, java_vm, object, args))
+                    return Some((method.delegate)(ctx, object, args))
                 }
                 return Some(invalidation!("expected {} args but got: {}:{:?}", needed_arg_count, provided_arg_count, args))
             }
         }
-        if vm.native_method_registry.try_resolve_extern_native(cam){
-            let optional_extern = vm.native_method_registry.extern_methods.borrow().get(&cam).cloned();
+        if ctx.vm.native_method_registry.try_resolve_extern_native(cam){
+            let optional_extern = ctx.vm.native_method_registry.extern_methods.borrow().get(&cam).cloned();
             if let Some(extern_native) = optional_extern {
                 let class_object_or_this = if cam.method.is_static(){
-                    vm.try_new_class_object(cam.class).ok()?
+                    ctx.vm.try_new_class_object(cam.class).ok()?
                 } else {
                     object.unwrap()
                 };
                 println!("[try_resolve_extern_native]: {class_object_or_this:?} with args: \n{:?}", args);
                 info!("METHOD_NAME (extern native): {}", cam.format());
-                let jni_result = extern_native.call(java_vm, cam, class_object_or_this, args);
+                let jni_result = extern_native.call(ctx.java_vm, cam, class_object_or_this, args);
                 let result = if let Some(val) = jni_result{
                     unsafe {
                         Some(match (cam.method.descriptor.return_type.clone().unwrap(), val){
@@ -159,8 +151,8 @@ impl <'a> NativeMethodRegistry<'a> {
                             (FieldType::Primitive(PrimitiveType::Short), jvalue { s }) => Value::Integer(s as i32),
                             (_, jvalue { l }) => {
                                 if l == 0{
-                                    vm.null()
-                                } else if let Some(reference) = vm.objects_by_id.borrow().get(&(l as u32)){
+                                    ctx.vm.null()
+                                } else if let Some(reference) = ctx.vm.objects_by_id.borrow().get(&(l as u32)){
                                     Value::Reference(reference)
                                 } else {
                                     return Some(invalidation!("object with id {} does not exist", l))
@@ -171,7 +163,7 @@ impl <'a> NativeMethodRegistry<'a> {
                 } else {
                     None
                 };
-                return if vm.native_method_registry.exception_in_native.replace(false){
+                return if ctx.vm.native_method_registry.exception_in_native.replace(false){
                     Some(Ok(VMResultType::ExceptionThrown))
                 } else {
                     Some(Ok(VMResultType::Successful(result)))
@@ -189,7 +181,8 @@ pub struct NativeMethod<'a>{
     delegate: NativeMethodDelegate<'a>
 }
 
-type NativeMethodDelegate<'a> = fn(&VM<'a>, &JavaVM, Option<Reference<'a>>, Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>;
+//FIXME maybe create a RNIEnv which is passed to the delegates instead
+type NativeMethodDelegate<'a> = fn(Context<'a, '_>, Option<Reference<'a>>, Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>;
 
 pub fn register_all_natives(registry: &mut NativeMethodRegistry) {
     java_io::register_natives(registry);

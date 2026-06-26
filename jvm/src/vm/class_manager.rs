@@ -256,7 +256,7 @@ impl<'a> ClassManager<'a>{
             let class_ptr: *const Class<'a> = &class;
             &*class_ptr
         };
-        vm.debug_helper.bytecode_helper.push_class(class_ref, bytes);
+        vm.vm_debug_helper.bytecode_helper.push_class(class_ref, bytes);
 
         class.init_vtable();
         class.init_itable();

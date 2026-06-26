@@ -39,7 +39,7 @@ pub fn register_natives(registry: &mut NativeMethodRegistry) {
 
 const ARRAY_BASE_OFFSET: usize = 16;
 
-gen_delegate!(delegate_array_base_offset, |_vm, _java_vm, _obj_ref, args| {
+gen_delegate!(delegate_array_base_offset, |_ctx, _obj_ref, args| {
     if let Some(Value::Reference(_class_ref)) = args.get(0){
         non_failing_some(Value::Integer(ARRAY_BASE_OFFSET as i32))
     } else {
@@ -47,7 +47,7 @@ gen_delegate!(delegate_array_base_offset, |_vm, _java_vm, _obj_ref, args| {
     }
 });
 
-gen_delegate!(delegate_array_index_scale, |_vm, _java_vm, _obj_ref, args| {
+gen_delegate!(delegate_array_index_scale, |_ctx, _obj_ref, args| {
     if let Some(Value::Reference(_class_ref)) = args.get(0){
         non_failing_some(Value::Integer(1))
     } else {
@@ -55,16 +55,16 @@ gen_delegate!(delegate_array_index_scale, |_vm, _java_vm, _obj_ref, args| {
     }
 });
 
-gen_delegate!(delegate_address_size, |_vm, _java_vm, _obj_ref, _args| {
+gen_delegate!(delegate_address_size, |_ctx, _obj_ref, _args| {
     non_failing_some(Value::Integer(8))
 });
 
-gen_delegate!(delegate_object_field_offset, |vm, _java_vm, _obj_ref, args| {
+gen_delegate!(delegate_object_field_offset, |ctx, _obj_ref, args| {
     //FIXME calc real offset
     debug!("delegate_object_field_offset: '{:?}'", args);
     if let Some(Value::Reference(field_ref)) = args.get(0){
         let class_ref = field_ref.get_field(FIELD_clazz_INDEX).expect_reference()?;
-        let clazz = vm.extract_class_from_class_object(class_ref)?;
+        let clazz = ctx.vm.extract_class_from_class_object(class_ref)?;
         let name_val = field_ref.get_field(FIELD_name_INDEX);
         let name = VM::extract_string_from_object(&name_val)?;
         if let Some((index, _)) = clazz.find_field(name.as_str()){
@@ -77,13 +77,13 @@ gen_delegate!(delegate_object_field_offset, |vm, _java_vm, _obj_ref, args| {
     }
 });
 
-gen_delegate!(delegate_static_field_offset, |vm, java_vm, obj_ref, args| {
+gen_delegate!(delegate_static_field_offset, |ctx, obj_ref, args| {
     //non_failing_some(Value::Long(0))
     //TODO check if needed
-    delegate_object_field_offset(vm, java_vm, obj_ref, args)
+    delegate_object_field_offset(ctx, obj_ref, args)
 });
 
-gen_delegate!(delegate_put_object_volatile, |_vm, _java_vm, _obj_ref, args| {
+gen_delegate!(delegate_put_object_volatile, |_ctx, _obj_ref, args| {
     debug!("put_object_volatile args: {:?}", args);
     if let (Some(Value::Reference(o)), Some(Value::Long(index)), Some(Value::Reference(x))) = (args.get(0), args.get(1), args.get(3)){
         // FIXME verify if null or correct field type
@@ -98,15 +98,15 @@ gen_delegate!(delegate_put_object_volatile, |_vm, _java_vm, _obj_ref, args| {
     }
 });
 
-gen_delegate!(delegate_get_object_volatile, |vm, _java_vm, _obj_ref, args| {
+gen_delegate!(delegate_get_object_volatile, |ctx, _obj_ref, args| {
     debug!("get_object_volatile args: {:?}", args);
     if let (Some(Value::Reference(o)), Some(Value::Long(index))) = (args.get(0), args.get(1)) {
         if o.is_array(){
             return non_failing_some(o.get_element(*index as usize - ARRAY_BASE_OFFSET));
         }
         let field_value = if o.class_name == JAVA_LANG_CLASS {
-            let class_ref = vm.extract_class_from_class_object(o)?;
-            let static_object = vm.static_class_objects.borrow().get(&class_ref.id).unwrap().clone();
+            let class_ref = ctx.vm.extract_class_from_class_object(o)?;
+            let static_object = ctx.vm.static_class_objects.borrow().get(&class_ref.id).unwrap().clone();
             static_object.get_field(*index as usize)
         } else {
             o.get_field(*index as usize)
@@ -117,15 +117,15 @@ gen_delegate!(delegate_get_object_volatile, |vm, _java_vm, _obj_ref, args| {
     }
 });
 
-gen_delegate!(delegate_get_int_volatile, |vm, _java_vm, _obj_ref, args| {
+gen_delegate!(delegate_get_int_volatile, |ctx, _obj_ref, args| {
     debug!("get_int_volatile args: {:?}", args);
     if let (Some(Value::Reference(o)), Some(Value::Long(index))) = (args.get(0), args.get(1)) {
         if o.is_array(){
             return non_failing_some(o.get_element(*index as usize  - ARRAY_BASE_OFFSET));
         }
         let field_value = if o.class_name == JAVA_LANG_CLASS {
-            let class_ref = vm.extract_class_from_class_object(o)?;
-            let static_object = vm.static_class_objects.borrow().get(&class_ref.id).unwrap().clone();
+            let class_ref = ctx.vm.extract_class_from_class_object(o)?;
+            let static_object = ctx.vm.static_class_objects.borrow().get(&class_ref.id).unwrap().clone();
             static_object.get_field(*index as usize)
         } else {
             o.get_field(*index as usize)
@@ -136,7 +136,7 @@ gen_delegate!(delegate_get_int_volatile, |vm, _java_vm, _obj_ref, args| {
     }
 });
 
-gen_delegate!(delegate_static_field_base, |_vm, _java_vm, _obj_ref, args| {
+gen_delegate!(delegate_static_field_base, |_ctx, _obj_ref, args| {
     if let Some(field_object_value) = args.get(0){
         let field_object = field_object_value.expect_reference()?;
         trace!("staticFieldBase: on field: '{:?}'", field_object);
@@ -147,7 +147,7 @@ gen_delegate!(delegate_static_field_base, |_vm, _java_vm, _obj_ref, args| {
     }
 });
 
-gen_delegate!(delegate_compare_and_swap_object, |_vm, _java_vm, _obj_ref, args| {
+gen_delegate!(delegate_compare_and_swap_object, |_ctx, _obj_ref, args| {
     if let (Some(Value::Reference(o)), Some(Value::Long(offset)), Some(Value::Reference(expected)), Some(Value::Reference(x))) = (args.get(0), args.get(1), args.get(3), args.get(4)) {
         if o.is_null(){
             return invalidation!("Expected an object or array but found null")
@@ -170,7 +170,7 @@ gen_delegate!(delegate_compare_and_swap_object, |_vm, _java_vm, _obj_ref, args| 
     non_failing_some(Value::from(false))
 });
 
-gen_delegate!(delegate_compare_and_swap_int, |_vm, _java_vm, _obj_ref, args| {
+gen_delegate!(delegate_compare_and_swap_int, |_ctx, _obj_ref, args| {
     if let (Some(Value::Reference(o)), Some(Value::Long(offset)), Some(Value::Integer(expected)), Some(Value::Integer(x))) = (args.get(0), args.get(1), args.get(3), args.get(4)) {
         if let Value::Integer(current) = o.get_field(*offset as usize){
             if current == *expected{
@@ -182,7 +182,7 @@ gen_delegate!(delegate_compare_and_swap_int, |_vm, _java_vm, _obj_ref, args| {
     non_failing_some(Value::from(false))
 });
 
-gen_delegate!(delegate_compare_and_swap_long, |_vm, _java_vm, _obj_ref, args| {
+gen_delegate!(delegate_compare_and_swap_long, |_ctx, _obj_ref, args| {
     if let (Some(Value::Reference(o)), Some(Value::Long(offset)), Some(Value::Long(expected)), Some(Value::Long(x))) = (args.get(0), args.get(1), args.get(3), args.get(5)) {
         if let Value::Long(current) = o.get_field(*offset as usize){
             if current == *expected{
@@ -194,45 +194,45 @@ gen_delegate!(delegate_compare_and_swap_long, |_vm, _java_vm, _obj_ref, args| {
     non_failing_some(Value::from(false))
 });
 
-gen_delegate!(delegate_allocate_memory, |vm, _java_vm, _obj_ref, args| {
+gen_delegate!(delegate_allocate_memory, |ctx, _obj_ref, args| {
     if let Some(Value::Long(num)) = args.get(0){
         //return is address in memory
-        let ptr = vm.unsafe_allocator.allocate_memory(*num as usize);
+        let ptr = ctx.vm.unsafe_allocator.allocate_memory(*num as usize);
         non_failing_some(Value::Long(ptr))
     } else {
         invalidation!("Expected a long")
     }
 });
 
-gen_delegate!(delegate_put_long, |vm, _java_vm, _obj_ref, args| {
+gen_delegate!(delegate_put_long, |ctx, _obj_ref, args| {
     //because args = [Long, Dummy, Long, Dummy]
     if let (Some(Value::Long(ptr)), Some(Value::Long(value))) = (args.get(0), args.get(2)){
-        vm.unsafe_allocator.put_long(*ptr, *value);
+        ctx.vm.unsafe_allocator.put_long(*ptr, *value);
         non_failing_none()
     } else {
         invalidation!("Expected a long as address and a long as value")
     }
 });
 
-gen_delegate!(delegate_get_long, |vm, _java_vm, _obj_ref, args| {
+gen_delegate!(delegate_get_long, |ctx, _obj_ref, args| {
     if let Some(Value::Long(ptr)) = args.get(0){
-        let long = vm.unsafe_allocator.get_long(*ptr);
+        let long = ctx.vm.unsafe_allocator.get_long(*ptr);
         Ok(VMResultType::Successful(long.map(|val| Value::Long(val))))
     } else {
         invalidation!("Expected a long as address")
     }
 });
 
-gen_delegate!(delegate_get_byte, |vm, _java_vm, _obj_ref, args| {
+gen_delegate!(delegate_get_byte, |ctx, _obj_ref, args| {
     if let Some(Value::Long(ptr)) = args.get(0){
-        let byte = vm.unsafe_allocator.get_byte(*ptr);
+        let byte = ctx.vm.unsafe_allocator.get_byte(*ptr);
         Ok(VMResultType::Successful(byte.map(|byte| Value::Integer(byte as i32))))
     } else {
         invalidation!("Expected a long as address")
     }
 });
 
-gen_delegate!(delegate_put_ordered_object, |vm, java_vm, _obj_ref, args| {
+gen_delegate!(delegate_put_ordered_object, |ctx, _obj_ref, args| {
     debug!("put_ordered_object args: {:?}", args);
     if let (Some(Value::Reference(o)), Some(Value::Long(index)), Some(x)) = (args.get(0), args.get(1), args.get(3)) {
         if o.is_array(){
@@ -240,9 +240,9 @@ gen_delegate!(delegate_put_ordered_object, |vm, java_vm, _obj_ref, args| {
             return non_failing_none();
         }
         if o.class_name == JAVA_LANG_CLASS {
-            let class_ref = vm.extract_class_from_class_object(o)?;
-            let _ = wrap_init!(vm, java_vm, vm.ensure_initialized(class_ref)?);
-            let static_object = vm.static_class_objects.borrow().get(&class_ref.id).unwrap().clone();
+            let class_ref = ctx.vm.extract_class_from_class_object(o)?;
+            let _ = wrap_init!(ctx, ctx.ensure_initialized(class_ref)?);
+            let static_object = ctx.vm.static_class_objects.borrow().get(&class_ref.id).unwrap().clone();
             static_object.set_field(*index as usize, x.clone());
         } else {
             o.set_field(*index as usize, x.clone());
@@ -253,7 +253,7 @@ gen_delegate!(delegate_put_ordered_object, |vm, java_vm, _obj_ref, args| {
     }
 });
 
-gen_delegate!(delegate_define_class, |vm, java_vm, _obj_ref, args| {
+gen_delegate!(delegate_define_class, |ctx, _obj_ref, args| {
     if let (Some(class_name_value), Some(Value::Reference(bytes_value)), Some(Value::Integer(start)), Some(Value::Integer(end))) = (args.get(0), args.get(1), args.get(2), args.get(3)) {
         let class_name = VM::extract_string_from_object(class_name_value)?;
         let bytes = if let ReferenceType::Array(_, _, data) = &bytes_value.reference_type{
@@ -262,31 +262,31 @@ gen_delegate!(delegate_define_class, |vm, java_vm, _obj_ref, args| {
             Vec::new()
         };
         let bytes = bytes.into_iter().skip(*start as usize).take((*end - *start) as usize).collect::<Vec<_>>();
-        let class_object = wrap_init!(vm, java_vm, vm.define_class(class_name.as_str(), bytes.clone())?);
+        let class_object = wrap_init!(ctx, ctx.vm.define_class(class_name.as_str(), bytes.clone())?);
         non_failing_some(Value::Reference(class_object))
     } else {
         invalidation!("define_class: expected string_object, byte array, start and end ints but got: {:?}, {:?}, {:?}, {:?}", args.get(0), args.get(1), args.get(2), args.get(3))
     }
 });
 
-gen_delegate!(delegate_define_anon_class, |vm, java_vm, _obj_ref, args| {
+gen_delegate!(delegate_define_anon_class, |ctx, _obj_ref, args| {
     if let (Some(Value::Reference(host_class)), Some(Value::Reference(byte_arr)), Some(Value::Reference(_cp_patch_arr_ref))) = (args.get(0), args.get(1), args.get(2)) {
         if let ReferenceType::Array(_, _, bytes ) = &byte_arr.reference_type{
             let bytes = bytes.borrow().iter().map(|val| if let Value::Integer(byte) = val {*byte as u8} else {0}).collect::<Vec<_>>();
-            let class = vm.class_manager.define_class(vm, None, None, bytes)?;
+            let class = ctx.vm.class_manager.define_class(ctx.vm, None, None, bytes)?;
 
-            let class_ref = vm.class_manager.classes.alloc(class);
+            let class_ref = ctx.vm.class_manager.classes.alloc(class);
 
             let class_ref = unsafe {
                 let class_ptr: *const Class<'a> = class_ref;
                 &*class_ptr
             };
 
-            vm.class_manager.classes_by_id.borrow_mut().insert(class_ref.id, class_ref);
+            ctx.vm.class_manager.classes_by_id.borrow_mut().insert(class_ref.id, class_ref);
             //vm.class_manager.classes_by_name.borrow_mut().insert(class_ref.name.clone(), class_ref);
-            vm.class_manager.class_loading_states.borrow_mut().insert(class_ref.id, ClassLoadingState::LOADED);
-            let class_obj = wrap_init!(vm, java_vm, vm.new_class_object_by_class(class_ref)?);
-            vm.class_manager.anonymous_classes.borrow_mut().insert(class_obj.id, AnonClassInfo { clazz: class_ref, host: host_class });
+            ctx.vm.class_manager.class_loading_states.borrow_mut().insert(class_ref.id, ClassLoadingState::LOADED);
+            let class_obj = wrap_init!(ctx, ctx.vm.new_class_object_by_class(class_ref)?);
+            ctx.vm.class_manager.anonymous_classes.borrow_mut().insert(class_obj.id, AnonClassInfo { clazz: class_ref, host: host_class });
             non_failing_some(Value::Reference(class_obj))
         } else {
             invalidation!("define_anon_class: expected bytes array type but got: {:?}", byte_arr)
@@ -296,30 +296,31 @@ gen_delegate!(delegate_define_anon_class, |vm, java_vm, _obj_ref, args| {
     }
 });
 
-gen_delegate!(delegate_allocate_instance, |vm, java_vm, _obj_ref, args| {
+gen_delegate!(delegate_allocate_instance, |ctx, _obj_ref, args| {
     if let Some(Value::Reference(class_ref)) = args.get(0){
-        let class_name = VM::extract_class_name_from_class_object(class_ref)?;
-        let object = wrap_init!(vm, java_vm, vm.new_object(class_name.as_str())?);
+        let clazz = ctx.vm.extract_class_from_class_object(class_ref)?;
+        wrap_init!(ctx, ctx.ensure_initialized(clazz)?);
+        let object = ctx.vm.new_object_from_class(clazz);
         non_failing_some(Value::Reference(object))
     } else {
         invalidation!("Expected a class reference to allocate but got: {:?}", args)
     }
 });
 
-gen_delegate!(delegate_should_be_initialized, |vm, _java_vm, _obj_ref, args| {
+gen_delegate!(delegate_should_be_initialized, |ctx, _obj_ref, args| {
     if let Some(Value::Reference(class_ref)) = args.get(0){
-        let clazz = vm.extract_class_from_class_object(class_ref)?;
-        let initialized = vm.class_manager.expect_class_state(clazz.id, ClassLoadingState::INITIALIZED);
+        let clazz = ctx.vm.extract_class_from_class_object(class_ref)?;
+        let initialized = ctx.vm.class_manager.expect_class_state(clazz.id, ClassLoadingState::INITIALIZED);
         non_failing_some(Value::from(!initialized))
     } else {
         invalidation!("Expected a class reference but got: {:?}", args)
     }
 });
 
-gen_delegate!(delegate_ensure_initialized, |vm, java_vm, _obj_ref, args| {
+gen_delegate!(delegate_ensure_initialized, |ctx, _obj_ref, args| {
     if let Some(Value::Reference(class_ref)) = args.get(0){
-        let clazz = vm.extract_class_from_class_object(class_ref)?;
-        let _clazz = wrap_init!(vm, java_vm, vm.ensure_initialized(clazz)?);
+        let clazz = ctx.vm.extract_class_from_class_object(class_ref)?;
+        let _clazz = wrap_init!(ctx, ctx.ensure_initialized(clazz)?);
         non_failing_none()
     } else {
         invalidation!("Expected a class reference but got: {:?}", args)
