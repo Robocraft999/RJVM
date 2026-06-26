@@ -18,6 +18,7 @@ use std::cell::RefCell;
 use std::cmp::PartialEq;
 use std::collections::{HashMap};
 use std::str::FromStr;
+use std::sync::RwLock;
 use typed_arena::Arena;
 
 #[derive(Debug, Clone)]
@@ -49,6 +50,7 @@ pub enum ClassLoadingState{
     INITIALIZED,
 }
 
+#[derive(Debug)]
 pub struct AnonClassInfo<'a> {
     pub clazz: ClassRef<'a>,
     pub host: Reference<'a>,
@@ -56,26 +58,26 @@ pub struct AnonClassInfo<'a> {
 
 pub struct ClassManager<'a>{
     pub class_path: ClassPath,
-    pub classes_by_name: RefCell<HashMap<String, ClassRef<'a>>>,
-    pub classes_by_id: RefCell<HashMap<ClassId, ClassRef<'a>>>,
-    pub class_loading_states: RefCell<HashMap<ClassId, ClassLoadingState>>,
-    pub anonymous_classes: RefCell<HashMap<u32, AnonClassInfo<'a>>>,
+    pub classes_by_name: RwLock<HashMap<String, ClassRef<'a>>>,
+    pub classes_by_id: RwLock<HashMap<ClassId, ClassRef<'a>>>,
+    pub class_loading_states: RwLock<HashMap<ClassId, ClassLoadingState>>,
+    pub anonymous_classes: RwLock<HashMap<u32, AnonClassInfo<'a>>>,
     pub classes: Arena<Class<'a>>,
-    pub primitive_class_ids: RefCell<HashMap<String, ClassId>>,
-    next_id: RefCell<u32>,
+    pub primitive_class_ids: RwLock<HashMap<String, ClassId>>,
+    next_id: RwLock<u32>,
 }
 
 impl<'a> ClassManager<'a>{
     pub fn new (class_path: ClassPath) -> Self{
         Self{
             class_path,
-            classes_by_name: RefCell::new(HashMap::new()),
-            classes_by_id: RefCell::new(HashMap::new()),
-            class_loading_states: RefCell::new(HashMap::new()),
-            anonymous_classes: RefCell::new(HashMap::new()),
+            classes_by_name: RwLock::new(HashMap::new()),
+            classes_by_id: RwLock::new(HashMap::new()),
+            class_loading_states: RwLock::new(HashMap::new()),
+            anonymous_classes: RwLock::new(HashMap::new()),
             classes: Arena::with_capacity(100),
-            primitive_class_ids: RefCell::new(HashMap::new()),
-            next_id: RefCell::new(1),
+            primitive_class_ids: RwLock::new(HashMap::new()),
+            next_id: RwLock::new(1),
         }
     }
 
@@ -108,17 +110,17 @@ impl<'a> ClassManager<'a>{
             &*class_ptr
         };
 
-        self.classes_by_name.borrow_mut().insert(class_name.to_string(), class_ref);
-        self.classes_by_id.borrow_mut().insert(class_ref.id, class_ref);
-        self.class_loading_states.borrow_mut().insert(class_ref.id, ClassLoadingState::LOADED);
+        self.classes_by_name.write()?.insert(class_name.to_string(), class_ref);
+        self.classes_by_id.write()?.insert(class_ref.id, class_ref);
+        self.class_loading_states.write()?.insert(class_ref.id, ClassLoadingState::LOADED);
 
         Ok(class_ref)
     }
 
     pub fn define_class(&self, vm: &VM<'a>, class_name: Option<&str>, array_info: Option<ArrayInfo>, bytes: Vec<u8>) -> VMResult<Class<'a>>{
         let parsed_class = parse_class_file(bytes.clone())?;
-        let next_id = *self.next_id.borrow();
-        *self.next_id.borrow_mut() += 1;
+        let next_id = *self.next_id.read()?;
+        *self.next_id.write()? += 1;
 
         let constants = parsed_class.constant_pool;
         let class_name = match class_name {
@@ -136,7 +138,7 @@ impl<'a> ClassManager<'a>{
             }
         }?;
 
-        if self.classes_by_name.borrow().contains_key(&class_name){
+        if self.classes_by_name.read()?.contains_key(&class_name){
             warn!("Duplicate class name {}", class_name);
         }
 
@@ -264,18 +266,25 @@ impl<'a> ClassManager<'a>{
         Ok(class)
     }
     
+    fn get_or_create_primitive_class(&self, vm: &VM<'a>, name: &str) -> VMResult<ClassId> {
+        if !self.primitive_class_ids.read()?.contains_key(name){
+            let id = *self.next_id.read()?;
+            *self.next_id.write()? += 1;
+            self.primitive_class_ids.write()?.insert(name.to_owned(), ClassId(id));
+
+            let wrapper = self.get_or_resolve_class(&vm, primitive_to_wrapper_name(name).as_str()).unwrap();
+            self.classes_by_id.write()?.insert(ClassId(id), wrapper);
+            self.classes_by_name.write()?.insert(name.to_owned(), wrapper);
+        }
+        Ok(self.primitive_class_ids.read()?.get(name).cloned().unwrap())
+    }
+    
     /// Use this carefully! The is no ClassRef for this id
     pub fn get_primitive_class(&self, vm: &VM<'a>, name: &str) -> ClassId {
-        if !self.primitive_class_ids.borrow().contains_key(name){
-            let id = *self.next_id.borrow();
-            *self.next_id.borrow_mut() += 1;
-            self.primitive_class_ids.borrow_mut().insert(name.to_owned(), ClassId(id));
-            
-            let wrapper = self.get_or_resolve_class(&vm, primitive_to_wrapper_name(name).as_str()).unwrap();
-            self.classes_by_id.borrow_mut().insert(ClassId(id), wrapper);
-            self.classes_by_name.borrow_mut().insert(name.to_owned(), wrapper);
-        }
-        self.primitive_class_ids.borrow().get(name).cloned().unwrap()
+        let Ok(id) = self.get_or_create_primitive_class(vm, name) else {
+            unreachable!()
+        };
+        id
     }
 
     pub fn get_classes_to_initialize(&self, class: ClassRef<'a>) -> VMResult<Vec<ClassRef<'a>>> {
@@ -300,7 +309,10 @@ impl<'a> ClassManager<'a>{
 
     pub fn update_class_state(&self, clazz: ClassRef, new_state: ClassLoadingState){
         //TODO validate that the class existed
-        self.class_loading_states.borrow_mut().insert(clazz.id, new_state);
+        let Ok(mut res) = self.class_loading_states.write() else {
+            unreachable!("Could not acquire lock for class state unlock")
+        };
+        res.insert(clazz.id, new_state);
     }
 
     fn try_create_array_class(&self, class_name: &str) -> VMResult<(String, Option<ArrayInfo>)>{
@@ -324,14 +336,18 @@ impl<'a> ClassManager<'a>{
 
     pub fn find_class_by_name(&self, class_name: &str) -> Option<ClassRef<'a>>{
         //self.classes.iter().find(|c| c.name == class_name)
-        self.classes_by_name.borrow().get(class_name).cloned()
+        self.classes_by_name.read().ok()?.get(class_name).cloned()
     }
 
     pub fn find_class_by_id(&self, class_id: ClassId) -> Option<ClassRef<'a>>{
-        self.classes_by_id.borrow().get(&class_id).cloned()
+        self.classes_by_id.read().ok()?.get(&class_id).cloned()
     }
 
     pub fn expect_class_state(&self, class_id: ClassId, state: ClassLoadingState) -> bool{
-        self.class_loading_states.borrow().get(&class_id).map(|s| s == &state).unwrap_or(false)
+        if let Ok(res) = self.class_loading_states.read() {
+            res.get(&class_id).map(|s| s == &state).unwrap_or(false)
+        } else {
+            unreachable!("Could not acquire lock for class state")
+        }
     }
 }

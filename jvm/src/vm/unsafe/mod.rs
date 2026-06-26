@@ -1,21 +1,26 @@
 use crate::vm::r#unsafe::memory_chunk::MemoryChunk;
 use std::cell::RefCell;
+use std::sync::RwLock;
 
 mod memory_chunk;
 
 pub struct Unsafe {
-    memory: RefCell<MemoryChunk>
+    memory: RwLock<MemoryChunk>
 }
 
 impl Unsafe {
     pub fn new() -> Self {
         Self{
-            memory: RefCell::new(MemoryChunk::new(1024 * 1024))
+            memory: RwLock::new(MemoryChunk::new(1024 * 1024))
         }
     }
 
     pub fn allocate_memory(&self, amount: usize) -> i64 {
-        self.memory.borrow_mut().alloc(amount).map(|entry| entry.ptr as i64).unwrap_or(-1)
+        if let Ok(mut res) = self.memory.write() {
+            res.alloc(amount).map(|entry| entry.ptr as i64).unwrap_or(-1)
+        } else {
+            unreachable!("Could not acquire lock for unsafe memory")
+        }
     }
 
     pub fn free_memory(&self, ptr: i64) {
@@ -23,23 +28,38 @@ impl Unsafe {
     }
 
     pub fn put_long(&self, ptr: i64, value: i64) {
-        self.memory.borrow_mut().put(ptr as usize, 8, &value.to_be_bytes())
+        if let Ok(mut res) = self.memory.write() {
+            res.put(ptr as usize, 8, &value.to_be_bytes());
+        } else {
+            unreachable!("Could not acquire lock for unsafe memory")
+        }
     }
 
     pub fn get_long(&self, ptr: i64) -> Option<i64> {
         let mut value: i64 = 0;
-        for (index, element) in self.memory.borrow().get(ptr as usize, 8).iter().enumerate(){
+        let Ok(res) = self.memory.read() else { 
+            unreachable!("Could not acquire lock for unsafe memory") 
+        };
+        for (index, element) in res.get(ptr as usize, 8).iter().enumerate(){
             value |= (*element as i64) << (8 * (7-index));
         }
         Some(value)
     }
 
     pub fn put_byte(&self, ptr: i64, value: u8) {
-        self.memory.borrow_mut().put(ptr as usize, 1, &[value])
+        if let Ok(mut res) = self.memory.write() {
+            res.put(ptr as usize, 1, &[value])
+        } else {
+            unreachable!("Could not acquire lock for unsafe memory")
+        }
     }
 
     pub fn get_byte(&self, ptr: i64) -> Option<u8> {
-        Some(self.memory.borrow_mut().get(ptr as usize, 1)[0])
+        if let Ok(res) = self.memory.read() {
+            Some(res.get(ptr as usize, 1)[0])
+        } else {
+            unreachable!("Could not acquire lock for unsafe memory")
+        }
     }
 }
 

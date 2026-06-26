@@ -15,6 +15,8 @@ impl fmt::Debug for MemoryChunk {
     }
 }
 
+unsafe impl Sync for MemoryChunk { }
+
 impl MemoryChunk {
     pub fn new(capacity: usize) -> Self {
         let layout = Layout::from_size_align(capacity, 8).unwrap();

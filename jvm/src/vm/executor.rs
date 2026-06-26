@@ -841,7 +841,10 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                 Instruction::MONITORENTER => {
                     if let Some(Value::Reference(lock_ref)) = ctx.thread.call_stack.pop_operand_value(){
                         debug!("MONITORENTER");
-                        *ctx.vm.current_locks.borrow_mut().entry(lock_ref.id).or_default() += 1;
+                        /*if let Ok(mut res) = ctx.vm.current_locks.write() {
+                            *res.entry(lock_ref.id).or_default() += 1;
+                        }*/
+                        
                     } else {
                         warn!("No object to lock")
                     }
@@ -849,14 +852,14 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                 Instruction::MONITOREXIT => {
                     if let Some(Value::Reference(lock_ref)) = ctx.thread.call_stack.pop_operand_value(){
                         debug!("MONITOREXIT");
-                        let mut locks = ctx.vm.current_locks.borrow_mut();
+                        /*let mut locks = ctx.vm.current_locks.borrow_mut();
                         let Some(current_lock_count) = locks.get_mut(&lock_ref.id) else {
                             return Some(Err(VmError::ValidationError(format!("Cannot unlock {:?} because it was not locked", lock_ref))));
                         };
                         *current_lock_count -= 1;
                         if *current_lock_count == 0 {
                             locks.remove(&lock_ref.id);
-                        }
+                        }*/
                     } else {
                         warn!("No object to lock")
                     }
@@ -1127,7 +1130,7 @@ fn execute_invoke<'a>(ctx: Context<'a, '_>, index: u16, kind: InvokeKind) -> VMP
     if ctx.vm.class_manager.expect_class_state(cam.class.id, ClassLoadingState::LOADED) {
         unimplemented!()
     }
-    trace!("loading state is: {:?}", ctx.vm.class_manager.class_loading_states.borrow().get(&cam.class.id));
+    trace!("loading state is: {:?}", ctx.vm.class_manager.class_loading_states.read()?.get(&cam.class.id));
     trace!("finished loading class to execute on: '{}'", cam.class.name.as_str());
     trace!("args_count: {}", args_count);
     let mut args = Vec::new();
@@ -1158,7 +1161,7 @@ fn execute_invoke<'a>(ctx: Context<'a, '_>, index: u16, kind: InvokeKind) -> VMP
         if let Some(Value::Reference(reference)) = popped && !reference.is_null(){
             Some(reference)
         } else {
-            println!("XXXX: {} {:?}", class_and_method.class.name, ctx.vm.class_manager.class_loading_states.borrow().get(&class_and_method.class.id));
+            println!("XXXX: {} {:?}", class_and_method.class.name, ctx.vm.class_manager.class_loading_states.read()?.get(&class_and_method.class.id));
             return Err(VmError::ValidationError(format!("Expected object or array as receiver for {} but found: {:?}", class_and_method.format(), popped)));
         }
     };

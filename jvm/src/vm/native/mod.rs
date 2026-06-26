@@ -13,6 +13,7 @@ use log::{info, warn};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::c_void;
+use std::sync::RwLock;
 
 mod external;
 mod java_lang_system;
@@ -64,18 +65,18 @@ use gen_delegate;
 
 pub struct NativeMethodRegistry<'a>{
     methods: Vec<NativeMethod<'a>>,
-    loaded_libraries: RefCell<Vec<Library>>,
-    extern_methods: RefCell<HashMap<ClassAndMethod<'a>, ExternNativeMethod>>, //FIXME consider saving native as option to prevent duplicate lookup
-    exception_in_native: RefCell<bool>,
+    loaded_libraries: RwLock<Vec<Library>>,
+    extern_methods: RwLock<HashMap<ClassAndMethod<'a>, ExternNativeMethod>>, //FIXME consider saving native as option to prevent duplicate lookup
+    exception_in_native: RwLock<bool>,
 }
 
 impl <'a> NativeMethodRegistry<'a> {
     pub fn new() -> Self{
         Self{
             methods: Vec::new(),
-            loaded_libraries: RefCell::new(Vec::new()),
-            extern_methods: RefCell::new(HashMap::new()),
-            exception_in_native: RefCell::new(false),
+            loaded_libraries: RwLock::new(Vec::new()),
+            extern_methods: RwLock::new(HashMap::new()),
+            exception_in_native: RwLock::new(false),
         }
     }
 
@@ -88,23 +89,32 @@ impl <'a> NativeMethodRegistry<'a> {
         })
     }
 
-    fn add_loaded_library(&self, lib: Library){
-        self.loaded_libraries.borrow_mut().push(lib);
+    fn add_loaded_library(&self, lib: Library) {
+        let Ok(mut res) = self.loaded_libraries.write() else {
+            unreachable!("Could not acquire lock for loaded libs")
+        };
+        res.push(lib);
     }
 
     fn try_resolve_extern_native(&self, class_and_method: &ClassAndMethod<'a>) -> bool {
         let (short, long) = class_and_method.native_escaped();
         println!("{}", class_and_method.format());
         println!("[try_resolve_extern_native]: {short} {long}");
-        for lib in self.loaded_libraries.borrow().iter(){
-            unsafe {
-                let ptr = if let Ok(sym) = lib.get::<*const ()>(short.as_bytes()){
-                    CodePtr::from_ptr(*sym as * const c_void)
-                } else if let Ok(sym) = lib.get::<*const ()>(long.as_bytes()){
-                    CodePtr::from_ptr(*sym as * const c_void)
-                } else { continue };
-                self.extern_methods.borrow_mut().insert(class_and_method.clone(), ExternNativeMethod::new(ptr, &class_and_method.method.descriptor));
-                return true
+        if let Ok(res) = self.loaded_libraries.read() {
+            for lib in res.iter(){
+                unsafe {
+                    let ptr = if let Ok(sym) = lib.get::<*const ()>(short.as_bytes()){
+                        CodePtr::from_ptr(*sym as * const c_void)
+                    } else if let Ok(sym) = lib.get::<*const ()>(long.as_bytes()){
+                        CodePtr::from_ptr(*sym as * const c_void)
+                    } else { continue };
+                    if let Ok(mut res2) = self.extern_methods.write() {
+                        res2.insert(class_and_method.clone(), ExternNativeMethod::new(ptr, &class_and_method.method.descriptor));
+                    } else {
+                        unreachable!("Could not acquire lock for extern methods")
+                    }
+                    return true
+                }
             }
         }
         false
@@ -112,7 +122,11 @@ impl <'a> NativeMethodRegistry<'a> {
 
     pub fn mark_exception(&self){
         warn!(target: "native", "Some native function marked as failed");
-        self.exception_in_native.replace(true);
+        if let Ok(mut res) = self.exception_in_native.write() {
+            *res = true;
+        } else {
+            unreachable!("Could not acquire lock for exception in native")
+        }
     }
 
     pub fn invoke(ctx: Context<'a, '_>, cam: &ClassAndMethod<'a>, object: Option<Reference<'a>>, args: Vec<Value<'a>>) -> Option<VMPartialResult<Option<Value<'a>>>>{
@@ -128,7 +142,11 @@ impl <'a> NativeMethodRegistry<'a> {
             }
         }
         if ctx.vm.native_method_registry.try_resolve_extern_native(cam){
-            let optional_extern = ctx.vm.native_method_registry.extern_methods.borrow().get(&cam).cloned();
+            let optional_extern = if let Ok(res) = ctx.vm.native_method_registry.extern_methods.read() {
+                res.get(&cam).cloned()
+            } else {
+                unreachable!("Could not acquire lock for extern methods")
+            };
             if let Some(extern_native) = optional_extern {
                 let class_object_or_this = if cam.method.is_static(){
                     ctx.vm.try_new_class_object(cam.class).ok()?
@@ -152,10 +170,15 @@ impl <'a> NativeMethodRegistry<'a> {
                             (_, jvalue { l }) => {
                                 if l == 0{
                                     ctx.vm.null()
-                                } else if let Some(reference) = ctx.vm.objects_by_id.borrow().get(&(l as u32)){
-                                    Value::Reference(reference)
                                 } else {
-                                    return Some(invalidation!("object with id {} does not exist", l))
+                                    match ctx.vm.objects_by_id.read() {
+                                        Ok(res) => if let Some(reference) = res.get(&(l as u32)) {
+                                            Value::Reference(reference)
+                                        } else {
+                                            return Some(invalidation!("object with id {} does not exist", l))
+                                        }
+                                        Err(pe) => return Some(Err(VmError::from(pe)))
+                                    }
                                 }
                             }
                         })
@@ -163,11 +186,16 @@ impl <'a> NativeMethodRegistry<'a> {
                 } else {
                     None
                 };
-                return if ctx.vm.native_method_registry.exception_in_native.replace(false){
-                    Some(Ok(VMResultType::ExceptionThrown))
+                if let Ok(mut res) = ctx.vm.native_method_registry.exception_in_native.write() {
+                    return if *res {
+                        *res = false;
+                        Some(Ok(VMResultType::ExceptionThrown))
+                    } else {
+                        Some(Ok(VMResultType::Successful(result)))
+                    };
                 } else {
-                    Some(Ok(VMResultType::Successful(result)))
-                };
+                    unreachable!("Could not acquire lock for exception in native")
+                }
             }
         }
         None

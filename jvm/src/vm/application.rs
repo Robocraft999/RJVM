@@ -1,4 +1,4 @@
-use std::cell::{Cell, RefCell};
+use std::cell::{Cell, RefCell, SyncUnsafeCell, UnsafeCell};
 use std::fmt::Debug;
 use crate::vm::class::ClassId;
 use crate::vm::jni::types::{JNIEnv, JavaVM};
@@ -13,8 +13,10 @@ use crate::vm::constants::{THREAD_threadStatus_INDEX, THREAD_eetop_INDEX, THREAD
 use crate::vm::java_thread::{JavaThread, NORM_PRIORITY, RUNNABLE};
 
 thread_local! {
-    static JAVA_THREAD: Cell<*mut ()> = Cell::new(std::ptr::null_mut());
+    pub static JAVA_THREAD: Cell<*mut ()> = Cell::new(std::ptr::null_mut());
 }
+
+pub static THREADS: UnsafeCell<*mut ()> = UnsafeCell::new(std::ptr::null_mut());
 
 pub fn thread<'a>() -> &'static mut JavaThread<'a>{
     unsafe {&mut* (JAVA_THREAD.get() as *mut JavaThread) }
@@ -60,7 +62,7 @@ impl <'a> Application<'a> {
     }
 
     fn init_system(&self) -> Result<(), VmError>{
-        for (k,v) in self.vm.class_manager.class_loading_states.borrow().iter() {
+        for (k,v) in self.vm.class_manager.class_loading_states.read()?.iter() {
             println!("Class: {:?}, state: {:?}", self.vm.find_class_by_id(ClassId(k.0)).unwrap().name, v);
         }
         let init = self.vm.resolve_class_method(JAVA_LANG_SYSTEM, "initializeSystemClass", "()V")?;

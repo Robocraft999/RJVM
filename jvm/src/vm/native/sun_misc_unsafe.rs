@@ -106,7 +106,7 @@ gen_delegate!(delegate_get_object_volatile, |ctx, _obj_ref, args| {
         }
         let field_value = if o.class_name == JAVA_LANG_CLASS {
             let class_ref = ctx.vm.extract_class_from_class_object(o)?;
-            let static_object = ctx.vm.static_class_objects.borrow().get(&class_ref.id).unwrap().clone();
+            let static_object = ctx.vm.static_class_objects.read()?.get(&class_ref.id).unwrap().clone();
             static_object.get_field(*index as usize)
         } else {
             o.get_field(*index as usize)
@@ -125,7 +125,7 @@ gen_delegate!(delegate_get_int_volatile, |ctx, _obj_ref, args| {
         }
         let field_value = if o.class_name == JAVA_LANG_CLASS {
             let class_ref = ctx.vm.extract_class_from_class_object(o)?;
-            let static_object = ctx.vm.static_class_objects.borrow().get(&class_ref.id).unwrap().clone();
+            let static_object = ctx.vm.static_class_objects.read()?.get(&class_ref.id).unwrap().clone();
             static_object.get_field(*index as usize)
         } else {
             o.get_field(*index as usize)
@@ -242,7 +242,7 @@ gen_delegate!(delegate_put_ordered_object, |ctx, _obj_ref, args| {
         if o.class_name == JAVA_LANG_CLASS {
             let class_ref = ctx.vm.extract_class_from_class_object(o)?;
             let _ = wrap_init!(ctx, ctx.ensure_initialized(class_ref)?);
-            let static_object = ctx.vm.static_class_objects.borrow().get(&class_ref.id).unwrap().clone();
+            let static_object = ctx.vm.static_class_objects.read()?.get(&class_ref.id).unwrap().clone();
             static_object.set_field(*index as usize, x.clone());
         } else {
             o.set_field(*index as usize, x.clone());
@@ -282,11 +282,11 @@ gen_delegate!(delegate_define_anon_class, |ctx, _obj_ref, args| {
                 &*class_ptr
             };
 
-            ctx.vm.class_manager.classes_by_id.borrow_mut().insert(class_ref.id, class_ref);
+            ctx.vm.class_manager.classes_by_id.write()?.insert(class_ref.id, class_ref);
             //vm.class_manager.classes_by_name.borrow_mut().insert(class_ref.name.clone(), class_ref);
-            ctx.vm.class_manager.class_loading_states.borrow_mut().insert(class_ref.id, ClassLoadingState::LOADED);
+            ctx.vm.class_manager.class_loading_states.write()?.insert(class_ref.id, ClassLoadingState::LOADED);
             let class_obj = wrap_init!(ctx, ctx.vm.new_class_object_by_class(class_ref)?);
-            ctx.vm.class_manager.anonymous_classes.borrow_mut().insert(class_obj.id, AnonClassInfo { clazz: class_ref, host: host_class });
+            ctx.vm.class_manager.anonymous_classes.write()?.insert(class_obj.id, AnonClassInfo { clazz: class_ref, host: host_class });
             non_failing_some(Value::Reference(class_obj))
         } else {
             invalidation!("define_anon_class: expected bytes array type but got: {:?}", byte_arr)
