@@ -1,6 +1,7 @@
 #![feature(negative_impls)]
 #![feature(c_variadic)]
 #![feature(iterator_try_collect)]
+#![feature(sync_unsafe_cell)]
 extern crate core;
 
 use log::{error, LevelFilter};

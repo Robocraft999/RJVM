@@ -34,7 +34,7 @@ gen_delegate!(delegate_invoke, |ctx, obj_ref, args| {
         let lambda_form = mh_ref.get_field(METHODHANDLE_form_INDEX).expect_reference()?;
         // vmentry
         let vmentry = lambda_form.get_field(LAMBDAFORM_vmentry_INDEX).expect_reference()?;
-        let blub = ctx.vm.object_payloads.borrow().get(&vmentry.id).unwrap().clone();
+        let blub = ctx.vm.object_payloads.read()?.get(&vmentry.id).unwrap().clone();
         if let (Some(Value::Reference(vmtarget_ref)), Some(Value::Reference(mname_ref))) = (blub.get(0), blub.get(1)) {
             let vmtarget = ctx.vm.extract_long(Value::Reference(vmtarget_ref))?.expect_long()?;
             let clazz = VM::extract_class_from_class_object(ctx.vm, mname_ref.get_field(MEMBERNAME_clazz_INDEX).expect_reference()?)? ;
@@ -122,7 +122,7 @@ gen_delegate!(delegate_get_named_con, |_ctx, _obj_ref, args| {
 
 gen_delegate!(delegate_object_field_offset, |ctx, _obj_ref, args| {
     if let Some(Value::Reference(mname)) = args.get(0) {
-        if !mname.is_null() && let Some(payload) = ctx.vm.object_payloads.borrow().get(&mname.id) {
+        if !mname.is_null() && let Some(payload) = ctx.vm.object_payloads.read()?.get(&mname.id) {
             // flags
             let flags = mname.get_field(MEMBERNAME_flags_INDEX).expect_int()?;
             if flags & IS_FIELD != 0 && flags & FieldFlag::Static as i32 == 0 {
@@ -166,7 +166,7 @@ gen_delegate!(delegate_get_members, |ctx, _obj_ref, args| {
 
 gen_delegate!(delegate_get_member_vminfo, |ctx, _obj_ref, args| {
     if let Some(Value::Reference(selff)) = args.get(0){
-        if let Some(vals) = ctx.vm.object_payloads.borrow().get(&selff.id){
+        if let Some(vals) = ctx.vm.object_payloads.read()?.get(&selff.id){
             let array = wrap_init!(ctx, ctx.vm.new_object_array_1(vals.clone())?);
             non_failing_some(Value::Reference(array))
         } else {
@@ -262,7 +262,7 @@ fn member_name_init_method<'a>(ctx: Context<'a, '_>, mname: Reference<'a>, info:
     // vmindex
     // vmtarget
     let vmindex = ctx.vm.new_java_lang_long(Value::Long(vmindex as i64))?;
-    let old = ctx.vm.object_payloads.borrow_mut().insert(mname.id, vec![vmindex, Value::Reference(mname)]);
+    let old = ctx.vm.object_payloads.write()?.insert(mname.id, vec![vmindex, Value::Reference(mname)]);
     Ok(())
 }
 
@@ -275,7 +275,7 @@ fn member_name_init_field<'a>(ctx: Context<'a, '_>, mname: Reference<'a>, field_
     let vmtarget = wrap_init!(ctx, ctx.vm.new_class_object_by_class(clazz)?);
     let slot = field_info.slot as i32;
     let vmindex = ctx.vm.new_java_lang_long(Value::Long(slot as i64))?;
-    let old = ctx.vm.object_payloads.borrow_mut().insert(mname.id, vec![vmindex, Value::Reference(vmtarget)]);
+    let old = ctx.vm.object_payloads.write()?.insert(mname.id, vec![vmindex, Value::Reference(vmtarget)]);
 
     // flags
     mname.set_field(MEMBERNAME_flags_INDEX, Value::Integer(flags));

@@ -3,6 +3,8 @@ use cesu8::{from_java_cesu8, Cesu8DecodingError};
 use log::{debug, error, info, trace, warn};
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::fmt::Debug;
+use std::sync::{PoisonError, RwLock};
 use thiserror::Error;
 
 use crate::class_file::constant_pool::BytecodeBehavior;
@@ -15,7 +17,7 @@ use crate::vm::constants::{CLASS_name_INDEX, LONG_value_INDEX, STRING_hash_INDEX
 use crate::vm::debug::DebugHelper;
 use crate::vm::gc::ObjectAllocator;
 use crate::vm::java_error::JavaError;
-use crate::vm::jni::types::JavaVM;
+use crate::vm::jni::types::{jclass, jobject, JavaVM};
 use crate::vm::native::{register_all_natives, NativeMethodRegistry};
 use crate::vm::r#unsafe::Unsafe;
 use crate::vm::result::{VMPartialResult, VMResult, VMResultType};
@@ -52,17 +54,17 @@ pub struct VM<'a>{
     pub class_manager: ClassManager<'a>,
     pub object_allocator: ObjectAllocator<'a>,
     pub unsafe_allocator: Unsafe,
-    pub objects_by_id: RefCell<HashMap<u32, Reference<'a>>>,
-    pub static_class_objects: RefCell<HashMap<ClassId, Reference<'a>>>,
-    pub string_objects: RefCell<HashMap<String, Reference<'a>>>,
-    pub class_objects: RefCell<HashMap<ClassId, Reference<'a>>>,
-    pub object_payloads: RefCell<HashMap<u32, Vec<Value<'a>>>>,
+    pub objects_by_id: RwLock<HashMap<u32, Reference<'a>>>,
+    pub static_class_objects: RwLock<HashMap<ClassId, Reference<'a>>>,
+    pub string_objects: RwLock<HashMap<String, Reference<'a>>>,
+    pub class_objects: RwLock<HashMap<ClassId, Reference<'a>>>,
+    pub object_payloads: RwLock<HashMap<u32, Vec<Value<'a>>>>,
     pub native_method_registry: NativeMethodRegistry<'a>,
-    pub currently_open_files: RefCell<HashMap<String, (Vec<u8>, usize)>>,
-    pub current_locks: RefCell<HashMap<u32, usize>>,
+    pub currently_open_files: RwLock<HashMap<String, (Vec<u8>, usize)>>,
+    pub current_locks: RwLock<HashMap<u32, usize>>,
     pub vm_debug_helper: DebugHelper,
     
-    pub threads: RefCell<Vec<JavaThread<'a>>>
+    pub threads: RwLock<Vec<JavaThread<'a>>>,
 }
 
 impl<'a> VM<'a>{
@@ -75,15 +77,15 @@ impl<'a> VM<'a>{
             class_manager,
             object_allocator: ObjectAllocator::new(),
             unsafe_allocator,
-            objects_by_id: RefCell::new(HashMap::new()),
-            static_class_objects: RefCell::new(HashMap::new()),
-            string_objects: RefCell::new(HashMap::new()),
-            class_objects: RefCell::new(HashMap::new()),
-            object_payloads: RefCell::new(HashMap::new()),
+            objects_by_id: RwLock::new(HashMap::new()),
+            static_class_objects: RwLock::new(HashMap::new()),
+            string_objects: RwLock::new(HashMap::new()),
+            class_objects: RwLock::new(HashMap::new()),
+            object_payloads: RwLock::new(HashMap::new()),
             native_method_registry,
-            currently_open_files: RefCell::new(HashMap::new()),
-            current_locks: RefCell::new(HashMap::new()),
-            threads: RefCell::new(Vec::new()),
+            currently_open_files: RwLock::new(HashMap::new()),
+            current_locks: RwLock::new(HashMap::new()),
+            threads: RwLock::new(Vec::new()),
             vm_debug_helper: DebugHelper::new(),
         }
     }
@@ -130,13 +132,21 @@ impl<'a> VM<'a>{
         info!("CC[{:?}] = {}", class.id, class.name);
         let fields = class.get_fields(&self);
         let obj = self.object_allocator.allocate_object(class, fields);
-        self.objects_by_id.borrow_mut().insert(obj.id, obj);
+        if let Ok(mut res) = self.objects_by_id.write() {
+            res.insert(obj.id, obj);
+        } else {
+            unreachable!("Object couldn't be allocated")
+        }
         self.vm_debug_helper.tracker.push_object_event(obj.id, format!("Object ({})", class.name));
         obj
     }
 
     pub fn get_static_class_object(&self, id: ClassId) -> Option<Reference<'a>>{
-        self.static_class_objects.borrow().get(&id).cloned()
+        if let Ok(res) = self.static_class_objects.read() {
+            res.get(&id).cloned()
+        } else {
+            None
+        }
     }
 
     pub fn new_array(&self, dims: usize, array_field_type: FieldType, content: RefCell<Vec<Value<'a>>>) -> VMPartialResult<Reference<'a>>{
@@ -148,7 +158,7 @@ impl<'a> VM<'a>{
         //FIXME verify if this is correct / maybe have to init the component type
         let class = self.get_or_resolve_class(class_name.as_str())?;
         let obj = self.object_allocator.allocate_array(class, dims, *component_type, content);
-        self.objects_by_id.borrow_mut().insert(obj.id, obj);
+        self.objects_by_id.write()?.insert(obj.id, obj);
         self.vm_debug_helper.tracker.push_object_event(obj.id, format!("Array allocated:   \n{:?}", obj));
         Ok(VMResultType::Successful(obj))
         /*get_or_init_special!(self.get_or_initialize_class(class_name.as_str())?,
@@ -197,8 +207,8 @@ impl<'a> VM<'a>{
     }
     
     pub fn new_string_object(&self, string: &str) -> VMPartialResult<Reference<'a>>{
-        if self.string_objects.borrow().contains_key(string){
-            return Ok(VMResultType::Successful(self.string_objects.borrow()[string]))
+        if self.string_objects.read()?.contains_key(string){
+            return Ok(VMResultType::Successful(self.string_objects.read()?[string]))
         }
         
         let char_array: Vec<Value<'a>> = string.chars().map(|c| Value::Integer(c as i32)).collect();
@@ -214,7 +224,7 @@ impl<'a> VM<'a>{
         //hash
         string_object.set_field(STRING_hash_INDEX, Value::Integer(0));
 
-        self.string_objects.borrow_mut().insert(string.to_owned(), string_object);
+        self.string_objects.write()?.insert(string.to_owned(), string_object);
         Ok(VMResultType::Successful(string_object))
     }
 
@@ -241,7 +251,7 @@ impl<'a> VM<'a>{
 
     // FIXME use only ClassRef instead
     fn new_class_object(&self, class_name: &str, class_id: ClassId) -> VMPartialResult<Reference<'a>>{
-        if !self.class_objects.borrow().contains_key(&class_id){
+        if !self.class_objects.read()?.contains_key(&class_id){
             let class_clazz = self.get_or_resolve_class(JAVA_LANG_CLASS)?;
             let class_object = self.new_object_from_class(class_clazz);
             let string_object = get_or_init!(self.new_string_object(class_name.replace("/", ".").as_str())?);
@@ -249,10 +259,10 @@ impl<'a> VM<'a>{
             //name
             class_object.set_field(CLASS_name_INDEX, Value::Reference(string_object));
 
-            self.class_objects.borrow_mut().insert(class_id, class_object);
+            self.class_objects.write()?.insert(class_id, class_object);
             Ok(VMResultType::Successful(class_object))
         } else {
-            Ok(VMResultType::Successful(self.class_objects.borrow()[&class_id]))
+            Ok(VMResultType::Successful(self.class_objects.read()?[&class_id]))
         }
     }
 
@@ -300,7 +310,7 @@ impl<'a> VM<'a>{
         match class {
             Ok(class) => Ok(class),
             Err(e) => {
-                match self.class_manager.anonymous_classes.borrow().get(&object.id) {
+                match self.class_manager.anonymous_classes.read()?.get(&object.id) {
                     Some(info) => Ok(info.clazz),
                     None => Err(e),
                 }
@@ -314,6 +324,23 @@ impl<'a> VM<'a>{
         let name = name.replace(".", "/");
         Ok(name)
     }
+    
+    // native helpers
+    pub fn resolve_class_object_by_id(&self, id: jclass) -> ClassRef<'a> {
+        let class_ref = self.resolve_object_by_id(id).unwrap();
+        self.extract_class_from_class_object(&class_ref).unwrap()
+    }
+    
+    pub fn resolve_object_by_id(&self, id: jobject) -> Option<Reference<'a>> {
+        if let Ok(res) = self.objects_by_id.read() {
+            res.get(&id).copied()
+        } else {
+            unreachable!("Could not acquire objects lock")
+        }
+    }
+    
+    
+    // util
 
     pub fn unchecked_check_if_subclass_of(&self, class_name: &str, of_name: &str) -> VMResult<bool>{
         let mut current_class = self.try_get_class(of_name)?;
@@ -456,7 +483,11 @@ impl<'a> Context<'a, '_> {
         info!("IC[{}]", class.name);
         if class.transitive_field_count > 0 && !class.is_array(){
             let static_object = self.vm.new_object_from_class(class);
-            self.vm.static_class_objects.borrow_mut().insert(class.id, static_object);
+            if let Ok(mut res) = self.vm.static_class_objects.write() {
+                res.insert(class.id, static_object);
+            } else {
+                unreachable!("Could not acquire lock for class init")
+            }
             if let Some(clinit_method) = class.find_method("<clinit>", "()V"){
                 let class_and_method = ClassAndMethod{
                     class,
@@ -506,7 +537,16 @@ pub enum VmError{
     Unspecified(String),
 
     #[error("Error caught in native function: {0}")]
-    Native(String)
+    Native(String),
+    
+    #[error("VM thread is poisoned: {0}")]
+    LockError(String)
+}
+
+impl<T: Debug> From<PoisonError<T>> for VmError {
+    fn from(value: PoisonError<T>) -> Self {
+        VmError::LockError(format!("{:?}", value))
+    }
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]

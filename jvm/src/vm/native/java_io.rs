@@ -47,7 +47,7 @@ gen_delegate!(delegate_read_bytes, |ctx, obj_ref, args| {
         if let Some(fis_ref) = obj_ref{
             let path = VM::extract_string_from_object(&fis_ref.get_field(FILEINPUTSTREAM_path_INDEX))?;
 
-            let existing_file = ctx.vm.currently_open_files.borrow_mut().remove(&path);
+            let existing_file = ctx.vm.currently_open_files.write()?.remove(&path);
             if let Some((content, index)) = existing_file {
                 //file: len 20, i 5
                 //buffer: blen 30, o 10, length 20
@@ -63,24 +63,24 @@ gen_delegate!(delegate_read_bytes, |ctx, obj_ref, args| {
                 if new_index > index{
                     if new_index == content.len(){
                         //read >0 bytes to end
-                        ctx.vm.currently_open_files.borrow_mut().insert(path.clone(), (content, new_index));
+                        ctx.vm.currently_open_files.write()?.insert(path.clone(), (content, new_index));
                         //println!("read >0 bytes to end");
                         non_failing_some(Value::Integer((new_index - index) as i32))
                     } else {
                         //read >0 bytes
-                        ctx.vm.currently_open_files.borrow_mut().insert(path.clone(), (content, new_index));
+                        ctx.vm.currently_open_files.write()?.insert(path.clone(), (content, new_index));
                         //println!("read >0 bytes");
                         non_failing_some(Value::Integer((end - start) as i32))
                     }
                 } else {
                     if new_index == content.len(){
                         //read 0 bytes from end to end
-                        ctx.vm.currently_open_files.borrow_mut().insert(path.clone(), (content, new_index));
+                        ctx.vm.currently_open_files.write()?.insert(path.clone(), (content, new_index));
                         //println!("read 0 bytes from end to end");
                         non_failing_some(Value::Integer(-1))
                     } else {
                         //read 0 bytes
-                        ctx.vm.currently_open_files.borrow_mut().insert(path.clone(), (content, new_index));
+                        ctx.vm.currently_open_files.write()?.insert(path.clone(), (content, new_index));
                         //println!("read 0 bytes");
                         non_failing_some(Value::Integer(0))
                     }
@@ -114,10 +114,10 @@ gen_delegate!(delegate_read_bytes, |ctx, obj_ref, args| {
 gen_delegate!(delegate_open0, |ctx, _obj_ref, args| {
     if let Some(Value::Reference(path_ref)) = args.get(0) && !path_ref.is_null(){
         let path = VM::extract_string_from_object(&Value::Reference(path_ref))?;
-        if !ctx.vm.currently_open_files.borrow().contains_key(&path) {
+        if !ctx.vm.currently_open_files.read()?.contains_key(&path) {
             let file_content = ctx.vm.class_manager.class_path.resolve_file(path.as_str())?;
             if let Some(file_content) = file_content {
-                ctx.vm.currently_open_files.borrow_mut().insert(path.clone(), (file_content, 0));
+                ctx.vm.currently_open_files.write()?.insert(path.clone(), (file_content, 0));
             }
         }
         non_failing_none()
@@ -132,7 +132,7 @@ gen_delegate!(delegate_close0, |ctx, obj_ref, _args| {
     };
     let path_val = fis_ref.get_field(FILEINPUTSTREAM_path_INDEX);
     let path = VM::extract_string_from_object(&path_val)?;
-    if ctx.vm.currently_open_files.borrow_mut().remove(&path).is_none() {
+    if ctx.vm.currently_open_files.write()?.remove(&path).is_none() {
         warn!("Closing non existent file: '{}'", path)
     }
     non_failing_none()
