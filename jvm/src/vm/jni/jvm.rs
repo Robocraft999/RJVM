@@ -414,7 +414,7 @@ pub unsafe extern "system-unwind" fn JVM_LoadClass0(env: *mut JNIEnv, obj: jobje
 pub unsafe extern "system-unwind" fn JVM_GetArrayLength(env: *mut JNIEnv, arr: jobject) -> jint {
     let vm = unsafe{&*(*env).vm};
 
-    let obj_ref = vm.resolve_object_by_id(arr).unwrap();
+    let obj_ref = vm.resolve_object_by_jobject(arr).unwrap();
     if let ReferenceType::Array(_, _, content) = &obj_ref.reference_type {
         content.borrow().len() as jint
     } else {
@@ -445,7 +445,7 @@ pub unsafe extern "system-unwind" fn JVM_SetPrimitiveArrayElement(env: *mut JNIE
 #[unsafe(no_mangle)]
 pub unsafe extern "system-unwind" fn JVM_NewArray(env: *mut JNIEnv<'static>, eltClass: jclass, length: jint) -> jobject {
     let vm = unsafe{&*(*env).vm};
-    let clazz = vm.resolve_class_object_by_id(eltClass);
+    let clazz = vm.resolve_class_object_by_jclass(eltClass);
     // FIXME check if we only have objects or primitives too (and if its always 1 dimensional)
     // one could use FieldType::from_str to fix, but then the prefilled values are wrong
     // maybe there is function somewhere which creates null values per fieldtype idk anymore
@@ -455,7 +455,7 @@ pub unsafe extern "system-unwind" fn JVM_NewArray(env: *mut JNIEnv<'static>, elt
         FieldType::Object(clazz.name.clone()).to_array_field_type(1),
         RefCell::new(content.clone())
     ));
-    arr.id as jobject
+    arr.id.nid() as jobject
 }
 
 #[unsafe(no_mangle)]

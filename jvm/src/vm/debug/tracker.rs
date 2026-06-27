@@ -1,16 +1,17 @@
 use log::{debug, info};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
+use crate::vm::value::RefId;
 
 pub struct Tracker{
-    tracked_object_ids: HashSet<u32>,
+    tracked_object_ids: HashSet<RefId>,
     tracked_method_descs: HashSet<String>,
-    logged_object_events: RefCell<HashMap<u32, Vec<String>>>,
+    logged_object_events: RefCell<HashMap<RefId, Vec<String>>>,
     logged_method_events: RefCell<HashMap<String, Vec<String>>>,
 }
 
 impl Tracker {
-    pub fn new(object_entries: Option<HashSet<u32>>, method_entries: Option<Vec<String>>) -> Self{
+    pub fn new(object_entries: Option<HashSet<RefId>>, method_entries: Option<Vec<String>>) -> Self{
         let mut tracked_object_ids = HashSet::new();
         tracked_object_ids.extend(object_entries.unwrap_or_default());
         let mut tracked_method_descs = HashSet::new();
@@ -20,7 +21,7 @@ impl Tracker {
             use crate::vm::debug::loader;
             let config = loader::load_config();
             if let Some(config) = config {
-                tracked_object_ids.extend(config.tracker.ids);
+                tracked_object_ids.extend(config.tracker.ids.iter().cloned().map(RefId));
                 tracked_method_descs.extend(config.tracker.descs);
             }
         }
@@ -32,7 +33,7 @@ impl Tracker {
         }
     }
 
-    pub fn push_object_event(&self, id: u32, event: String){
+    pub fn push_object_event(&self, id: RefId, event: String){
         #[cfg(feature = "debug")]
         {
             if !self.tracked_object_ids.contains(&id) {
@@ -63,7 +64,7 @@ impl Tracker {
     pub fn print(&self) {
         info!(target: "debug", "Object Tracker:");
         for (id, events) in self.logged_object_events.borrow().iter() {
-            info!(target: "debug", "Events for: {}", id);
+            info!(target: "debug", "Events for: {:?}", id);
             for event in events.iter() {
                 debug!(target: "debug", "  ~ {}", event);
             }

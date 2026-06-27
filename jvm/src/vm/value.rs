@@ -4,12 +4,15 @@ use crate::vm::constants::STRING_value_INDEX;
 use crate::vm::{VmError, VM};
 use std::cell::RefCell;
 use std::fmt::{Debug, Formatter};
+use std::mem;
+use crate::vm::jni::types::jobject;
+use crate::vm::result::VMResult;
 
-#[derive(PartialEq, Default, Clone)]
-pub enum Value<'a>{
+#[derive(PartialEq, Default, Clone, Copy)]
+pub enum Value{
     #[default]
     Uninitialized,
-    Reference(Reference<'a>),
+    Reference(RefId),
 
     Integer(i32),
     Long(i64),
@@ -18,7 +21,7 @@ pub enum Value<'a>{
     Dummy,
 }
 
-impl Debug for Value<'_>{
+impl Debug for Value{
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             Value::Reference(rv) => {
@@ -38,7 +41,26 @@ impl Debug for Value<'_>{
     }
 }
 
-impl<'a> Value<'a>{
+impl Value{
+    pub fn print(&self, vm: &VM) -> String {
+        match self {
+            Value::Reference(id) => {
+                if id.is_null(){
+                    "VNull".to_string()
+                } else {
+                    let rv = vm.resolve_object_by_id(*id).unwrap();
+                    format!("{:?}", rv.print(vm))
+                }
+            },
+            Value::Uninitialized => "VUninitialized".to_string(),
+            Value::Integer(value) => format!("VInt ({})", value),
+            Value::Long(value) => format!("VLong ({})", value),
+            Value::Float(value) => format!("VFloat ({:.8})", value),
+            Value::Double(value) => format!("VDouble ({:.8})", value),
+            Value::Dummy => "VDummy".to_string(),
+        }
+    }
+
     pub fn expect_int(&self) -> Result<i32, VmError> {
         if let Value::Integer(value) = self{
             Ok(*value)
@@ -70,14 +92,6 @@ impl<'a> Value<'a>{
             Err(VmError::ValidationError(format!("Expected double but found {:?}", self)))
         }
     }
-
-    pub fn expect_reference(&self) -> Result<Reference<'a>, VmError> {
-        if let Value::Reference(value) = self{
-            Ok(*value)
-        } else {
-            Err(VmError::ValidationError(format!("Expected reference but found {:?}", self)))
-        }
-    }
     
     pub fn get_computational_type(&self) -> i32{
         match self {
@@ -100,46 +114,77 @@ impl<'a> Value<'a>{
     }
 }
 
-impl From<bool> for Value<'_>{
+impl From<bool> for Value{
     fn from(value: bool) -> Self{
         Self::Integer(if value { 1 } else { 0 })
     }
 }
 
-pub type Reference<'a> = &'a ReferenceValue<'a>;
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Hash)]
+pub struct RefId(pub u32);
 
-#[derive(PartialEq, Clone)]
-pub struct ReferenceValue<'a>{
-    pub(crate) id: u32,
-    pub(crate) class_id: ClassId,
-    pub(crate) class_name: String,
-    pub(crate) reference_type: ReferenceType<'a>,
+impl RefId {
+    pub fn is_null(&self) -> bool {
+        self.0 == 0
+    }
+    pub fn nid(&self) -> jobject { self.0 as jobject }
 }
 
-impl<'a> ReferenceValue<'a>{
+macro_rules! gen_typed_get_field {
+    ($name:ident, $typ:ident, $res_type:ty) => {
+        pub fn $name(&self, index: usize) -> VMResult<$res_type> {
+            match &self.reference_type {
+                ReferenceType::Object(fields) => {
+                    if let Value::$typ(inner) = fields.borrow()[index] {
+                        Ok(inner)
+                    } else {
+                        Err(VmError::ValidationError(format!("Expected {} field at '{}'", stringify!($typ), index)))
+                    }
+                }
+                ReferenceType::Array(..) => Err(VmError::ValidationError("This reference represents an array, please use 'get_element()'".to_string())),
+            }
+        }
+    };
+}
+
+pub type Reference<'a> = &'a ReferenceValue;
+
+#[derive(PartialEq, Clone)]
+pub struct ReferenceValue{
+    pub(crate) id: RefId,
+    pub(crate) class_id: ClassId,
+    pub(crate) class_name: String,
+    pub(crate) reference_type: ReferenceType,
+}
+
+impl ReferenceValue{
     //FIXME switch these to Option for safety
-    pub fn set_field(&self, index: usize, value: Value<'a>) {
+    pub fn set_field(&self, index: usize, value: Value) {
         match &self.reference_type {
             ReferenceType::Object(fields) => {fields.borrow_mut()[index] = value}
             ReferenceType::Array(_, _, _) => {unimplemented!("This reference represents an array, please use 'set_element()'")}
         };
     }
 
-    pub fn get_field(&self, index: usize) -> Value<'a>{
+    pub fn get_field(&self, index: usize) -> Value{
         match &self.reference_type {
             ReferenceType::Object(fields) => {fields.borrow()[index].clone()}
             ReferenceType::Array(_, _, _) => {unimplemented!("This reference represents an array, please use 'get_element()'")}
         }
     }
 
-    pub fn set_element(&self, index: usize, value: Value<'a>) {
+    gen_typed_get_field!(get_ref_field, Reference, RefId);
+    gen_typed_get_field!(get_int_field, Integer, i32);
+    gen_typed_get_field!(get_long_field, Long, i64);
+
+    pub fn set_element(&self, index: usize, value: Value) {
         match &self.reference_type {
             ReferenceType::Object(_) => {unimplemented!("This reference represents an object, please use 'set_field()'")}
             ReferenceType::Array(_, _, content) => {content.borrow_mut()[index] = value}
         };
     }
 
-    pub fn get_element(&self, index: usize) -> Value<'a>{
+    pub fn get_element(&self, index: usize) -> Value{
         match &self.reference_type {
             ReferenceType::Object(_) => {unimplemented!("This reference represents an object, please use 'get_field()'")}
             ReferenceType::Array(_, _, content) => {content.borrow()[index].clone()}
@@ -168,22 +213,32 @@ impl<'a> ReferenceValue<'a>{
     }
 
     pub fn is_null(&self) -> bool{
-        self.id == 0
+        self.id.is_null()
     }
 
-    fn get_components_printable(&self) -> Vec<String>{
+    pub fn print<'a>(&self, vm: &VM<'a>) -> String {
+        format!("VRef [ id: {:?}, class: {}:{}, type: {}, components: {:?} ]",
+                self.id.0,
+                &self.class_name, &self.class_id.0,
+                if matches!(self.reference_type, ReferenceType::Object(..)) { "Object" } else { "Array" },
+                self.get_components_printable(vm)
+        )
+    }
+
+    fn get_components_printable<'a>(&self, vm: &VM<'a>) -> Vec<String>{
         let object = |field: &Value| match field {
-            Value::Reference(rv) => {
+            Value::Reference(id) => {
+                let rv = vm.resolve_object_by_id(*id).unwrap();
                 if rv.class_name == "java/lang/String" {
-                    format!("{}:{}:{:?}->'{}'", rv.id, rv.class_name, rv.class_id.0, VM::extract_string_from_object(field).unwrap_or("VMError".to_string()))
+                    format!("{:?}:{}:{:?}->'{}'", rv.id, rv.class_name, rv.class_id.0, vm.extract_string_from_ref(rv).unwrap_or("VMError".to_string()))
                 } else if rv.class_name == "[C"{
-                    format!("{}:{}:{:?}->'{}'", rv.id, rv.class_name, rv.class_id.0, VM::extract_string_from_char_arr(field).unwrap_or("VMError".to_string()))
+                    format!("{:?}:{}:{:?}->'{}'", rv.id, rv.class_name, rv.class_id.0, vm.extract_string_from_char_arr(field.clone()).unwrap_or("VMError".to_string()))
                 } else if rv.class_name == "java/lang/Class" {
-                    format!("{}:{}:{:?}->'{}'", rv.id, rv.class_name, rv.class_id.0, VM::extract_class_name_from_class_object(rv).unwrap_or("VMError".to_string()))
-                } else if rv.id == 0{
+                    format!("{:?}:{}:{:?}->'{}'", rv.id, rv.class_name, rv.class_id.0, vm.extract_class_name_from_class_ref(rv).unwrap_or("VMError".to_string()))
+                } else if rv.is_null(){
                     "Null".to_string()
                 } else {
-                    format!("{}:{}:{:?}", rv.id, rv.class_name, rv.class_id.0)
+                    format!("{:?}:{}:{:?}", rv.id, rv.class_name, rv.class_id.0)
                 }
             }
             _ => format!("{:?}", field)
@@ -191,7 +246,7 @@ impl<'a> ReferenceValue<'a>{
         match &self.reference_type {
             ReferenceType::Object(fields) => {
                 if self.class_name == "java/lang/String" {
-                    let internal = VM::extract_string_from_char_arr(&self.get_field(STRING_value_INDEX)).unwrap_or("VMError".to_string());
+                    let internal = vm.extract_string_from_char_arr(self.get_field(STRING_value_INDEX)).unwrap_or("VMError".to_string());
                     let mut components = Vec::new();
                     components.push(internal);
                     let mut other_fields = fields.borrow().iter().skip(1).map(object).collect();
@@ -232,7 +287,7 @@ impl<'a> ReferenceValue<'a>{
     }
 }
 
-impl Debug for ReferenceValue<'_>{
+/*impl Debug for ReferenceValue{
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("VRef")
             .field("object_id", &self.id)
@@ -244,10 +299,16 @@ impl Debug for ReferenceValue<'_>{
             .field("components", &self.get_components_printable())
             .finish()
     }
+}*/
+
+impl Debug for ReferenceValue {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "<VRef>")
+    }
 }
 
 #[derive(PartialEq, Clone)]
-pub enum ReferenceType<'a>{
-    Object(RefCell<Vec<Value<'a>>>),
-    Array(usize, FieldType, RefCell<Vec<Value<'a>>>)
+pub enum ReferenceType{
+    Object(RefCell<Vec<Value>>),
+    Array(usize, FieldType, RefCell<Vec<Value>>)
 }

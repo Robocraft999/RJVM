@@ -26,7 +26,7 @@ pub fn register_natives(registry: &mut NativeMethodRegistry) {
 
 gen_delegate!(delegate_fill_in_stacktrace, |_ctx, obj_ref, _args| {
     if let Some(obj_ref) = obj_ref{
-        non_failing_some(Value::Reference(obj_ref))
+        non_failing_some(Value::Reference(obj_ref.id))
     } else {
         invalidation!("Expected a Throwable")
     }
@@ -42,11 +42,11 @@ gen_delegate!(delegate_stack_trace_depth, |_ctx, obj_ref, _args| {
 
 gen_delegate!(delegate_intern, |ctx, obj_ref, _args| {
     if let Some(obj) = obj_ref{
-        let content = VM::extract_string_from_object(&Value::Reference(obj))?;
+        let content = ctx.vm.extract_string_from_ref(obj)?;
         if ctx.vm.string_objects.read()?.contains_key(&content){
-            non_failing_some(Value::Reference(ctx.vm.string_objects.read()?[&content]))
+            non_failing_some(Value::Reference(ctx.vm.string_objects.read()?[&content].id))
         } else {
-            non_failing_some(Value::Reference(obj))
+            non_failing_some(Value::Reference(obj.id))
         }
     } else {
         invalidation!("Expected a string object reference")
@@ -55,8 +55,7 @@ gen_delegate!(delegate_intern, |ctx, obj_ref, _args| {
 
 gen_delegate!(delegate_current_thread, |ctx, _obj_ref, _args| {
     let Some(thread_ref_id) = ctx.thread.thread_obj_id else { return invalidation!("Thread object id has to be set by now") };
-    let thread_ref = ctx.vm.objects_by_id.borrow().get(&thread_ref_id).copied().unwrap();
-    non_failing_some(Value::Reference(thread_ref))
+    non_failing_some(Value::Reference(thread_ref_id))
 });
 
 gen_delegate!(delegate_is_alive, |_ctx, obj_ref, _args| {
@@ -69,7 +68,7 @@ gen_delegate!(delegate_holds_lock, |ctx, _obj_ref, args| {
     let Some(Value::Reference(lock_ref)) = args.get(0) else { return invalidation!("holdLock expected a potential lock"); };
     //let current_thread = ctx.vm.current_thread.borrow();
     //let Some(_current_thread) = current_thread.as_ref() else { return invalidation!("There is no thread lol"); };
-    non_failing_some(Value::from(ctx.vm.current_locks.read()?.contains_key(&lock_ref.id)))
+    non_failing_some(Value::from(ctx.vm.current_locks.read()?.contains_key(&lock_ref)))
 });
 
 gen_delegate!(delegate_start0, |ctx, obj_ref, _args| {
@@ -80,10 +79,7 @@ gen_delegate!(delegate_start0, |ctx, obj_ref, _args| {
         let mut java_thread = JavaThread::new(1);
         java_thread.thread_obj_id.replace(obj_id);
     
-        JAVA_THREAD.set(&mut java_thread as *mut JavaThread as _);
-        if let Ok(mut t) = ctx.vm.threads.write() {
-            t.push(java_thread);
-        }
+        JAVA_THREAD.set(java_thread);
     });
     non_failing_none()
 });
@@ -106,10 +102,10 @@ gen_delegate!(delegate_environ, |ctx, _obj_ref, _args| {
     let _ = wrap_init!(ctx, ctx.vm.new_array(1, FieldType::Primitive(PrimitiveType::Byte).to_array_field_type(1), RefCell::new(Vec::new()))?);
     let values: Vec<Value> = vars.iter()
         .flat_map(|(k, v)| vec![
-            Value::Reference(byte_array_from_str(ctx.vm, k).unwrap()),
-            Value::Reference(byte_array_from_str(ctx.vm, v).unwrap()),
+            Value::Reference(byte_array_from_str(ctx.vm, k).unwrap().id),
+            Value::Reference(byte_array_from_str(ctx.vm, v).unwrap().id),
         ])
         .collect();
     let array_ref = wrap_init!(ctx, ctx.vm.new_array(2, FieldType::Primitive(PrimitiveType::Byte).to_array_field_type(2), RefCell::new(values.clone()))?);
-    non_failing_some(Value::Reference(array_ref))
+    non_failing_some(Value::Reference(array_ref.id))
 });

@@ -19,10 +19,10 @@ pub fn register_natives(registry: &mut NativeMethodRegistry) {
 gen_delegate!(delegate_find_loaded_class0, |ctx, _obj_ref, args| {
     debug!("findLoadedClass0 {:?}", args);
     if let Some(str_object) = args.get(0) {
-        let class_name = VM::extract_string_from_object(&str_object)?;
+        let class_name = ctx.vm.extract_string_from_value(*str_object)?;
         let class_name = class_name.replace(".", "/");
         if ctx.vm.class_manager.find_class_by_name(class_name.as_str()).is_some() {
-            non_failing_some(Value::Reference(wrap_init!(ctx, ctx.vm.new_class_object_by_name(class_name.as_str())?)))
+            non_failing_some(Value::Reference(wrap_init!(ctx, ctx.vm.new_class_object_by_name(class_name.as_str())?).id))
         } else {
             non_failing_some(ctx.vm.null())
         }
@@ -34,11 +34,11 @@ gen_delegate!(delegate_find_loaded_class0, |ctx, _obj_ref, args| {
 gen_delegate!(delegate_find_bootstrap_class, |ctx, _obj_ref, args| {
     debug!("findBootstrapClass {:?}", args);
     if let Some(str_object) = args.get(0) {
-        let class_name = VM::extract_string_from_object(&str_object)?;
+        let class_name = ctx.vm.extract_string_from_value(*str_object)?;
         let class_name = class_name.replace(".", "/");
 
         match ctx.vm.get_or_resolve_class(class_name.as_str()) {
-            Ok(clazz) => non_failing_some(Value::Reference(wrap_init!(ctx, ctx.vm.new_class_object_by_class(clazz)?))),
+            Ok(clazz) => non_failing_some(Value::Reference(wrap_init!(ctx, ctx.vm.new_class_object_by_class(clazz)?).id)),
             Err(_) => non_failing_some(ctx.vm.null())
         }
     } else {
@@ -58,7 +58,7 @@ gen_delegate!(delegate_native_lib_load, |ctx, obj_ref, _args| {
         //handle
         obj_ref.set_field(CLASSLOADER_NATIVELIBRARY_handle_INDEX, Value::Long(1));
         let name_val = obj_ref.get_field(CLASSLOADER_NATIVELIBRARY_name_INDEX);//args.get(0).unwrap();
-        let name = VM::extract_string_from_object(&name_val)?;
+        let name = ctx.vm.extract_string_from_value(name_val)?;
         println!("name: {name}");
         println!("javavm: {:p}", ctx.java_vm);
 

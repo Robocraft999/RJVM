@@ -31,24 +31,25 @@ pub fn register_natives(registry: &mut NativeMethodRegistry) {
 gen_delegate!(delegate_invoke, |ctx, obj_ref, args| {
     if let Some(mh_ref) = obj_ref {
         // form
-        let lambda_form = mh_ref.get_field(METHODHANDLE_form_INDEX).expect_reference()?;
+        let lambda_form_ref = ctx.vm.resolve_object_by_id(mh_ref.get_ref_field(METHODHANDLE_form_INDEX)?)?;
         // vmentry
-        let vmentry = lambda_form.get_field(LAMBDAFORM_vmentry_INDEX).expect_reference()?;
-        let blub = ctx.vm.object_payloads.read()?.get(&vmentry.id).unwrap().clone();
-        if let (Some(Value::Reference(vmtarget_ref)), Some(Value::Reference(mname_ref))) = (blub.get(0), blub.get(1)) {
-            let vmtarget = ctx.vm.extract_long(Value::Reference(vmtarget_ref))?.expect_long()?;
-            let clazz = VM::extract_class_from_class_object(ctx.vm, mname_ref.get_field(MEMBERNAME_clazz_INDEX).expect_reference()?)? ;
-            let name = VM::extract_string_from_object(&mname_ref.get_field(MEMBERNAME_name_INDEX))?;
+        let vmentry_ref = ctx.vm.resolve_object_by_id(lambda_form_ref.get_ref_field(LAMBDAFORM_vmentry_INDEX)?)?;
+        let blub = ctx.vm.object_payloads.read()?.get(&vmentry_ref.id).unwrap().clone();
+        if let (Some(Value::Reference(vmtarget_ref_id)), Some(Value::Reference(mname_ref_id))) = (blub.get(0), blub.get(1)) {
+            let vmtarget = ctx.vm.extract_long(Value::Reference(*vmtarget_ref_id))?.expect_long()?;
+            let mname_ref = ctx.vm.resolve_object_by_id(*mname_ref_id)?;
+            let clazz = ctx.vm.resolve_clazz_by_class_ref_id(mname_ref.get_ref_field(MEMBERNAME_clazz_INDEX)?)?;
+            let name = ctx.vm.extract_string_from_value(mname_ref.get_field(MEMBERNAME_name_INDEX))?;
 
             if vmtarget as isize == NONVIRTUAL_VTABLE_INDEX {
-                let typ_ref = mname_ref.get_field(MEMBERNAME_type_INDEX).expect_reference()?;
+                let typ_ref = ctx.vm.resolve_object_by_id(mname_ref.get_ref_field(MEMBERNAME_type_INDEX)?)?;
 
-                let desc = descriptor::from_method_type(typ_ref)?;
+                let desc = ctx.vm.extract_descriptor_from_method_type(typ_ref)?;
 
                 let method = clazz.find_method(name.as_str(), desc.as_str()).unwrap();
                 let cam = ClassAndMethod { class: clazz, method };
                 assert!(cam.method.flags & MethodFlag::Static as u16 > 0);
-                let mut delegate_args = vec![Value::Reference(mh_ref)];
+                let mut delegate_args = vec![Value::Reference(mh_ref.id)];
                 delegate_args.extend(args);
                 let result = JavaThread::invoke_subroutine(ctx, cam, None, delegate_args);
                 return match result{
@@ -70,13 +71,14 @@ gen_delegate!(delegate_link_to_static, |ctx, _obj_ref, args| {
     // this apparently just casts the simplified arguments back up to their target types
     // see: https://github.com/openjdk/jdk8u/blob/master/hotspot/src/share/vm/opto/callGenerator.cpp#L807
     // FIXME check if the membername should stay in last or should be removed
-    if let Some(Value::Reference(mname_ref)) = args.get(args.len() - 1) {
-        let typ_ref = mname_ref.get_field(MEMBERNAME_type_INDEX).expect_reference()?;
-        let clazz = VM::extract_class_from_class_object(ctx.vm, mname_ref.get_field(MEMBERNAME_clazz_INDEX).expect_reference()?)? ;
-        let name = VM::extract_string_from_object(&mname_ref.get_field(MEMBERNAME_name_INDEX))?;
+    if let Some(Value::Reference(mname_ref_id)) = args.get(args.len() - 1) {
+        let mname_ref = ctx.vm.resolve_object_by_id(*mname_ref_id)?;
+        let typ_ref = ctx.vm.resolve_object_by_id(mname_ref.get_ref_field(MEMBERNAME_type_INDEX)?)?;
+        let clazz = ctx.vm.resolve_clazz_by_class_ref_id(mname_ref.get_ref_field(MEMBERNAME_clazz_INDEX)?)? ;
+        let name = ctx.vm.extract_string_from_value(mname_ref.get_field(MEMBERNAME_name_INDEX))?;
         println!("LTS: {}", name);
 
-        let desc = descriptor::from_method_type(typ_ref)?;
+        let desc = ctx.vm.extract_descriptor_from_method_type(typ_ref)?;
         let desc = MethodDescriptor::new(desc);
         if desc.args.len() != args.len() - 1 {
             unreachable!("Args count does not match: expected: {}, got: {:?}", desc.as_str(), args)
@@ -121,10 +123,11 @@ gen_delegate!(delegate_get_named_con, |_ctx, _obj_ref, args| {
 
 
 gen_delegate!(delegate_object_field_offset, |ctx, _obj_ref, args| {
-    if let Some(Value::Reference(mname)) = args.get(0) {
-        if !mname.is_null() && let Some(payload) = ctx.vm.object_payloads.read()?.get(&mname.id) {
+    if let Some(Value::Reference(mname_id)) = args.get(0) {
+        if !mname_id.is_null() && let Some(payload) = ctx.vm.object_payloads.read()?.get(&mname_id) {
+            let mname_ref = ctx.vm.resolve_object_by_id(*mname_id)?;
             // flags
-            let flags = mname.get_field(MEMBERNAME_flags_INDEX).expect_int()?;
+            let flags = mname_ref.get_int_field(MEMBERNAME_flags_INDEX)?;
             if flags & IS_FIELD != 0 && flags & FieldFlag::Static as i32 == 0 {
                 non_failing_some(ctx.vm.extract_long(payload[0].clone())?)
             } else {
@@ -140,24 +143,24 @@ gen_delegate!(delegate_object_field_offset, |ctx, _obj_ref, args| {
 
 gen_delegate!(delegate_get_members, |ctx, _obj_ref, args| {
     if let (
-        Some(Value::Reference(class_ref)),
-        Some(Value::Reference(name_ref)),
-        Some(Value::Reference(sig_ref)),
+        Some(Value::Reference(class_ref_id)),
+        Some(Value::Reference(name_ref_id)),
+        Some(Value::Reference(sig_ref_id)),
         Some(Value::Integer(m_flags)),
-        Some(Value::Reference(caller_ref)),
+        Some(Value::Reference(caller_ref_id)),
         Some(Value::Integer(skip)),
-        Some(Value::Reference(results_ref)),
+        Some(Value::Reference(results_ref_id)),
     ) = (args.get(0), args.get(1), args.get(2), args.get(3), args.get(4), args.get(5), args.get(6)) {
-        if class_ref.is_null() || results_ref.is_null() {
+        if class_ref_id.is_null() || results_ref_id.is_null() {
             return non_failing_some(Value::Integer(-1))
         }
-        let clazz = ctx.vm.extract_class_from_class_object(class_ref)?;
-        if name_ref.is_null() || sig_ref.is_null() {
+        let clazz = ctx.vm.resolve_clazz_by_class_ref_id(*class_ref_id)?;
+        if name_ref_id.is_null() || sig_ref_id.is_null() {
             return non_failing_some(Value::Integer(0));
         }
-        let name = VM::extract_string_from_object(&Value::Reference(name_ref))?;
-        let sig = VM::extract_string_from_object(&Value::Reference(sig_ref))?;
-        let caller = ctx.vm.extract_class_from_class_object(caller_ref)?;
+        let name = ctx.vm.extract_string_from_value(Value::Reference(*name_ref_id))?;
+        let sig = ctx.vm.extract_string_from_value(Value::Reference(*sig_ref_id))?;
+        let caller = ctx.vm.resolve_clazz_by_class_ref_id(*caller_ref_id)?;
         todo!()
     }
 
@@ -165,10 +168,10 @@ gen_delegate!(delegate_get_members, |ctx, _obj_ref, args| {
 });
 
 gen_delegate!(delegate_get_member_vminfo, |ctx, _obj_ref, args| {
-    if let Some(Value::Reference(selff)) = args.get(0){
-        if let Some(vals) = ctx.vm.object_payloads.read()?.get(&selff.id){
+    if let Some(Value::Reference(self_id)) = args.get(0){
+        if let Some(vals) = ctx.vm.object_payloads.read()?.get(&self_id){
             let array = wrap_init!(ctx, ctx.vm.new_object_array_1(vals.clone())?);
-            non_failing_some(Value::Reference(array))
+            non_failing_some(Value::Reference(array.id))
         } else {
             invalidation!("No vminfo payload found")
         }
@@ -196,30 +199,32 @@ const REF_newInvokeSpecial: i32 = 8;
 const REF_invokeInterface: i32  = 9;
 
 gen_delegate!(delegate_init, |ctx, _obj_ref, args| {
-    if let (Some(Value::Reference(mname)), Some(Value::Reference(target))) = (args.get(0), args.get(1)){
-        if !mname.is_null() && !target.is_null(){
+    if let (Some(Value::Reference(mname_id)), Some(Value::Reference(target_id))) = (args.get(0), args.get(1)){
+        if !mname_id.is_null() && !target_id.is_null(){
             // see https://github.com/openjdk/jdk8u/blob/master/hotspot/src/share/vm/prims/methodHandles.cpp#L129
-            if target.class_name == JAVA_LANG_REFLECT_METHOD {
+            let target_ref = ctx.vm.resolve_object_by_id(*target_id)?;
+            let mname_ref = ctx.vm.resolve_object_by_id(*mname_id)?;
+            if target_ref.class_name == JAVA_LANG_REFLECT_METHOD {
                 // clazz
-                let clazz = target.get_field(METHOD_clazz_INDEX).expect_reference()?;
+                let class_ref_id = target_ref.get_ref_field(METHOD_clazz_INDEX)?;
                 // slot
-                let slot = target.get_field(METHOD_slot_INDEX).expect_int()?;
+                let slot = target_ref.get_int_field(METHOD_slot_INDEX)?;
 
-                let class_ref = ctx.vm.extract_class_from_class_object(clazz)?;
+                let class_ref = ctx.vm.resolve_clazz_by_class_ref_id(class_ref_id)?;
                 let method_info = class_ref.get_method_in_slot(slot as usize).unwrap();
                 let info = CallInfo::new(&method_info, &class_ref);
 
                 // clazz
-                mname.set_field(MEMBERNAME_clazz_INDEX, Value::Reference(clazz));
-                member_name_init_method(ctx, mname, &info)?;
+                mname_ref.set_field(MEMBERNAME_clazz_INDEX, Value::Reference(class_ref_id));
+                member_name_init_method(ctx, mname_ref, &info)?;
 
                 non_failing_none()
-            } else if target.class_name == JAVA_LANG_REFLECT_FIELD {
+            } else if target_ref.class_name == JAVA_LANG_REFLECT_FIELD {
                 todo!()
-            } else if target.class_name == JAVA_LANG_REFLECT_CONSTRUCTOR {
+            } else if target_ref.class_name == JAVA_LANG_REFLECT_CONSTRUCTOR {
                 todo!()
             } else {
-                invalidation!("target is not a valid type (expected Method, Field, Constructor, but got: {})", target.class_name)
+                invalidation!("target is not a valid type (expected Method, Field, Constructor, but got: {})", target_ref.class_name)
             }
         } else {
             invalidation!("MemberName or target reference are null")
@@ -262,7 +267,7 @@ fn member_name_init_method<'a>(ctx: Context<'a, '_>, mname: Reference<'a>, info:
     // vmindex
     // vmtarget
     let vmindex = ctx.vm.new_java_lang_long(Value::Long(vmindex as i64))?;
-    let old = ctx.vm.object_payloads.write()?.insert(mname.id, vec![vmindex, Value::Reference(mname)]);
+    let old = ctx.vm.object_payloads.write()?.insert(mname.id, vec![vmindex, Value::Reference(mname.id)]);
     Ok(())
 }
 
@@ -275,7 +280,7 @@ fn member_name_init_field<'a>(ctx: Context<'a, '_>, mname: Reference<'a>, field_
     let vmtarget = wrap_init!(ctx, ctx.vm.new_class_object_by_class(clazz)?);
     let slot = field_info.slot as i32;
     let vmindex = ctx.vm.new_java_lang_long(Value::Long(slot as i64))?;
-    let old = ctx.vm.object_payloads.write()?.insert(mname.id, vec![vmindex, Value::Reference(vmtarget)]);
+    let old = ctx.vm.object_payloads.write()?.insert(mname.id, vec![vmindex, Value::Reference(vmtarget.id)]);
 
     // flags
     mname.set_field(MEMBERNAME_flags_INDEX, Value::Integer(flags));
@@ -283,22 +288,22 @@ fn member_name_init_field<'a>(ctx: Context<'a, '_>, mname: Reference<'a>, field_
 }
 
 
-fn resolve_signature<'a>(sig: Reference<'a>) -> VMResult<String> {
+fn resolve_signature<'a>(ctx: Context<'a, '_>, sig: Reference<'a>) -> VMResult<String> {
     if sig.class_name == JAVA_LANG_INVOKE_METHOD_TYPE {
-        let args_ref = sig.get_field(METHODTYPE_ptypes_INDEX).expect_reference()?;
-        let rtype_ref = sig.get_field(METHODTYPE_rtype_INDEX).expect_reference()?;
+        let args_ref = ctx.vm.resolve_object_by_id(sig.get_ref_field(METHODTYPE_ptypes_INDEX)?)?;
+        let rtype_ref_id = sig.get_ref_field(METHODTYPE_rtype_INDEX)?;
         if let ReferenceType::Array(_, _, content) = &args_ref.reference_type{
             let mut signature = String::from("(");
             for class_obj in content.borrow().iter(){
-                let class_obj = class_obj.expect_reference()?;
-                let class_name = VM::extract_class_name_from_class_object(class_obj)?;
+                let Value::Reference(class_ref_id) = *class_obj else { return invalidation!("Expected Reference") };
+                let class_name = &ctx.vm.resolve_clazz_by_class_ref_id(class_ref_id)?.name;
                 signature.push_str(get_class_descriptor(class_name.as_str()).as_str());
             }
             signature.push_str(")");
-            if rtype_ref.is_null(){
+            if rtype_ref_id.is_null(){
                 signature.push_str("V");
             } else {
-                let class_name = VM::extract_class_name_from_class_object(rtype_ref)?;
+                let class_name = &ctx.vm.resolve_clazz_by_class_ref_id(rtype_ref_id)?.name;
                 signature.push_str(get_class_descriptor(class_name.as_str()).as_str())
             }
             Ok(signature)
@@ -306,7 +311,7 @@ fn resolve_signature<'a>(sig: Reference<'a>) -> VMResult<String> {
             invalidation!("Invalid signature (args is not an array)")
         }
     } else if sig.class_name == JAVA_LANG_CLASS {
-        let class_name = VM::extract_class_name_from_class_object(sig)?;
+        let class_name = ctx.vm.extract_class_name_from_class_ref(sig)?;
         let signature = get_class_descriptor(class_name.as_str());
         Ok(signature)
     } else if sig.class_name == JAVA_LANG_STRING {
@@ -317,13 +322,14 @@ fn resolve_signature<'a>(sig: Reference<'a>) -> VMResult<String> {
 }
 
 gen_delegate!(delegate_resolve, |ctx, _obj_ref, args| {
-    if let (Some(Value::Reference(selff)), Some(Value::Reference(caller))) = (args.get(0), args.get(1)){
-        let clazz = ctx.vm.extract_class_from_class_object(selff.get_field(MEMBERNAME_clazz_INDEX).expect_reference().unwrap())?;
+    if let (Some(Value::Reference(self_ref_id)), Some(Value::Reference(caller_id))) = (args.get(0), args.get(1)){
+        let self_ref = ctx.vm.resolve_object_by_id(*self_ref_id)?;
+        let clazz = ctx.vm.resolve_clazz_by_class_ref_id(self_ref.get_ref_field(MEMBERNAME_clazz_INDEX)?)?;
         //let caller_clazz = vm.extract_class_from_class_object(caller)?; can be null apparently
-        let name = VM::extract_string_from_object(&selff.get_field(MEMBERNAME_name_INDEX))?;
-        let typ = selff.get_field(MEMBERNAME_type_INDEX).expect_reference()?;
-        let sig = resolve_signature(typ)?;
-        let flags = &selff.get_field(MEMBERNAME_flags_INDEX).expect_int()?;
+        let name = ctx.vm.extract_string_from_value(self_ref.get_field(MEMBERNAME_name_INDEX))?;
+        let typ = ctx.vm.resolve_object_by_id(self_ref.get_ref_field(MEMBERNAME_type_INDEX)?)?;
+        let sig = resolve_signature(ctx, typ)?;
+        let flags = &self_ref.get_field(MEMBERNAME_flags_INDEX).expect_int()?;
         let ref_kind = flags >> REFERENCE_KIND_SHIFT;
         match flags & ALL_KINDS {
             IS_METHOD => {
@@ -351,13 +357,13 @@ gen_delegate!(delegate_resolve, |ctx, _obj_ref, args| {
                     }
                     _ => unreachable!("Invalid ref_kind: {}", ref_kind)
                 };
-                member_name_init_method(ctx, selff, &call_info)?;
+                member_name_init_method(ctx, self_ref, &call_info)?;
                 //selff.set_field(3, Value::Integer(*flags | call_info.selected_method.flags as i32));
             }
             IS_FIELD => {
                 let (vmindex, field_info, holder_id) = clazz.find_field_static(name.as_str()).unwrap();
-                selff.set_field(MEMBERNAME_flags_INDEX, Value::Integer(*flags | field_info.flags as i32));
-                member_name_init_field(ctx, selff, field_info)?;
+                self_ref.set_field(MEMBERNAME_flags_INDEX, Value::Integer(*flags | field_info.flags as i32));
+                member_name_init_field(ctx, self_ref, field_info)?;
             }
             other => todo!("Unsupported mh type: {:b}", other)
         };
@@ -366,7 +372,7 @@ gen_delegate!(delegate_resolve, |ctx, _obj_ref, args| {
 
         //let prev = vm.object_payloads.borrow_mut().insert(selff.id, vec![vmindex, vmtarget]);
         //assert!(prev.is_none());
-        non_failing_some(Value::Reference(selff))
+        non_failing_some(Value::Reference(self_ref.id))
     } else {
         invalidation!("Expected two references")
     }

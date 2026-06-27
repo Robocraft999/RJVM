@@ -22,7 +22,7 @@ gen_delegate!(delegate_get_class, |ctx, obj_ref, _args| {
     if let Some(obj_ref) = obj_ref {
         debug!("obj: {:?}", obj_ref.class_name);
         let class_ref = wrap_init!(ctx, ctx.vm.new_class_object_by_name(obj_ref.class_name.as_str())?);
-        non_failing_some(Value::Reference(class_ref))
+        non_failing_some(Value::Reference(class_ref.id))
     } else {
         invalidation!("Object is Null")
     }
@@ -48,7 +48,7 @@ gen_delegate!(delegate_clone, |ctx, obj_ref, _args| {
                 debug!("Cloning array: {:?}", obj_ref);
                 let new_array_ref = wrap_init!(ctx, ctx.vm.new_array(*dims, component_type.clone().to_array_field_type(*dims), content.clone())?);
                 ctx.vm.vm_debug_helper.tracker.push_object_event(new_array_ref.id, format!("Cloned from:\n    {:?}", obj_ref));
-                non_failing_some(Value::Reference(new_array_ref))
+                non_failing_some(Value::Reference(new_array_ref.id))
             }
             ReferenceType::Object(content) => {
                 debug!("Cloning object: {:?}", obj_ref);
@@ -58,7 +58,7 @@ gen_delegate!(delegate_clone, |ctx, obj_ref, _args| {
                 if let ReferenceType::Object(new_content) = &new_object_ref.reference_type{
                     let _ = new_content.replace(content.borrow().clone());
                 }
-                non_failing_some(Value::Reference(new_object_ref))
+                non_failing_some(Value::Reference(new_object_ref.id))
             }
         }
     } else {

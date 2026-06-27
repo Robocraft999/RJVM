@@ -1,11 +1,11 @@
 use crate::class_file::fields::field_type::FieldType;
 use crate::vm::class::{ClassId, ClassRef};
-use crate::vm::value::{Reference, ReferenceType, ReferenceValue, Value};
+use crate::vm::value::{RefId, Reference, ReferenceType, ReferenceValue, Value};
 use std::cell::RefCell;
 use typed_arena::Arena;
 
 pub struct ObjectAllocator<'a>{
-    arena: Arena<ReferenceValue<'a>>,
+    arena: Arena<ReferenceValue>,
     next_object_id: RefCell<u32>,
     pub null: Reference<'a>,
 }
@@ -14,7 +14,7 @@ impl<'a> ObjectAllocator<'a>{
     pub(crate) fn new() -> Self{
         let arena = Arena::with_capacity(1024);
         let _null = arena.alloc(ReferenceValue{
-            id: 0,
+            id: RefId(0),
             class_id: ClassId(u32::MAX),
             class_name: String::from("xXxNullxXx"),
             reference_type: ReferenceType::Object(RefCell::new(Vec::new())),
@@ -28,9 +28,9 @@ impl<'a> ObjectAllocator<'a>{
         }
     }
 
-    pub fn allocate_object(&self, class: ClassRef<'a>, fields: Vec<Value<'a>>) -> Reference<'a>{
+    pub fn allocate_object(&self, class: ClassRef<'a>, fields: Vec<Value>) -> Reference<'a>{
         let object = ReferenceValue{
-            id: *self.next_object_id.borrow(),
+            id: RefId(*self.next_object_id.borrow()),
             class_id: class.id,
             class_name: class.name.to_string(),
             reference_type: ReferenceType::Object(RefCell::new(fields))
@@ -44,9 +44,9 @@ impl<'a> ObjectAllocator<'a>{
         }
     }
 
-    pub fn allocate_array(&self, class: ClassRef<'a>, dims: usize, component_type: FieldType, content: RefCell<Vec<Value<'a>>>) -> Reference<'a>{
+    pub fn allocate_array(&self, class: ClassRef<'a>, dims: usize, component_type: FieldType, content: RefCell<Vec<Value>>) -> Reference<'a>{
         let array = ReferenceValue{
-            id: *self.next_object_id.borrow(),
+            id: RefId(*self.next_object_id.borrow()),
             class_id: class.id,
             class_name: class.name.to_string(),
             reference_type: ReferenceType::Array(dims, component_type, content),

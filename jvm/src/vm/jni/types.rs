@@ -8,7 +8,7 @@ use crate::class_file::fields::field_type::{FieldType, PrimitiveType};
 use crate::native_init_wrap;
 use crate::vm::class::{ClassAndMethod, ClassId};
 use crate::vm::result::{VMPartialResult, VMResult, VMResultType};
-use crate::vm::value::{ReferenceType, Value};
+use crate::vm::value::{RefId, ReferenceType, Value};
 use crate::vm::{jni::{env_function_table::JNINativeInterface, vm_function_table::JNIInvokeInterface}, Context, VmError, VM};
 use log::{debug, error, warn};
 use std::cell::RefCell;
@@ -153,7 +153,7 @@ macro_rules! native_wrap {
 unsafe fn resolve_static_class_and_method(env: *mut JNIEnv, clazz: jclass, method_id: jmethodID) -> ClassAndMethod{
     let vm = unsafe{&*(*env).vm};
 
-    let class_ref = vm.resolve_class_object_by_id(clazz);
+    let class_ref = vm.resolve_class_object_by_jclass(clazz);
 
     let method_info = class_ref.methods.get(method_id).unwrap();
     ClassAndMethod{class: class_ref, method: method_info}
@@ -162,22 +162,22 @@ unsafe fn resolve_static_class_and_method(env: *mut JNIEnv, clazz: jclass, metho
 unsafe fn resolve_class_and_method(env: *mut JNIEnv, obj: jobject, method_id: jmethodID) -> ClassAndMethod{
     let vm = unsafe{&*(*env).vm};
 
-    let obj_ref = vm.resolve_object_by_id(obj).unwrap();
+    let obj_ref = vm.resolve_object_by_jobject(obj).unwrap();
     let class_ref = vm.get_or_resolve_class(obj_ref.class_name.as_str()).unwrap();
 
     let method_info = class_ref.methods.get(method_id).unwrap();
     ClassAndMethod{class: class_ref, method: method_info}
 }
 
-unsafe fn resolve_function_args<'a>(env: *mut JNIEnv<'a>, class_and_method: &ClassAndMethod, mut raw: VaList) -> Vec<Value<'a>>{
+unsafe fn resolve_function_args<'a>(env: *mut JNIEnv<'a>, class_and_method: &ClassAndMethod, mut raw: VaList) -> Vec<Value>{
     let vm = unsafe{&*(*env).vm};
     class_and_method.method.descriptor.args.iter().flat_map(|ft| match ft{
         FieldType::Object(..) | FieldType::Array(..) => {
             let ref_id: u32 = unsafe{raw.next_arg()};
             {
-                let reference = vm.resolve_object_by_id(ref_id).unwrap();
-                println!("NATIVE: arg for {}: {:?}", class_and_method.format(), reference);
-                vec![Value::Reference(reference)]
+                let reference = Value::Reference(RefId(ref_id));
+                println!("NATIVE: arg for {}: {:?}", class_and_method.format(), reference.print(vm));
+                vec![reference]
             }
         }
         FieldType::Primitive(pt) => match pt{
@@ -223,7 +223,7 @@ impl JNINativeInterface_ {
                 vm.get_or_resolve_class(name.as_str()).unwrap()
             };
             let class_obj = native_init_wrap!(env, vm.new_class_object_by_class(class));
-            class_obj.id
+            class_obj.id.nid()
         }
     }
 
@@ -252,8 +252,8 @@ impl JNINativeInterface_ {
     pub unsafe extern "system-unwind" fn Throw(env: *mut JNIEnv<'static>, obj: jthrowable) -> jint{
         let vm: &VM = unsafe{&*(*env).vm};
         debug!(target: "native", "NATIVE: Throw");
-        let object = vm.resolve_object_by_id(obj).unwrap();
-        let prev = thread().caught_exception.replace(Some(("NativeException".to_string(), "Unknown".to_string(), Value::Reference(object))));
+        let object = vm.resolve_object_by_jobject(obj).unwrap();
+        let prev = thread().caught_exception.replace(Some(("NativeException".to_string(), "Unknown".to_string(), Value::Reference(object.id))));
         assert!(prev.is_none());
         0 as jint
     }
@@ -263,7 +263,7 @@ impl JNINativeInterface_ {
     pub fn ExceptionOccurred(env: *mut JNIEnv) -> jthrowable{
         let vm: &VM = unsafe{&*(*env).vm};
         if let Some((_, _, Value::Reference(throwable))) = &thread().caught_exception.borrow().as_ref(){
-            throwable.id as jthrowable
+            throwable.nid() as jthrowable
         } else {
             0 as jthrowable
         }
@@ -292,7 +292,7 @@ impl JNINativeInterface_ {
 
     pub fn NewGlobalRef(env: *mut JNIEnv, lobj: jobject) -> jobject{
         let vm = unsafe{&*(*env).vm};
-        debug!("NATIVE: NewGlobalRef: {:?}", vm.resolve_object_by_id(lobj));
+        debug!("NATIVE: NewGlobalRef: {:?}", vm.resolve_object_by_jobject(lobj));
         //FIXME currently the object exits forever so this is fine
         lobj
     }
@@ -340,7 +340,7 @@ impl JNINativeInterface_ {
             }
         };
         if let VMResultType::Successful(None) = res{
-            obj_ref.id as jobject
+            obj_ref.id.nid() as jobject
         } else {
             unimplemented!("NewObjectV: expected no return value but got: {:?}", res)
         }
@@ -351,9 +351,9 @@ impl JNINativeInterface_ {
 
     pub unsafe extern "system-unwind" fn GetObjectClass(env: *mut JNIEnv<'static>, obj: jobject) -> jclass{
         let vm: &VM = unsafe{&*(*env).vm};
-        if let Some(object) = vm.resolve_object_by_id(obj){
+        if let Some(object) = vm.resolve_object_by_jobject(obj){
             let class_obj = native_init_wrap!(env, vm.new_class_object(object.class_name.as_str(), object.class_id));
-            class_obj.id as jclass
+            class_obj.id.nid() as jclass
         } else {
             0 as jclass
         }
@@ -366,9 +366,9 @@ impl JNINativeInterface_ {
             // but allowing true breaks stuff
             return JNI_FALSE;
         }
-        let obj_ref = vm.resolve_object_by_id(obj).unwrap();
+        let obj_ref = vm.resolve_object_by_jobject(obj).unwrap();
         let obj_class = vm.find_class_by_id(obj_ref.class_id).unwrap();
-        let class_ref = vm.resolve_class_object_by_id(clazz);
+        let class_ref = vm.resolve_class_object_by_jclass(clazz);
         let instance_of = vm.is_instance_of(obj_class, class_ref);
         if instance_of {JNI_TRUE} else {JNI_FALSE}
     }
@@ -378,7 +378,7 @@ impl JNINativeInterface_ {
         let signature = unsafe{CStr::from_ptr(sig)}.to_str().map_err(|e| VmError::Native(e.to_string())).unwrap();
         let vm = unsafe{&*(*env).vm};
 
-        let class_ref = vm.resolve_class_object_by_id(clazz);
+        let class_ref = vm.resolve_class_object_by_jclass(clazz);
         println!("NATIVE: GetMethodID: {}::{}{}", class_ref.name, method_name, signature);
         //FIXME zero index results in NULL
         class_ref.find_method_index(method_name, signature).ok_or(VmError::Native(format!("GetMethodID: {}::{}{} not found", class_ref.name, method_name, signature))).unwrap()
@@ -396,7 +396,7 @@ impl JNINativeInterface_ {
         let java_vm = unsafe{&*(*env).pvm};
         let ctx = Context { vm, java_vm,  thread: thread()};
 
-        let obj_ref = vm.resolve_object_by_id(obj).unwrap();
+        let obj_ref = vm.resolve_object_by_jobject(obj).unwrap();
         debug!("CallObjectMethodV: {} ({:?})", class_and_method.format(), args);
         let res = match JavaThread::invoke_subroutine(ctx, class_and_method, Some(obj_ref), args) {
             Ok(result) => result,
@@ -408,7 +408,7 @@ impl JNINativeInterface_ {
             }
         };
         if let VMResultType::Successful(Some(Value::Reference(reference))) = res{
-            reference.id as jobject
+            reference.nid() as jobject
         } else {
             unimplemented!("CallObjectMethodV: expected object return value but got: {:?}", res)
         }
@@ -454,7 +454,7 @@ impl JNINativeInterface_ {
         let java_vm = unsafe{&*(*env).pvm};
         let ctx = Context { vm, java_vm, thread: thread()};
 
-        let obj_ref = vm.resolve_object_by_id(obj).unwrap();
+        let obj_ref = vm.resolve_object_by_jobject(obj).unwrap();
         debug!("CallVoidMethodV: {} ({:?})", class_and_method.format(), args);
         let res = match JavaThread::invoke_subroutine(ctx, class_and_method, Some(obj_ref), args) {
             Ok(result) => result,
@@ -511,7 +511,7 @@ impl JNINativeInterface_ {
         let signature = unsafe{CStr::from_ptr(sig)}.to_str().map_err(|e| VmError::Native(e.to_string())).unwrap();
         let vm = unsafe{&*(*env).vm};
 
-        let class_ref = vm.resolve_class_object_by_id(clazz);
+        let class_ref = vm.resolve_class_object_by_jclass(clazz);
         println!("NATIVE: GetFieldID: {}::{}{}", class_ref.name, field_name, signature);
         // FIXME same as GetMethodID, there is a field at index 0 which is recognized as NULL
         if let Some((index, _)) = class_ref.find_field(field_name){
@@ -544,7 +544,7 @@ impl JNINativeInterface_ {
     }
     pub unsafe extern "system-unwind" fn GetLongField(env: *mut JNIEnv, obj: jobject, fieldID: jfieldID) -> jlong{
         let vm = unsafe{&*(*env).vm};
-        let obj_ref = vm.resolve_object_by_id(obj).unwrap();
+        let obj_ref = vm.resolve_object_by_jobject(obj).unwrap();
         let Value::Long(val) = obj_ref.get_field(fieldID as usize) else { unreachable!("") };
         val as jlong
     }
@@ -555,15 +555,15 @@ impl JNINativeInterface_ {
         unimplemented!()
     }
 
-    unsafe fn SetField<'a>(env: *mut JNIEnv<'a>, obj: jobject, fieldID: jfieldID, val: Value<'a>) {
+    unsafe fn SetField<'a>(env: *mut JNIEnv<'a>, obj: jobject, fieldID: jfieldID, val: Value) {
         let vm = unsafe{&*(*env).vm};
-        let obj_ref = vm.resolve_object_by_id(obj).unwrap();
+        let obj_ref = vm.resolve_object_by_jobject(obj).unwrap();
         obj_ref.set_field(fieldID as usize, val);
     }
     pub unsafe extern "system-unwind" fn SetObjectField(env: *mut JNIEnv, obj: jobject, fieldID: jfieldID, val: jobject) {
         let vm = unsafe{&*(*env).vm};
         let val = if val != 0 {
-            Value::Reference(vm.resolve_object_by_id(obj).unwrap())
+            Value::Reference(RefId(obj))
         } else {
             vm.null()
         };
@@ -601,7 +601,7 @@ impl JNINativeInterface_ {
         let java_vm = unsafe{&*(*env).pvm};
         let ctx = Context { vm, java_vm, thread: thread() };
 
-        let class_ref = vm.resolve_class_object_by_id(clazz);
+        let class_ref = vm.resolve_class_object_by_jclass(clazz);
         native_init_wrap!(env, ctx.ensure_initialized(class_ref));
         println!("NATIVE: GetStaticMethodID: {}::{}{}", class_ref.name, method_name, signature);
         //FIXME zero index results in NULL
@@ -629,7 +629,7 @@ impl JNINativeInterface_ {
         };
         if let VMResultType::Successful(Some(result)) = res{
             if let Value::Reference(r) = result{
-                r.id as jobject
+                r.nid() as jobject
             } else {
                 unreachable!("CallStaticObjectMethodV: expected an object or null return value")
             }
@@ -732,7 +732,7 @@ impl JNINativeInterface_ {
         let signature = unsafe{CStr::from_ptr(sig)}.to_str().map_err(|e| VmError::Native(e.to_string())).unwrap();
         let vm = unsafe{&*(*env).vm};
 
-        let clazz = vm.resolve_class_object_by_id(clazz);
+        let clazz = vm.resolve_class_object_by_jclass(clazz);
         println!("NATIVE: GetStaticFieldID: {}::{}{}", clazz.name, field_name, signature);
         // FIXME same as GetMethodID, there is a field at index 0 which is recognized as NULL
         if let Some((index, _, _)) = clazz.find_field_static(field_name){
@@ -748,12 +748,12 @@ impl JNINativeInterface_ {
     pub unsafe extern "system-unwind" fn GetStaticObjectField(env: *mut JNIEnv, clazz: jclass, fieldID: jfieldID) -> jobject{
         let vm = unsafe{&*(*env).vm};
 
-        let clazz = vm.resolve_class_object_by_id(clazz);
+        let clazz = vm.resolve_class_object_by_jclass(clazz);
 
         if let Ok(res) = vm.static_class_objects.read() {
             let class_ref = res.get(&clazz.id).unwrap();
             let Value::Reference(val) = class_ref.get_field(fieldID as usize) else { unimplemented!("GetStaticObjectField: not an object") };
-            val.id as jobject
+            val.nid() as jobject
         } else {
             unreachable!("Could not acquire static class objects lock")
         }
@@ -819,18 +819,16 @@ impl JNINativeInterface_ {
         println!("NATIVE: NewString: '{}' , {:?}", unicode_str, raw_slice);
         let vm = unsafe{&*(*env).vm};
         let str = vm.try_new_string_object(unicode_str.as_str()).map_err(|e| VmError::Native(e.to_string())).unwrap();
-        str.id
+        str.id.nid()
     }
     pub unsafe extern "system-unwind" fn GetStringLength(env: *mut JNIEnv, str: jstring) -> jsize{
         let vm: &VM = unsafe{&*(*env).vm};
-        let string_ref = vm.resolve_object_by_id(str).unwrap();
-        let string = VM::extract_string_from_object(&Value::Reference(string_ref)).unwrap();
+        let string = vm.extract_string_from_value(Value::Reference(RefId(str))).unwrap();
         string.len() as jsize
     }
     pub unsafe extern "system-unwind" fn GetStringChars(env: *mut JNIEnv, str: jstring, isCopy: *mut jboolean) -> *const jchar{
         let vm: &VM = unsafe{&*(*env).vm};
-        let string_ref = vm.resolve_object_by_id(str).unwrap();
-        let string = VM::extract_string_from_object(&Value::Reference(string_ref)).unwrap();
+        let string = vm.extract_string_from_value(Value::Reference(RefId(str))).unwrap();
         debug!(target: "native", "NATIVE: GetStringChars: {}", string);
         //FIXME potential dangling pointer
         let boxed_string = Box::new(string.encode_utf16().collect::<Vec<u16>>());
@@ -847,7 +845,7 @@ impl JNINativeInterface_ {
             let utf_r = CStr::from_ptr(utf).to_owned().into_string().map_err(|e| VmError::Native(e.to_string())).unwrap();
             let vm = &*(*env).vm;
             let str = vm.try_new_string_object(utf_r.as_str()).map_err(|e| VmError::Native(e.to_string())).unwrap();
-            str.id
+            str.id.nid()
         }
     }
     pub unsafe extern "system-unwind" fn GetStringUTFLength(env: *mut JNIEnv, str: jstring) -> jsize{
@@ -862,7 +860,7 @@ impl JNINativeInterface_ {
 
     pub unsafe extern "system-unwind" fn GetArrayLength(env: *mut JNIEnv, array: jarray) -> jsize{
         let vm: &VM = unsafe{&*(*env).vm};
-        let array_ref = vm.resolve_object_by_id(array).unwrap();
+        let array_ref = vm.resolve_object_by_jobject(array).unwrap();
         if let ReferenceType::Array(_, _, content) = &array_ref.reference_type {
             content.borrow().len() as jsize
         } else {
@@ -872,27 +870,27 @@ impl JNINativeInterface_ {
 
     pub unsafe extern "system-unwind" fn NewObjectArray(env: *mut JNIEnv<'static>, length: jsize, clazz: jclass, init: jobject) -> jobjectArray{
         let vm: &VM = unsafe{&*(*env).vm};
-        let clazz = vm.resolve_class_object_by_id(clazz);
-        let init_ref = if init != 0 {
-            Value::Reference(vm.resolve_object_by_id(init).unwrap())
+        let clazz = vm.resolve_class_object_by_jclass(clazz);
+        let init_val = if init != 0 {
+            Value::Reference(RefId(init))
         } else {
             vm.null()
         };
 
-        let content = vec![init_ref; length as usize];
+        let content = vec![init_val; length as usize];
         let array_ref = native_init_wrap!(env, vm.new_array(
             1,
             FieldType::Object(clazz.name.clone()).to_array_field_type(1),
             RefCell::new(content.clone())
         ));
-        array_ref.id as jobjectArray
+        array_ref.id.nid() as jobjectArray
     }
 
     pub unsafe extern "system-unwind" fn SetObjectArrayElement(env: *mut JNIEnv, array: jarray, index: jsize, value: jobject){
         let vm: &VM = unsafe{&*(*env).vm};
-        let array_ref = vm.resolve_object_by_id(array).unwrap();
+        let array_ref = vm.resolve_object_by_jobject(array).unwrap();
         let value_ref = if value != 0 {
-            Value::Reference(vm.resolve_object_by_id(value).unwrap())
+            Value::Reference(RefId(value))
         } else {
             vm.null()
         };
@@ -907,12 +905,12 @@ impl JNINativeInterface_ {
             FieldType::Primitive(PrimitiveType::Byte).to_array_field_type(1),
             RefCell::new(content.clone())
         ));
-        array_ref.id as jbyteArray
+        array_ref.id.nid() as jbyteArray
     }
 
     pub unsafe extern "system-unwind" fn GetByteArrayRegion(env: *mut JNIEnv, array: jbyteArray, start: jsize, len: jsize, buf: *mut jbyte){
         let vm: &VM = unsafe{&*(*env).vm};
-        let array_ref = vm.resolve_object_by_id(array).unwrap();
+        let array_ref = vm.resolve_object_by_jobject(array).unwrap();
         if let ReferenceType::Array(_, _, content) = &array_ref.reference_type{
             content.borrow()
                 .iter()
@@ -934,7 +932,7 @@ impl JNINativeInterface_ {
 
     pub unsafe extern "system-unwind" fn SetByteArrayRegion(env: *mut JNIEnv, array: jbyteArray, start: jsize, len: jsize, buf: *mut jbyte) {
         let vm: &VM = unsafe { &*(*env).vm };
-        let array_ref = vm.resolve_object_by_id(array).unwrap();
+        let array_ref = vm.resolve_object_by_jobject(array).unwrap();
         if let ReferenceType::Array(_, _, content) = &array_ref.reference_type{
             content.borrow_mut()
                 .iter_mut()
