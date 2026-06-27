@@ -21,11 +21,12 @@ gen_delegate!(delegate_get_stack_access_control_context, |ctx, _obj_ref, _args| 
 });
 
 gen_delegate!(delegate_do_privileged, |ctx, _obj_ref, args| {
-    if let Some(Value::Reference(action)) = args.get(0) {
-        let clazz = ctx.vm.find_class_by_id(action.class_id).unwrap();
+    if let Some(Value::Reference(action_ref_id)) = args.get(0) {
+        let action_ref = ctx.vm.resolve_object_by_id(*action_ref_id)?;
+        let clazz = ctx.vm.find_class_by_id(action_ref.class_id).unwrap();
         // FIXME clazz.find_method should be sufficient here
         let run = clazz.resolve_method_virtual("run", "()Ljava/lang/Object;").unwrap();
-        let res = JavaThread::invoke_subroutine(ctx, run, Some(action), vec![]);
+        let res = JavaThread::invoke_subroutine(ctx, run, Some(action_ref), vec![]);
 
         // invoke_frames_until returns occurred exceptions as Err(VmError::JavaException(JavaError::JavaExceptionThrown))
         // because it doesn't know whether it is a subroutine or not

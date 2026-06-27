@@ -20,13 +20,14 @@ pub fn register_natives(registry: &mut NativeMethodRegistry) {
     registry.register(JAVA_IO_UNIX_FILE_SYSTEM, "getLastModifiedTime", "(Ljava/io/File;)J", delegate_last_modified_time);
 }
 
-gen_delegate!(delegate_write_bytes, |_ctx, _obj_ref, args| {
+gen_delegate!(delegate_write_bytes, |ctx, _obj_ref, args| {
     if let (
-        Some(Value::Reference(bytes_ref)),
+        Some(Value::Reference(bytes_ref_id)),
         Some(Value::Integer(offset)),
         Some(Value::Integer(amount)),
         Some(Value::Integer(_should_append))
     ) = (args.get(0), args.get(1), args.get(2), args.get(3)) {
+        let bytes_ref = ctx.vm.resolve_object_by_id(*bytes_ref_id)?;
         if let ReferenceType::Array(_, _, data) = &bytes_ref.reference_type{
             let data = &data.borrow()[*offset as usize..(*offset + *amount) as usize];
             let string: String = data.iter().map(|value| if let Value::Integer(int) = value { (*int as u8) as char} else { '?' }).collect();
@@ -41,14 +42,15 @@ gen_delegate!(delegate_write_bytes, |_ctx, _obj_ref, args| {
 });
 
 gen_delegate!(delegate_read_bytes, |ctx, obj_ref, args| {
-    if let (Some(Value::Reference(data_ref)), Some(Value::Integer(offset)), Some(Value::Integer(length))) = (args.get(0), args.get(1), args.get(2)) {
+    if let (Some(Value::Reference(data_ref_id)), Some(Value::Integer(offset)), Some(Value::Integer(length))) = (args.get(0), args.get(1), args.get(2)) {
         let io_exception_class = wrap_init!(ctx, ctx.get_or_initialize_class("java/io/IOException")?);
 
         if let Some(fis_ref) = obj_ref{
-            let path = VM::extract_string_from_object(&fis_ref.get_field(FILEINPUTSTREAM_path_INDEX))?;
+            let path = ctx.vm.extract_string_from_value(fis_ref.get_field(FILEINPUTSTREAM_path_INDEX))?;
 
             let existing_file = ctx.vm.currently_open_files.write()?.remove(&path);
             if let Some((content, index)) = existing_file {
+                let data_ref = ctx.vm.resolve_object_by_id(*data_ref_id)?;
                 //file: len 20, i 5
                 //buffer: blen 30, o 10, length 20
                 //start = 10, end = 25 = 10 + min(30 - 10, 20 - 5)
@@ -112,8 +114,8 @@ gen_delegate!(delegate_read_bytes, |ctx, obj_ref, args| {
 
 //obsolete because libjava.so is loaded
 gen_delegate!(delegate_open0, |ctx, _obj_ref, args| {
-    if let Some(Value::Reference(path_ref)) = args.get(0) && !path_ref.is_null(){
-        let path = VM::extract_string_from_object(&Value::Reference(path_ref))?;
+    if let Some(path_val) = args.get(0) && !path_val.is_null(){
+        let path = ctx.vm.extract_string_from_value(*path_val)?;
         if !ctx.vm.currently_open_files.read()?.contains_key(&path) {
             let file_content = ctx.vm.class_manager.class_path.resolve_file(path.as_str())?;
             if let Some(file_content) = file_content {
@@ -131,7 +133,7 @@ gen_delegate!(delegate_close0, |ctx, obj_ref, _args| {
         return invalidation!("Expected this")
     };
     let path_val = fis_ref.get_field(FILEINPUTSTREAM_path_INDEX);
-    let path = VM::extract_string_from_object(&path_val)?;
+    let path = ctx.vm.extract_string_from_value(path_val)?;
     if ctx.vm.currently_open_files.write()?.remove(&path).is_none() {
         warn!("Closing non existent file: '{}'", path)
     }
@@ -143,10 +145,11 @@ const BA_REGULAR: i32 = 2;
 const BA_DIRECTORY: i32 = 4;
 const BA_HIDDEN: i32 = 8;
 
-gen_delegate!(delegate_get_boolean_attribute, |_ctx, _obj_ref, args| {
-    if let Some(Value::Reference(path_val)) = args.get(0){
-        let string_val = path_val.get_field(FILE_path_INDEX);
-        let path = VM::extract_string_from_object(&string_val)?;
+gen_delegate!(delegate_get_boolean_attribute, |ctx, _obj_ref, args| {
+    if let Some(Value::Reference(path_ref_id)) = args.get(0){
+        let path_ref = ctx.vm.resolve_object_by_id(*path_ref_id)?;
+        let string_val = path_ref.get_field(FILE_path_INDEX);
+        let path = ctx.vm.extract_string_from_value(string_val)?;
         let path = Path::new(&path);
         let mut attributes = 0;
         if path.exists(){
@@ -165,20 +168,21 @@ gen_delegate!(delegate_get_boolean_attribute, |_ctx, _obj_ref, args| {
 gen_delegate!(delegate_canonicalize0, |ctx, _obj_ref, args| {
     debug!("canonicalize0");
     if let Some(string_val) = args.get(0){
-        let path = VM::extract_string_from_object(string_val)?;
+        let path = ctx.vm.extract_string_from_value(*string_val)?;
         let path = Path::new(&path);
         let path = path.canonicalize().unwrap().into_os_string().into_string().unwrap();
         let new_path = wrap_init!(ctx, ctx.vm.new_string_object(path.as_str())?);
-        non_failing_some(Value::Reference(new_path))
+        non_failing_some(Value::Reference(new_path.id))
     } else {
         invalidation!("Can't canonicalize 0 arguments")
     }
 });
 
-gen_delegate!(delegate_last_modified_time, |_ctx, _obj_ref, args| {
-    if let Some(Value::Reference(path_val)) = args.get(0){
-        let string_val = path_val.get_field(FILE_path_INDEX);
-        let path = VM::extract_string_from_object(&string_val)?;
+gen_delegate!(delegate_last_modified_time, |ctx, _obj_ref, args| {
+    if let Some(Value::Reference(path_ref_id)) = args.get(0){
+        let path_ref = ctx.vm.resolve_object_by_id(*path_ref_id)?;
+        let string_val = path_ref.get_field(FILE_path_INDEX);
+        let path = ctx.vm.extract_string_from_value(string_val)?;
         let path = Path::new(&path);
         let last_modified = path.metadata().map(|m| m.modified().unwrap().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis() as i64).unwrap_or(0);
         non_failing_some(Value::Long(last_modified))

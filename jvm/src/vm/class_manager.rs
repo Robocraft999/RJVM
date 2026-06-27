@@ -11,7 +11,7 @@ use crate::error::ClassParseError;
 use crate::vm::class::{ArrayInfo, Class, ClassId, ClassRef};
 use crate::vm::class_path::ClassPath;
 use crate::vm::result::VMResult;
-use crate::vm::value::Reference;
+use crate::vm::value::{RefId, Reference};
 use crate::vm::{bytecode, VmError, VM};
 use log::{info, warn};
 use std::cell::RefCell;
@@ -61,7 +61,7 @@ pub struct ClassManager<'a>{
     pub classes_by_name: RwLock<HashMap<String, ClassRef<'a>>>,
     pub classes_by_id: RwLock<HashMap<ClassId, ClassRef<'a>>>,
     pub class_loading_states: RwLock<HashMap<ClassId, ClassLoadingState>>,
-    pub anonymous_classes: RwLock<HashMap<u32, AnonClassInfo<'a>>>,
+    pub anonymous_classes: RwLock<HashMap<RefId, AnonClassInfo<'a>>>,
     pub classes: Arena<Class<'a>>,
     pub primitive_class_ids: RwLock<HashMap<String, ClassId>>,
     next_id: RwLock<u32>,

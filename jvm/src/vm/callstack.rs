@@ -1,7 +1,7 @@
 use super::call_frame::CallFrame;
 use crate::bytecode::Instruction;
 use crate::error;
-use crate::vm::class::{Class, ClassId, ClassRef};
+use crate::vm::class::{Class, ClassAndMethodId, ClassId, ClassRef};
 use crate::vm::info;
 use crate::vm::result::{VMPartialResult, VMResult, VMResultType};
 use crate::vm::value::Reference;
@@ -13,14 +13,14 @@ use crate::VM;
 use log::{trace, warn};
 use std::cell::RefCell;
 
-pub struct CallStack<'a>{
-    pub frames: RefCell<Vec<CallFrame<'a>>>,
-    pub operand_stacks: RefCell<Vec<Vec<Value<'a>>>>,
-    pub locals_stack: RefCell<Vec<Vec<Value<'a>>>>,
+pub struct CallStack{
+    pub frames: RefCell<Vec<CallFrame>>,
+    pub operand_stacks: RefCell<Vec<Vec<Value>>>,
+    pub locals_stack: RefCell<Vec<Vec<Value>>>,
     pub pcs: RefCell<Vec<ProgramCounter>>,
 }
 
-impl<'a> CallStack<'a> {
+impl CallStack {
     pub fn new() -> Self{
         CallStack{
             frames: RefCell::new(Vec::new()),
@@ -30,11 +30,11 @@ impl<'a> CallStack<'a> {
         }
     }
 
-    pub fn create_and_push_call_frame(&self, class_and_method: ClassAndMethod<'a>, object: Option<Reference<'a>>, args: Vec<Value<'a>>, should_push_return: bool){
+    pub fn create_and_push_call_frame<'a>(&self, class_and_method: ClassAndMethod<'a>, object: Option<Reference<'a>>, args: Vec<Value>, should_push_return: bool){
         let mut locals = vec![Value::Uninitialized; class_and_method.get_max_locals()];
         let mut offset = 0;
         if !class_and_method.method.is_static(){
-            locals[0] = Value::Reference(object.unwrap());
+            locals[0] = Value::Reference(object.unwrap().id);
             offset = 1;
         }
         if !class_and_method.class.has_method_polymorphic_signature(class_and_method.method) {
@@ -56,21 +56,21 @@ impl<'a> CallStack<'a> {
         self.pcs.borrow_mut().push(ProgramCounter(0));
         trace!("Pushing frame for: {}", class_and_method.format());
         let frame = CallFrame{
-            class_and_method,
+            class_and_method: class_and_method.as_ids(),
             should_push_return,
         };
         self.frames.borrow_mut().push(frame);
     }
 
-    pub fn pop_call_frame(&self) -> CallFrame<'a>{
+    pub fn pop_call_frame(&self) -> CallFrame{
         self.locals_stack.borrow_mut().pop();
         self.operand_stacks.borrow_mut().pop();
         self.pcs.borrow_mut().pop();
-        trace!("Popping frame for: {}", self.frames.borrow().last().unwrap().class_and_method.format());
+        trace!("Popping frame for: {:?}", self.frames.borrow().last().unwrap().class_and_method);
         self.frames.borrow_mut().pop().unwrap()
     }
 
-    pub fn pop_call_frame_at(&self, index: usize) -> CallFrame<'a>{
+    pub fn pop_call_frame_at(&self, index: usize) -> CallFrame{
         if index == self.frames.borrow().len() - 1{
             self.pop_call_frame()
         } else {
@@ -81,22 +81,22 @@ impl<'a> CallStack<'a> {
         }
     }
 
-    pub fn push_operand_value(&self, val: Value<'a>){
+    pub fn push_operand_value(&self, val: Value){
         if self.operand_stacks.borrow().last().unwrap().len() == self.operand_stacks.borrow().last().unwrap().capacity(){
             panic!("Method Stack overflown");
         }
         self.operand_stacks.borrow_mut().last_mut().unwrap().push(val);
     }
 
-    pub fn pop_operand_value(&self) -> Option<Value<'a>>{
+    pub fn pop_operand_value(&self) -> Option<Value>{
         self.operand_stacks.borrow_mut().last_mut().unwrap().pop() //TODO make it VMResult and add error type
     }
 
-    pub fn store_local(&self, val: Value<'a>, index: usize){
+    pub fn store_local(&self, val: Value, index: usize){
         self.locals_stack.borrow_mut().last_mut().unwrap()[index] = val;
     }
 
-    pub fn load_local(&self, index: usize) -> Option<Value<'a>>{
+    pub fn load_local(&self, index: usize) -> Option<Value>{
         self.locals_stack.borrow().last().unwrap().get(index).cloned() //TODO same as above
     }
 
@@ -108,7 +108,7 @@ impl<'a> CallStack<'a> {
         *self.pcs.borrow().last().unwrap()
     }
 
-    pub fn get_class_and_method_cloned(&self) -> ClassAndMethod<'a> {
+    pub fn get_class_and_method_id_cloned(&self) -> ClassAndMethodId {
         self.frames.borrow().last().unwrap().class_and_method.clone()
     }
 
@@ -120,17 +120,18 @@ impl<'a> CallStack<'a> {
         self.frames.borrow().is_empty()
     }
 
-    pub fn print_call_stack(&self) {
+    pub fn print_call_stack(&self, vm: &VM) {
         for (index, call_frame_info) in self.frames.borrow().iter().enumerate(){
             //error!("[{}]: {:?}, stack={}, locals={}", index, call_frame.pc, call_frame.stack, call_frame.locals);
-            warn!("[{}]: {:?}", index, self.format_frame(index, &call_frame_info.class_and_method));
+            warn!("[{}]: {:?}", index, self.format_frame(index, vm, &call_frame_info.class_and_method));
         }
     }
 
-    fn format_frame(&self, index: usize, cam: &ClassAndMethod) -> String{
+    fn format_frame(&self, index: usize, vm: &VM, cam: &ClassAndMethodId) -> String{
         let mut line_number = -1;
         let mut instruction = None;
         let pc = self.pcs.borrow()[index].0;
+        let cam = ClassAndMethod::try_resolve(vm, cam).unwrap();
         if let Some(code) = &cam.method.attributes.code{
             instruction = cam.method.code_blocks.as_ref().map(|blocks| blocks.get(&pc).unwrap());
             // TODO check all tables not only the first

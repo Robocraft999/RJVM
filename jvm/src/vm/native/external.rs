@@ -45,7 +45,7 @@ fn descriptor_to_cif(method_descriptor: &MethodDescriptor) -> Cif {
 fn values_to_jni_args<'a>(args: &'a Vec<Value>) -> Vec<Arg<'a>> {
     args.iter().filter(|v| if let Value::Dummy = v {false} else {true}).map(|arg| {
         match arg{
-            Value::Reference(reference) => Arg::new(&reference.id),
+            Value::Reference(reference) => Arg::new(&reference.0),
             Value::Integer(integer) => Arg::new(integer),
             Value::Long(long) => Arg::new(long),
             Value::Float(float) => Arg::new(float),
@@ -68,9 +68,9 @@ impl ExternNativeMethod {
         Self { ptr, cif }
     }
 
-    pub fn call<'a>(&self, java_vm: &JavaVM, class_and_method: &ClassAndMethod, object: Reference<'a>, args: Vec<Value<'a>>) -> Option<jvalue>{
+    pub fn call<'a>(&self, java_vm: &JavaVM, class_and_method: &ClassAndMethod, object: Reference<'a>, args: Vec<Value>) -> Option<jvalue>{
         let env: *const JNIEnv = &java_vm.env;
-        let second = object.id as jobject;
+        let second = object.id.nid() as jobject;
         let mut jni_args = vec![Arg::new(&env), Arg::new(&second)];
         jni_args.extend(values_to_jni_args(&args));
         unsafe {

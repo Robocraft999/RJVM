@@ -62,11 +62,12 @@ gen_delegate!(delegate_address_size, |_ctx, _obj_ref, _args| {
 gen_delegate!(delegate_object_field_offset, |ctx, _obj_ref, args| {
     //FIXME calc real offset
     debug!("delegate_object_field_offset: '{:?}'", args);
-    if let Some(Value::Reference(field_ref)) = args.get(0){
-        let class_ref = field_ref.get_field(FIELD_clazz_INDEX).expect_reference()?;
-        let clazz = ctx.vm.extract_class_from_class_object(class_ref)?;
+    if let Some(Value::Reference(field_id)) = args.get(0){
+        let field_ref = ctx.vm.resolve_object_by_id(*field_id)?;
+        let Value::Reference(class_ref_id) = field_ref.get_field(FIELD_clazz_INDEX) else { return invalidation!("Expected a reference") };
+        let clazz = ctx.vm.resolve_clazz_by_class_ref_id(class_ref_id)?;
         let name_val = field_ref.get_field(FIELD_name_INDEX);
-        let name = VM::extract_string_from_object(&name_val)?;
+        let name = ctx.vm.extract_string_from_value(name_val)?;
         if let Some((index, _)) = clazz.find_field(name.as_str()){
             non_failing_some(Value::Long(index as i64))
         } else {
@@ -83,14 +84,15 @@ gen_delegate!(delegate_static_field_offset, |ctx, obj_ref, args| {
     delegate_object_field_offset(ctx, obj_ref, args)
 });
 
-gen_delegate!(delegate_put_object_volatile, |_ctx, _obj_ref, args| {
+gen_delegate!(delegate_put_object_volatile, |ctx, _obj_ref, args| {
     debug!("put_object_volatile args: {:?}", args);
-    if let (Some(Value::Reference(o)), Some(Value::Long(index)), Some(Value::Reference(x))) = (args.get(0), args.get(1), args.get(3)){
+    if let (Some(Value::Reference(o_id)), Some(Value::Long(index)), Some(Value::Reference(x_id))) = (args.get(0), args.get(1), args.get(3)){
+        let o = ctx.vm.resolve_object_by_id(*o_id)?;
         // FIXME verify if null or correct field type
         if o.is_array(){
-            o.set_element(*index as usize - ARRAY_BASE_OFFSET, Value::Reference(x));
+            o.set_element(*index as usize - ARRAY_BASE_OFFSET, Value::Reference(*x_id));
         } else {
-            o.set_field(*index as usize, Value::Reference(x));
+            o.set_field(*index as usize, Value::Reference(*x_id));
         }
         non_failing_none()
     } else {
@@ -100,7 +102,8 @@ gen_delegate!(delegate_put_object_volatile, |_ctx, _obj_ref, args| {
 
 gen_delegate!(delegate_get_object_volatile, |ctx, _obj_ref, args| {
     debug!("get_object_volatile args: {:?}", args);
-    if let (Some(Value::Reference(o)), Some(Value::Long(index))) = (args.get(0), args.get(1)) {
+    if let (Some(Value::Reference(o_id)), Some(Value::Long(index))) = (args.get(0), args.get(1)) {
+        let o = ctx.vm.resolve_object_by_id(*o_id)?;
         if o.is_array(){
             return non_failing_some(o.get_element(*index as usize - ARRAY_BASE_OFFSET));
         }
@@ -119,7 +122,8 @@ gen_delegate!(delegate_get_object_volatile, |ctx, _obj_ref, args| {
 
 gen_delegate!(delegate_get_int_volatile, |ctx, _obj_ref, args| {
     debug!("get_int_volatile args: {:?}", args);
-    if let (Some(Value::Reference(o)), Some(Value::Long(index))) = (args.get(0), args.get(1)) {
+    if let (Some(Value::Reference(o_id)), Some(Value::Long(index))) = (args.get(0), args.get(1)) {
+        let o = ctx.vm.resolve_object_by_id(*o_id)?;
         if o.is_array(){
             return non_failing_some(o.get_element(*index as usize  - ARRAY_BASE_OFFSET));
         }
@@ -136,9 +140,9 @@ gen_delegate!(delegate_get_int_volatile, |ctx, _obj_ref, args| {
     }
 });
 
-gen_delegate!(delegate_static_field_base, |_ctx, _obj_ref, args| {
-    if let Some(field_object_value) = args.get(0){
-        let field_object = field_object_value.expect_reference()?;
+gen_delegate!(delegate_static_field_base, |ctx, _obj_ref, args| {
+    if let Some(Value::Reference(field_ref_id)) = args.get(0){
+        let field_object = ctx.vm.resolve_object_by_id(*field_ref_id)?;
         trace!("staticFieldBase: on field: '{:?}'", field_object);
         let class_object = field_object.get_field(FIELD_clazz_INDEX);
         non_failing_some(class_object)
@@ -147,20 +151,21 @@ gen_delegate!(delegate_static_field_base, |_ctx, _obj_ref, args| {
     }
 });
 
-gen_delegate!(delegate_compare_and_swap_object, |_ctx, _obj_ref, args| {
-    if let (Some(Value::Reference(o)), Some(Value::Long(offset)), Some(Value::Reference(expected)), Some(Value::Reference(x))) = (args.get(0), args.get(1), args.get(3), args.get(4)) {
+gen_delegate!(delegate_compare_and_swap_object, |ctx, _obj_ref, args| {
+    if let (Some(Value::Reference(o_id)), Some(Value::Long(offset)), Some(Value::Reference(expected_id)), Some(Value::Reference(x))) = (args.get(0), args.get(1), args.get(3), args.get(4)) {
+        let o = ctx.vm.resolve_object_by_id(*o_id)?;
         if o.is_null(){
             return invalidation!("Expected an object or array but found null")
         } else if o.is_object(){
-            if let Value::Reference(current) = o.get_field(*offset as usize){
-                if current.id == expected.id{
+            if let Value::Reference(current_id) = o.get_field(*offset as usize){
+                if current_id == *expected_id{
                     o.set_field(*offset as usize, Value::Reference(*x));
                     return non_failing_some(Value::from(true));
                 }
             }
         } else if o.is_array(){
-            if let Value::Reference(current) = o.get_element(*offset as usize - ARRAY_BASE_OFFSET){
-                if current.id == expected.id{
+            if let Value::Reference(current_id) = o.get_element(*offset as usize - ARRAY_BASE_OFFSET){
+                if current_id == *expected_id{
                     o.set_element(*offset as usize - ARRAY_BASE_OFFSET, Value::Reference(*x));
                     return non_failing_some(Value::from(true));
                 }
@@ -170,8 +175,9 @@ gen_delegate!(delegate_compare_and_swap_object, |_ctx, _obj_ref, args| {
     non_failing_some(Value::from(false))
 });
 
-gen_delegate!(delegate_compare_and_swap_int, |_ctx, _obj_ref, args| {
-    if let (Some(Value::Reference(o)), Some(Value::Long(offset)), Some(Value::Integer(expected)), Some(Value::Integer(x))) = (args.get(0), args.get(1), args.get(3), args.get(4)) {
+gen_delegate!(delegate_compare_and_swap_int, |ctx, _obj_ref, args| {
+    if let (Some(Value::Reference(o_id)), Some(Value::Long(offset)), Some(Value::Integer(expected)), Some(Value::Integer(x))) = (args.get(0), args.get(1), args.get(3), args.get(4)) {
+        let o = ctx.vm.resolve_object_by_id(*o_id)?;
         if let Value::Integer(current) = o.get_field(*offset as usize){
             if current == *expected{
                 o.set_field(*offset as usize, Value::Integer(*x));
@@ -182,8 +188,9 @@ gen_delegate!(delegate_compare_and_swap_int, |_ctx, _obj_ref, args| {
     non_failing_some(Value::from(false))
 });
 
-gen_delegate!(delegate_compare_and_swap_long, |_ctx, _obj_ref, args| {
-    if let (Some(Value::Reference(o)), Some(Value::Long(offset)), Some(Value::Long(expected)), Some(Value::Long(x))) = (args.get(0), args.get(1), args.get(3), args.get(5)) {
+gen_delegate!(delegate_compare_and_swap_long, |ctx, _obj_ref, args| {
+    if let (Some(Value::Reference(o_id)), Some(Value::Long(offset)), Some(Value::Long(expected)), Some(Value::Long(x))) = (args.get(0), args.get(1), args.get(3), args.get(5)) {
+        let o = ctx.vm.resolve_object_by_id(*o_id)?;
         if let Value::Long(current) = o.get_field(*offset as usize){
             if current == *expected{
                 o.set_field(*offset as usize, Value::Long(*x));
@@ -234,7 +241,8 @@ gen_delegate!(delegate_get_byte, |ctx, _obj_ref, args| {
 
 gen_delegate!(delegate_put_ordered_object, |ctx, _obj_ref, args| {
     debug!("put_ordered_object args: {:?}", args);
-    if let (Some(Value::Reference(o)), Some(Value::Long(index)), Some(x)) = (args.get(0), args.get(1), args.get(3)) {
+    if let (Some(Value::Reference(o_id)), Some(Value::Long(index)), Some(x)) = (args.get(0), args.get(1), args.get(3)) {
+        let o = ctx.vm.resolve_object_by_id(*o_id)?;
         if o.is_array(){
             o.set_element(*index as usize - ARRAY_BASE_OFFSET, x.clone());
             return non_failing_none();
@@ -254,24 +262,27 @@ gen_delegate!(delegate_put_ordered_object, |ctx, _obj_ref, args| {
 });
 
 gen_delegate!(delegate_define_class, |ctx, _obj_ref, args| {
-    if let (Some(class_name_value), Some(Value::Reference(bytes_value)), Some(Value::Integer(start)), Some(Value::Integer(end))) = (args.get(0), args.get(1), args.get(2), args.get(3)) {
-        let class_name = VM::extract_string_from_object(class_name_value)?;
-        let bytes = if let ReferenceType::Array(_, _, data) = &bytes_value.reference_type{
+    if let (Some(class_name_value), Some(Value::Reference(bytes_ref_id)), Some(Value::Integer(start)), Some(Value::Integer(end))) = (args.get(0), args.get(1), args.get(2), args.get(3)) {
+        let class_name = ctx.vm.extract_string_from_value(*class_name_value)?;
+        let bytes_ref = ctx.vm.resolve_object_by_id(*bytes_ref_id)?;
+        let bytes = if let ReferenceType::Array(_, _, data) = &bytes_ref.reference_type{
             data.borrow().iter().map(|val| if let Value::Integer(byte) = val {*byte as u8} else {0}).collect()
         } else {
             Vec::new()
         };
         let bytes = bytes.into_iter().skip(*start as usize).take((*end - *start) as usize).collect::<Vec<_>>();
         let class_object = wrap_init!(ctx, ctx.vm.define_class(class_name.as_str(), bytes.clone())?);
-        non_failing_some(Value::Reference(class_object))
+        non_failing_some(Value::Reference(class_object.id))
     } else {
         invalidation!("define_class: expected string_object, byte array, start and end ints but got: {:?}, {:?}, {:?}, {:?}", args.get(0), args.get(1), args.get(2), args.get(3))
     }
 });
 
 gen_delegate!(delegate_define_anon_class, |ctx, _obj_ref, args| {
-    if let (Some(Value::Reference(host_class)), Some(Value::Reference(byte_arr)), Some(Value::Reference(_cp_patch_arr_ref))) = (args.get(0), args.get(1), args.get(2)) {
-        if let ReferenceType::Array(_, _, bytes ) = &byte_arr.reference_type{
+    if let (Some(Value::Reference(host_class_id)), Some(Value::Reference(byte_arr_ref_id)), Some(Value::Reference(_cp_patch_arr_ref))) = (args.get(0), args.get(1), args.get(2)) {
+        let host_class_ref = ctx.vm.resolve_object_by_id(*host_class_id)?;
+        let byte_arr_ref = ctx.vm.resolve_object_by_id(*byte_arr_ref_id)?;
+        if let ReferenceType::Array(_, _, bytes ) = &byte_arr_ref.reference_type{
             let bytes = bytes.borrow().iter().map(|val| if let Value::Integer(byte) = val {*byte as u8} else {0}).collect::<Vec<_>>();
             let class = ctx.vm.class_manager.define_class(ctx.vm, None, None, bytes)?;
 
@@ -286,10 +297,10 @@ gen_delegate!(delegate_define_anon_class, |ctx, _obj_ref, args| {
             //vm.class_manager.classes_by_name.borrow_mut().insert(class_ref.name.clone(), class_ref);
             ctx.vm.class_manager.class_loading_states.write()?.insert(class_ref.id, ClassLoadingState::LOADED);
             let class_obj = wrap_init!(ctx, ctx.vm.new_class_object_by_class(class_ref)?);
-            ctx.vm.class_manager.anonymous_classes.write()?.insert(class_obj.id, AnonClassInfo { clazz: class_ref, host: host_class });
-            non_failing_some(Value::Reference(class_obj))
+            ctx.vm.class_manager.anonymous_classes.write()?.insert(class_obj.id, AnonClassInfo { clazz: class_ref, host: host_class_ref });
+            non_failing_some(Value::Reference(class_obj.id))
         } else {
-            invalidation!("define_anon_class: expected bytes array type but got: {:?}", byte_arr)
+            invalidation!("define_anon_class: expected bytes array type but got: {:?}", byte_arr_ref)
         }
     } else {
         invalidation!("define_anon_class: expected three objects, got {:?}", args)
@@ -297,19 +308,19 @@ gen_delegate!(delegate_define_anon_class, |ctx, _obj_ref, args| {
 });
 
 gen_delegate!(delegate_allocate_instance, |ctx, _obj_ref, args| {
-    if let Some(Value::Reference(class_ref)) = args.get(0){
-        let clazz = ctx.vm.extract_class_from_class_object(class_ref)?;
+    if let Some(Value::Reference(class_ref_id)) = args.get(0){
+        let clazz = ctx.vm.resolve_clazz_by_class_ref_id(*class_ref_id)?;
         wrap_init!(ctx, ctx.ensure_initialized(clazz)?);
         let object = ctx.vm.new_object_from_class(clazz);
-        non_failing_some(Value::Reference(object))
+        non_failing_some(Value::Reference(object.id))
     } else {
         invalidation!("Expected a class reference to allocate but got: {:?}", args)
     }
 });
 
 gen_delegate!(delegate_should_be_initialized, |ctx, _obj_ref, args| {
-    if let Some(Value::Reference(class_ref)) = args.get(0){
-        let clazz = ctx.vm.extract_class_from_class_object(class_ref)?;
+    if let Some(Value::Reference(class_ref_id)) = args.get(0){
+        let clazz = ctx.vm.resolve_clazz_by_class_ref_id(*class_ref_id)?;
         let initialized = ctx.vm.class_manager.expect_class_state(clazz.id, ClassLoadingState::INITIALIZED);
         non_failing_some(Value::from(!initialized))
     } else {
@@ -318,8 +329,8 @@ gen_delegate!(delegate_should_be_initialized, |ctx, _obj_ref, args| {
 });
 
 gen_delegate!(delegate_ensure_initialized, |ctx, _obj_ref, args| {
-    if let Some(Value::Reference(class_ref)) = args.get(0){
-        let clazz = ctx.vm.extract_class_from_class_object(class_ref)?;
+    if let Some(Value::Reference(class_ref_id)) = args.get(0){
+        let clazz = ctx.vm.resolve_clazz_by_class_ref_id(*class_ref_id)?;
         let _clazz = wrap_init!(ctx, ctx.ensure_initialized(clazz)?);
         non_failing_none()
     } else {

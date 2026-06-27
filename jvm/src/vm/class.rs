@@ -120,7 +120,7 @@ impl<'a> Class<'a>{
         self.array_info.is_some()
     }
 
-    pub fn get_constant_as_value(&'a self, vm: &VM<'a>, index: u16) -> Value<'a>{
+    pub fn get_constant_as_value(&'a self, vm: &VM<'a>, index: u16) -> Value{
         let optional_constant = self.get_or_resolve_constant(&vm, index);
         if let Some(constant) = optional_constant{
             match constant {
@@ -136,7 +136,7 @@ impl<'a> Class<'a>{
         }
     }
 
-    pub fn get_fields(&'a self, vm: &VM<'a>) -> Vec<Value<'a>>{
+    pub fn get_fields(&'a self, vm: &VM<'a>) -> Vec<Value>{
         let local_values = (self.first_field_index..self.transitive_field_count)
             .map(|index| {
                 let field = self.field_at_index(index).unwrap();
@@ -549,10 +549,26 @@ impl<'a> ClassAndMethod<'a>{
 
         (short, long)
     }
+    
+    pub fn try_resolve(vm: &VM<'a>, camid: &ClassAndMethodId) -> VMResult<Self> {
+        let clazz = vm.find_class_by_id(camid.class_id).ok_or(VmError::ValidationError("Class not found".to_owned()))?;
+        let method = clazz.get_method_in_slot(camid.method_slot).ok_or(VmError::ValidationError("Method not found".to_owned()))?;
+        Ok(Self { class: clazz, method })
+    }
+    
+    pub fn as_ids(&self) -> ClassAndMethodId {
+        ClassAndMethodId { class_id: self.class.id, method_slot: self.method.slot }
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct ClassAndField<'a>{
     pub class: ClassRef<'a>,
     pub field: &'a FieldInfo,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ClassAndMethodId{
+    pub class_id: ClassId,
+    pub method_slot: usize,
 }

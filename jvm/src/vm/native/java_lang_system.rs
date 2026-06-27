@@ -34,11 +34,11 @@ gen_delegate!(delegate_time_millis, |_ctx, _obj_ref, _args| {
 });
 
 gen_delegate!(delegate_identity_hash_code, |_ctx, _obj_ref, args| {
-    if let Some(Value::Reference(object)) = args.get(0){
+    if let Some(Value::Reference(object_id)) = args.get(0){
         let mut hasher = DefaultHasher::new();
-        object.id.hash(&mut hasher);
+        object_id.hash(&mut hasher);
         let addr = hasher.finish() as i32;
-        trace!(target: "native", "HASH: {addr} {object:?}");
+        trace!(target: "native", "HASH: {addr} {object_id:?}");
         non_failing_some(Value::Integer(addr))
     } else {
         invalidation!("Expected Object but found '{:?}'", args.get(0))
@@ -49,7 +49,7 @@ gen_delegate!(delegate_set_out0, |ctx, _obj_ref, args| {
     let clazz = ctx.vm.get_or_resolve_class(JAVA_LANG_SYSTEM)?;
     if let Some(static_obj_refect) = ctx.vm.get_static_class_object(clazz.id){
         if let Some(Value::Reference(object)) = args.get(0){
-            static_obj_refect.set_field(SYSTEM_out_INDEX, Value::Reference(object));
+            static_obj_refect.set_field(SYSTEM_out_INDEX, Value::Reference(*object));
             non_failing_none()
         } else {
             invalidation!("Expected Object but found '{:?}'", args.get(0))
@@ -62,8 +62,8 @@ gen_delegate!(delegate_set_out0, |ctx, _obj_ref, args| {
 gen_delegate!(delegate_set_err0, |ctx, _obj_ref, args| {
     let clazz = ctx.vm.get_or_resolve_class(JAVA_LANG_SYSTEM)?;
     if let Some(static_obj_refect) = ctx.vm.get_static_class_object(clazz.id){
-        if let Some(Value::Reference(object)) = args.get(0){
-            static_obj_refect.set_field(SYSTEM_err_INDEX, Value::Reference(object));
+        if let Some(Value::Reference(object_id)) = args.get(0){
+            static_obj_refect.set_field(SYSTEM_err_INDEX, Value::Reference(*object_id));
             non_failing_none()
         } else {
             invalidation!("Expected Object but found '{:?}'", args.get(0))
@@ -76,12 +76,14 @@ gen_delegate!(delegate_set_err0, |ctx, _obj_ref, args| {
 // TODO real arraycopy
 gen_delegate!(delegate_arraycopy, |ctx, _obj_ref, args| {
     if let (
-        Some(Value::Reference(src_ref)),
+        Some(Value::Reference(src_id)),
         Some(Value::Integer(src_pos)),
-        Some(Value::Reference(dst_ref)),
+        Some(Value::Reference(dst_id)),
         Some(Value::Integer(dst_pos)),
         Some(Value::Integer(length))
     ) = (args.get(0), args.get(1), args.get(2), args.get(3), args.get(4)){
+        let src_ref = ctx.vm.resolve_object_by_id(*src_id)?;
+        let dst_ref = ctx.vm.resolve_object_by_id(*dst_id)?;
         let src_pos = *src_pos as usize;
         let dst_pos = *dst_pos as usize;
         if let (ReferenceType::Array(_, _, src), ReferenceType::Array(_, _, dst)) = (&src_ref.reference_type, &dst_ref.reference_type){
@@ -89,7 +91,7 @@ gen_delegate!(delegate_arraycopy, |ctx, _obj_ref, args| {
             // if src and dst are the same, we must preserve the original content before we start copying.
             let src_content = src.borrow()[src_pos..src_pos + length].to_vec();
             dst.borrow_mut()[dst_pos..dst_pos+length].clone_from_slice(&src_content);
-            ctx.vm.vm_debug_helper.tracker.push_object_event(dst_ref.id, format!("Arraycopy from {} [{}:{}]->[{}:{}] :\n    {:?}", src_ref.id, src_pos, src_pos+length, dst_pos, dst_pos+length, dst_ref));
+            ctx.vm.vm_debug_helper.tracker.push_object_event(dst_ref.id, format!("Arraycopy from {:?} [{}:{}]->[{}:{}] :\n    {:?}", src_ref.id, src_pos, src_pos+length, dst_pos, dst_pos+length, dst_ref));
             return non_failing_none()
         }
     }
@@ -97,7 +99,8 @@ gen_delegate!(delegate_arraycopy, |ctx, _obj_ref, args| {
 });
 
 gen_delegate!(delegate_init_properties, |ctx, _obj_ref, args| {
-    let properties_obj_refect = args.get(0).unwrap().expect_reference()?;
+    let Some(Value::Reference(properties_obj_id)) = args.get(0) else { return invalidation!("this properties is not a reference") };
+    let properties_ref = ctx.vm.resolve_object_by_id(*properties_obj_id)?;
     let mut props = vec![
         ("file.encoding", "UTF-8".to_string()),
         ("line.separator", "\n".to_string()),
@@ -133,7 +136,7 @@ gen_delegate!(delegate_init_properties, |ctx, _obj_ref, args| {
         //FIXME could be bad to unwrap
         let arg1 = ctx.vm.try_new_string_object(key)?;
         let arg2 = ctx.vm.try_new_string_object(value.as_str())?;
-        ctx.thread.call_stack.create_and_push_call_frame(properties_set_method.clone(), Some(properties_obj_refect), vec![Value::Reference(arg1), Value::Reference(arg2)], false)
+        ctx.thread.call_stack.create_and_push_call_frame(properties_set_method.clone(), Some(properties_ref), vec![Value::Reference(arg1.id), Value::Reference(arg2.id)], false)
     }
     let _res = JavaThread::invoke_frames_until(ctx, current_frame_index)?;
     //Ok(VMResultType::NeedsClassInit(frames, false))
@@ -142,13 +145,14 @@ gen_delegate!(delegate_init_properties, |ctx, _obj_ref, args| {
 
 gen_delegate!(delegate_system_map_library_name, |ctx, _obj_ref, args| {
     if let Some(string) = args.get(0) {
-        let name = VM::extract_string_from_object(string)?;
+        let name = ctx.vm.extract_string_from_value(*string)?;
         let new_name = match env::consts::OS{
             "windows" => name + ".dll",
             "linux" => format!("lib{name}.so"),
             _ => name
         };
-        non_failing_some(Value::Reference(wrap_init!(ctx, ctx.vm.new_string_object(new_name.as_str())?)))
+        let string_ref = wrap_init!(ctx, ctx.vm.new_string_object(new_name.as_str())?);
+        non_failing_some(Value::Reference(string_ref.id))
     } else {
         invalidation!("Expected Reference but found '{:?}'", args.get(0))
     }

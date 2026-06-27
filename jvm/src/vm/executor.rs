@@ -10,6 +10,7 @@ use crate::vm::jni::types::JavaVM;
 use crate::vm::result::{VMPartialResult, VMResultType};
 use crate::{bytecode::Instruction, get_or_init, get_or_init_option, vm::{bytecode::InstructionBlock, class::{ClassAndMethod, ClassRef}, java_error::JavaError, result::VMResult, value::{ReferenceType, Value}, VmError, VM}};
 use log::{debug, error, info, trace, warn};
+use crate::vm::class::ClassAndMethodId;
 use crate::vm::Context;
 use crate::vm::java_thread::JavaThread;
 
@@ -22,8 +23,9 @@ macro_rules! wrap_error {
     };
 }
 
-pub fn execute<'a>(ctx: Context<'a, '_>) -> VMPartialResult<Option<Value<'a>>>{
-    let class_and_method = &ctx.thread.call_stack.frames.borrow().last().unwrap().class_and_method.clone();
+pub fn execute<'a>(ctx: Context<'a, '_>) -> VMPartialResult<Option<Value>>{
+    let camid = &ctx.thread.call_stack.get_class_and_method_id_cloned();
+    let class_and_method = ClassAndMethod::try_resolve(ctx.vm, camid)?;
     if ctx.vm.class_manager.expect_class_state(class_and_method.class.id, ClassLoadingState::LOADED){
         unreachable!("Class {} has to be initialized to call {} upon", class_and_method.class.name, class_and_method.format());
     }
@@ -40,8 +42,9 @@ pub fn execute<'a>(ctx: Context<'a, '_>) -> VMPartialResult<Option<Value<'a>>>{
     Err(VmError::MethodCallError(format!("Method: {} is not executeable, because it has no code", class_and_method.format())))
 }
 
-pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult<Option<Value<'a>>>>{
-    let class_and_method = &ctx.thread.call_stack.frames.borrow().last().unwrap().class_and_method.clone();
+pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult<Option<Value>>>{
+    let camid = &ctx.thread.call_stack.get_class_and_method_id_cloned();
+    let class_and_method = wrap_error!(ClassAndMethod::try_resolve(ctx.vm, camid));
     let block = class_and_method.method.get_code_block_at(ctx.thread.call_stack.get_pc());
     let current_pc = ctx.thread.call_stack.get_pc();
     trace!(">{:03} {:?}", current_pc.0, block);
@@ -134,7 +137,8 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                     let index = ctx.thread.call_stack.pop_operand_value().unwrap().expect_int().unwrap();
                     let array = ctx.thread.call_stack.pop_operand_value();
                     debug!("XALOAD: {:?}[{}]", array, index);
-                    if let Some(Value::Reference(array_ref)) = array{
+                    if let Some(Value::Reference(array_id)) = array{
+                        let array_ref = wrap_error!(ctx.vm.resolve_object_by_id(array_id));
                         ctx.thread.call_stack.push_operand_value(array_ref.get_element(index as usize));
                     }
                 }
@@ -176,8 +180,9 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                     let index = ctx.thread.call_stack.pop_operand_value().unwrap().expect_int().unwrap();
                     let popped = ctx.thread.call_stack.pop_operand_value().unwrap();
                     debug!("XASTORE: {:?}[{}] <- {:?}", popped, index, value);
-                    if let Value::Reference(array_ref) = popped{
-                        ctx.thread.debug_helper.tracker.push_object_event(array_ref.id, format!("Setting [{}] to:\n    {:?}", index, value));
+                    if let Value::Reference(array_id) = popped{
+                        let array_ref = wrap_error!(ctx.vm.resolve_object_by_id(array_id));
+                        ctx.thread.debug_helper.tracker.push_object_event(array_id, format!("Setting [{}] to:\n    {:?}", index, array_ref.print(ctx.vm)));
                         array_ref.set_element(index as usize, value);
                     }
                 }
@@ -560,8 +565,8 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                     let o2 = ctx.thread.call_stack.pop_operand_value().unwrap();
                     match (o1, o2) {
                         (Value::Reference(obj1), Value::Reference(obj2)) => {
-                            debug!("IF_ACMPEQ {:?} == {:?}?", obj1.id, obj2.id);
-                            if obj1.id == obj2.id {
+                            debug!("IF_ACMPEQ {:?} == {:?}?", obj1, obj2);
+                            if obj1 == obj2 {
                                 ctx.thread.call_stack.set_pc(*target);
                             }
                         }
@@ -573,8 +578,8 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                     let o2 = ctx.thread.call_stack.pop_operand_value().unwrap();
                     match (o1, o2) {
                         (Value::Reference(obj1), Value::Reference(obj2)) => {
-                            debug!("IF_ACMPNE {:?} != {:?}?", obj1.id, obj2.id);
-                            if obj1.id != obj2.id {
+                            debug!("IF_ACMPNE {:?} != {:?}?", obj1, obj2);
+                            if obj1 != obj2 {
                                 ctx.thread.call_stack.set_pc(*target);
                             }
                         }
@@ -617,7 +622,7 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                     let value = ctx.thread.call_stack.pop_operand_value().unwrap();
                     if !class_and_method.method.is_static(){
                         if let Some(Value::Reference(this)) = ctx.thread.call_stack.load_local(0){
-                            ctx.thread.debug_helper.tracker.push_object_event(this.id, format!("Function {} returned:\n    {:?}", class_and_method.format(), value))
+                            ctx.thread.debug_helper.tracker.push_object_event(this, format!("Function {} returned:\n    {:?}", class_and_method.format(), value))
                         }
                     }
                     ctx.thread.debug_helper.tracker.push_method_event(class_and_method.format(), format!("returning: {:?}", value));
@@ -665,7 +670,8 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                     debug!("GETFIELD {}.{} {}", caf.class.name, caf.field.name, caf.field.field_type.to_descriptor());
                     let (field_index, _) = caf.class.find_field(caf.field.name.as_str()).unwrap();
                     let object = ctx.thread.call_stack.pop_operand_value().unwrap();
-                    if let Value::Reference(obj) = object && !object.is_null(){
+                    if let Value::Reference(obj_id) = object && !object.is_null(){
+                        let obj = wrap_error!(ctx.vm.resolve_object_by_id(obj_id));
                         ctx.thread.call_stack.push_operand_value(obj.get_field(field_index));
                     } else {
                         return Some(Err(VmError::ValidationError(format!("Cannot get field: {}.{}::{} because 'this' is {:?}", caf.class.name, caf.field.name, caf.field.field_type.to_descriptor(), object))));
@@ -677,10 +683,11 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                     debug!("PUTFIELD {}.{} {} {} {:?}", caf.class.name, caf.field.name, caf.field.field_type.to_descriptor(), field_index, info);
                     let value = ctx.thread.call_stack.pop_operand_value().unwrap();
                     let object = ctx.thread.call_stack.pop_operand_value().unwrap();
-                    if let Value::Reference(obj) = object && !object.is_null(){
-                        ctx.thread.debug_helper.tracker.push_object_event(obj.id, format!("Set field: {}: {:?} to:\n    {:?}", info.name, info.field_type, value));
+                    if let Value::Reference(obj_id) = object && !object.is_null(){
+                        let obj = wrap_error!(ctx.vm.resolve_object_by_id(obj_id));
+                        ctx.thread.debug_helper.tracker.push_object_event(obj_id, format!("Set field: {}: {:?} to:\n    {:?}", info.name, info.field_type, obj.print(ctx.vm)));
                         obj.set_field(field_index, value);
-                        debug!("obj:{:?}", &obj);
+                        debug!("obj:{:?}", obj.print(ctx.vm));
                     } else {
                         return Some(Err(VmError::ValidationError(format!("Cannot get field: {}.{}::{} because 'this' is {:?}", caf.class.name, caf.field.name, caf.field.field_type.to_descriptor(), object))));
                     }
@@ -692,13 +699,14 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                 Instruction::INVOKEINTERFACE(index, _, _) => { return Some(execute_invoke(ctx, *index, InvokeKind::INTERFACE)) }
                 Instruction::INVOKEDYNAMIC(index, _, _) => {
                     let Some(ConstantPoolEntry::InvokeDynamic(bm, name, typ)) = class_and_method.class.get_or_resolve_constant(ctx.vm, *index) else { unreachable!("Do Errors") };
-                    let caller_obj = Value::Reference(get_or_init_option!(ctx.vm.new_class_object_by_class(class_and_method.class)));
+                    let caller_obj = Value::Reference(get_or_init_option!(ctx.vm.new_class_object_by_class(class_and_method.class)).id);
 
                     let Some(ConstantPoolEntry::MethodHandleMethod(bm_kind, bootstrap_cam)) = class_and_method.class.get_or_resolve_constant(ctx.vm, bm.bootstrap_method_ref) else { unreachable!("Do Errors") };
-                    let Some(Value::Reference(bm_type_ref)) = get_or_init_option!(ctx.new_method_type(&bootstrap_cam.method.descriptor)) else { unreachable!("Do errors") };
+                    let Some(Value::Reference(bm_type_id)) = get_or_init_option!(ctx.new_method_type(&bootstrap_cam.method.descriptor)) else { unreachable!("Do errors") };
+                    let bm_type_ref = wrap_error!(ctx.vm.resolve_object_by_id(bm_type_id));
                     let bootstrap_method_obj = get_or_init_option!(ctx.new_method_handle(class_and_method.class, bm_kind, bootstrap_cam, bm_type_ref)).unwrap();
 
-                    let name_obj = Value::Reference(get_or_init_option!(ctx.vm.new_string_object(name.as_str())));
+                    let name_obj = Value::Reference(get_or_init_option!(ctx.vm.new_string_object(name.as_str())).id);
                     let Some(type_obj) = get_or_init_option!(ctx.new_method_type(&MethodDescriptor::new(typ))) else { unreachable!("Do Errors") };
 
                     let mut static_args = Vec::new();
@@ -706,9 +714,10 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                         let Some(val) = (match class_and_method.class.get_or_resolve_constant(ctx.vm, *index) {
                             Some(ConstantPoolEntry::MethodType(desc)) => get_or_init_option!(ctx.new_method_type(&desc)),
                             Some(ConstantPoolEntry::MethodHandleMethod(arg_kind, arg_cam)) => {
-                                let Some(Value::Reference(arg_method_type)) = get_or_init_option!(ctx.new_method_type(&arg_cam.method.descriptor)) else {
+                                let Some(Value::Reference(arg_method_type_id)) = get_or_init_option!(ctx.new_method_type(&arg_cam.method.descriptor)) else {
                                     return Some(Err(VmError::ValidationError("Could not create MethodType for static callsite arg".to_string())));
                                 };
+                                let arg_method_type = wrap_error!(ctx.vm.resolve_object_by_id(arg_method_type_id));
                                 get_or_init_option!(ctx.new_method_handle(class_and_method.class, arg_kind, arg_cam, arg_method_type))
                             }
                             _ => unimplemented!()
@@ -717,10 +726,10 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                         };
                         static_args.push(val);
                     }
-                    let static_arguments = Value::Reference(get_or_init_option!(ctx.vm.new_object_array_1(static_args)));
+                    let static_arguments = Value::Reference(get_or_init_option!(ctx.vm.new_object_array_1(static_args)).id);
 
                     let appendix_ref = get_or_init_option!(ctx.vm.new_object_array_1(vec![ctx.vm.null()]));
-                    let appendix_result = Value::Reference(appendix_ref);
+                    let appendix_result = Value::Reference(appendix_ref.id);
 
                     println!("schwubbel1");
                     let helper = ctx.vm.resolve_class_method(
@@ -729,15 +738,19 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                         "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/invoke/MemberName;"
                     ).unwrap();
                     
-                    let Some(Value::Reference(mname_ref)) = get_or_init_option!(JavaThread::invoke_subroutine(ctx, helper, None, vec![caller_obj, bootstrap_method_obj, name_obj, type_obj, static_arguments, appendix_result])) else { unreachable!("DO ERRORs") };
+                    let Some(Value::Reference(mname_id)) = get_or_init_option!(JavaThread::invoke_subroutine(ctx, helper, None, vec![caller_obj, bootstrap_method_obj, name_obj, type_obj, static_arguments, appendix_result])) else { unreachable!("DO ERRORs") };
+                    let mname_ref = wrap_error!(ctx.vm.resolve_object_by_id(mname_id));
                     println!("schwubbel2");
 
-                    let typ_ref = mname_ref.get_field(MEMBERNAME_type_INDEX).expect_reference().unwrap();
-                    let clazz = VM::extract_class_from_class_object(ctx.vm, mname_ref.get_field(MEMBERNAME_clazz_INDEX).expect_reference().unwrap()).unwrap();
-                    let name = VM::extract_string_from_object(&mname_ref.get_field(MEMBERNAME_name_INDEX)).unwrap();
+                    let Value::Reference(typ_id) = mname_ref.get_field(MEMBERNAME_type_INDEX) else { unreachable!("DO errors") };
+                    let typ_ref = wrap_error!(ctx.vm.resolve_object_by_id(typ_id));
+
+                    let Value::Reference(class_ref_id) = mname_ref.get_field(MEMBERNAME_clazz_INDEX) else { unreachable!("Do Errors") };
+                    let clazz = wrap_error!(ctx.vm.resolve_clazz_by_class_ref_id(class_ref_id));
+                    let name = ctx.vm.extract_string_from_value(mname_ref.get_field(MEMBERNAME_name_INDEX)).unwrap();
                     println!("IVD: {}", name);
 
-                    let desc = descriptor::from_method_type(typ_ref).unwrap();
+                    let desc = ctx.vm.extract_descriptor_from_method_type(typ_ref).unwrap();
                     let desc = MethodDescriptor::new(desc);
 
                     let method = clazz.find_method(name.as_str(), desc.as_str()).unwrap();
@@ -758,7 +771,7 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                     let new_object = ctx.vm.new_object_from_class(clazz);
 
                     debug!("NEW: {} {} {:?}", index, clazz.name, &new_object);
-                    ctx.thread.call_stack.push_operand_value(Value::Reference(new_object));
+                    ctx.thread.call_stack.push_operand_value(Value::Reference(new_object.id));
                 }
                 Instruction::NEWARRAY(atype) => {
                     let primitive_type = match atype {
@@ -789,7 +802,8 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                 Instruction::ARRAYLENGTH => {
                     debug!("ARRAYLENGTH");
                     let popped = ctx.thread.call_stack.pop_operand_value();
-                    if let Some(Value::Reference(reference)) = popped{
+                    if let Some(Value::Reference(ref_id)) = popped{
+                        let reference = wrap_error!(ctx.vm.resolve_object_by_id(ref_id));
                         if let ReferenceType::Array(_, _, content) = &reference.reference_type{
                             ctx.thread.call_stack.push_operand_value(Value::Integer(content.borrow().len() as i32));
                         } else {
@@ -802,12 +816,13 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
 
                 Instruction::ATHROW => {
                     debug!("ATHROW");
-                    if let Some(Value::Reference(error)) = ctx.thread.call_stack.pop_operand_value(){
+                    if let Some(Value::Reference(error_id)) = ctx.thread.call_stack.pop_operand_value(){
+                        let error = wrap_error!(ctx.vm.resolve_object_by_id(error_id));
                         let string_value = error.get_field(THROWABLE_detailsMessage_INDEX);
-                        let string = if !string_value.is_null() {VM::extract_string_from_object(&string_value).unwrap()} else {String::new()};
+                        let string = if !string_value.is_null() {ctx.vm.extract_string_from_value(string_value).unwrap()} else {String::new()};
                         let exception_name = ctx.vm.class_manager.find_class_by_id(error.class_id).unwrap().name.clone();
                         ctx.thread.debug_helper.exception_helper.push(format!("Throw   {}: {}\n└-- thrown by {} at {}", exception_name, string, class_and_method.format(), ctx.thread.call_stack.get_pc().0));
-                        let prev = ctx.thread.caught_exception.replace(Some((string, class_and_method.format(), Value::Reference(error))));
+                        let prev = ctx.thread.caught_exception.replace(Some((string, class_and_method.format(), Value::Reference(error.id))));
                         assert!(prev.is_none());
                         return Some(Ok(VMResultType::ExceptionThrown));
                     }
@@ -829,7 +844,8 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                         ctx.thread.call_stack.push_operand_value(Value::from(false));
                         return None;
                     }
-                    let object = object.expect_reference().unwrap();
+                    let Value::Reference(object_id) = object else { return Some(Err(VmError::ValidationError("INSTANCEOF: expected object to be a reference".to_string()))) };
+                    let object = wrap_error!(ctx.vm.resolve_object_by_id(object_id));
                     let object_class = ctx.vm.find_class_by_id(object.class_id).unwrap();
                     let instance_of = ctx.vm.is_instance_of(object_class, of_class);
 
@@ -929,7 +945,7 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
     None
 }
 
-fn x_const<'a>(thread: &JavaThread<'a>, value: Value<'a>){
+fn x_const<'a>(thread: &JavaThread, value: Value){
     thread.call_stack.push_operand_value(value);
 }
 
@@ -1119,11 +1135,10 @@ fn execute_ji_arithmetic<F: FnOnce(i64, i32) -> Result<i64, VmError>>(thread: &J
     }
 }
 
-fn execute_invoke<'a>(ctx: Context<'a, '_>, index: u16, kind: InvokeKind) -> VMPartialResult<Option<Value<'a>>> {
-    let calling_class_and_method = &ctx.thread.call_stack.frames.borrow().last().unwrap().class_and_method.clone();
-    // FIXME: signature polymorphic methods such as MethodHandle.invoke(Object... args) don't create an array of arguments before call.
-    // This means if calling MethodHandle.invoke() without arguments will pop 'this' as the parameter which is not needed and will cause a missing
-    // error when trying to pop the receiver after
+fn execute_invoke<'a>(ctx: Context<'a, '_>, index: u16, kind: InvokeKind) -> VMPartialResult<Option<Value>> {
+    let calling_class_and_method_id = &ctx.thread.call_stack.get_class_and_method_id_cloned();
+    let calling_class_and_method = &ClassAndMethod::try_resolve(ctx.vm, calling_class_and_method_id)?;
+
     let (cam, args_count) = get_constant_method_ref_and_args_count(calling_class_and_method, ctx.vm, index).expect("GIB MICH DIE METHODE");
     trace!("loading class to execute on: '{}'", cam.class.name.as_str());
     get_or_init!(ctx.ensure_initialized(cam.class)?);
@@ -1158,7 +1173,8 @@ fn execute_invoke<'a>(ctx: Context<'a, '_>, index: u16, kind: InvokeKind) -> VMP
         None
     } else {
         let popped = ctx.thread.call_stack.pop_operand_value();
-        if let Some(Value::Reference(reference)) = popped && !reference.is_null(){
+        if let Some(Value::Reference(ref_id)) = popped && !ref_id.is_null(){
+            let reference = ctx.vm.resolve_object_by_id(ref_id)?;
             Some(reference)
         } else {
             println!("XXXX: {} {:?}", class_and_method.class.name, ctx.vm.class_manager.class_loading_states.read()?.get(&class_and_method.class.id));
@@ -1285,8 +1301,9 @@ fn get_constant_method_ref_and_args_count<'a>(calling: &ClassAndMethod<'a>, vm: 
 }
 
 //FIXME: Deprecated
-fn get_constant_as_value<'a>(ctx: Context<'a, '_>, index: u16) -> VMPartialResult<Value<'a>>{
-    let class_and_method = &ctx.thread.call_stack.frames.borrow().last().unwrap().class_and_method.clone();
+fn get_constant_as_value<'a>(ctx: Context<'a, '_>, index: u16) -> VMPartialResult<Value>{
+    let camid = &ctx.thread.call_stack.get_class_and_method_id_cloned();
+    let class_and_method = ClassAndMethod::try_resolve(ctx.vm, camid)?;
     let constant_value = class_and_method.class.get_or_resolve_constant(&ctx.vm, index).unwrap();
     let value = match constant_value {
         ConstantPoolEntry::Integer(value) => Value::Integer(value),
@@ -1295,18 +1312,18 @@ fn get_constant_as_value<'a>(ctx: Context<'a, '_>, index: u16) -> VMPartialResul
         ConstantPoolEntry::Double(value) => Value::Double(value),
         ConstantPoolEntry::String(string) => {
             let string_object = get_or_init!(ctx.vm.new_string_object(string.as_str())?);
-            Value::Reference(string_object)
+            Value::Reference(string_object.id)
         }
         ConstantPoolEntry::Class(clazz) => {
             let class_object = get_or_init!(ctx.vm.new_class_object_by_class(clazz)?);
-            Value::Reference(class_object)
+            Value::Reference(class_object.id)
         }
         _ => unimplemented!("Constant of type {constant_value:?} cannot be converted to a value")
     };
     Ok(VMResultType::Successful(value))
 }
 
-fn execute_create_array<'a>(ctx: Context<'a, '_>, array_field_type: FieldType, dims: usize) -> VMPartialResult<Value<'a>>{
+fn execute_create_array<'a>(ctx: Context<'a, '_>, array_field_type: FieldType, dims: usize) -> VMPartialResult<Value>{
     if let FieldType::Array(_, component_type) = array_field_type{
         //ensure that the array class get loaded before popping the count(s)
         for i in 0..dims{
@@ -1325,12 +1342,14 @@ fn execute_create_array<'a>(ctx: Context<'a, '_>, array_field_type: FieldType, d
                 continue
             }
             for _ in 0..current_dim{
-                local_content.push(Value::Reference(ctx.vm.try_new_array(dims, component_type.clone().to_array_field_type(i), RefCell::new(content.clone()))?))
+                let arr_ref = ctx.vm.try_new_array(dims, component_type.clone().to_array_field_type(i), RefCell::new(content.clone()))?;
+                local_content.push(Value::Reference(arr_ref.id))
             }
             content = local_content;
         }
         //FIXME component_type.to_array_field_type(dims) is just array_field_type
-        Ok(VMResultType::Successful(Value::Reference(ctx.vm.try_new_array(dims, component_type.to_array_field_type(dims), RefCell::new(content))?)))
+        let arr_ref = ctx.vm.try_new_array(dims, component_type.to_array_field_type(dims), RefCell::new(content))?;
+        Ok(VMResultType::Successful(Value::Reference(arr_ref.id)))
     } else {
         Err(VmError::ValidationError(format!("Field type for creating an array must be FieldType::Array but is {:?}", array_field_type)))
     }

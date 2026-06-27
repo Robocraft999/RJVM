@@ -84,7 +84,7 @@ impl FieldType {
         }
     }
 
-    pub fn get_default_value<'a>(&self, null: Value<'a>) -> Value<'a> {
+    pub fn get_default_value<'a>(&self, null: Value) -> Value {
         match self {
             FieldType::Primitive(primitive) => {
                 match primitive {
@@ -146,7 +146,7 @@ impl FromStr for FieldType{
     }
 }
 
-impl PartialEq<Value<'_>> for FieldType{
+impl PartialEq<Value> for FieldType{
     fn eq(&self, other: &Value) -> bool {
         match (other, self) {
             (Value::Reference(..), FieldType::Object(..)) | (Value::Reference(..), FieldType::Array(..)) => true,

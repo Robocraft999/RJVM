@@ -5,7 +5,7 @@ use crate::vm::java_thread::JavaThread;
 use crate::vm::jni::types::{jvalue, JavaVM};
 use crate::vm::native::external::ExternNativeMethod;
 use crate::vm::result::{VMPartialResult, VMResultType};
-use crate::vm::value::{Reference, Value};
+use crate::vm::value::{RefId, Reference, Value};
 use crate::vm::{Context, VmError, VM};
 use libffi::high::CodePtr;
 use libloading::Library;
@@ -53,8 +53,8 @@ macro_rules! gen_delegate {
         fn $name<'a>(
             $context: crate::vm::Context<'a, '_>,
             $obj: Option<Reference<'a>>,
-            $args: Vec<Value<'a>>,
-        ) -> VMPartialResult<Option<Value<'a>>> {
+            $args: Vec<Value>,
+        ) -> VMPartialResult<Option<Value>> {
             $body
         }
     };
@@ -129,7 +129,7 @@ impl <'a> NativeMethodRegistry<'a> {
         }
     }
 
-    pub fn invoke(ctx: Context<'a, '_>, cam: &ClassAndMethod<'a>, object: Option<Reference<'a>>, args: Vec<Value<'a>>) -> Option<VMPartialResult<Option<Value<'a>>>>{
+    pub fn invoke(ctx: Context<'a, '_>, cam: &ClassAndMethod<'a>, object: Option<Reference<'a>>, args: Vec<Value>) -> Option<VMPartialResult<Option<Value>>>{
         for method in &ctx.vm.native_method_registry.methods{
             if method.method_name == cam.method.name && method.method_descriptor == cam.method.descriptor && cam.class.name == method.class_name{
                 let needed_arg_count = cam.method.descriptor.args.len();
@@ -167,20 +167,7 @@ impl <'a> NativeMethodRegistry<'a> {
                             (FieldType::Primitive(PrimitiveType::Integer), jvalue { i }) => Value::Integer(i as i32),
                             (FieldType::Primitive(PrimitiveType::Long), jvalue { j }) => Value::Long(j as i64),
                             (FieldType::Primitive(PrimitiveType::Short), jvalue { s }) => Value::Integer(s as i32),
-                            (_, jvalue { l }) => {
-                                if l == 0{
-                                    ctx.vm.null()
-                                } else {
-                                    match ctx.vm.objects_by_id.read() {
-                                        Ok(res) => if let Some(reference) = res.get(&(l as u32)) {
-                                            Value::Reference(reference)
-                                        } else {
-                                            return Some(invalidation!("object with id {} does not exist", l))
-                                        }
-                                        Err(pe) => return Some(Err(VmError::from(pe)))
-                                    }
-                                }
-                            }
+                            (_, jvalue { l }) => { Value::Reference(RefId(l as u32)) }
                         })
                     }
                 } else {
@@ -210,7 +197,7 @@ pub struct NativeMethod<'a>{
 }
 
 //FIXME maybe create a RNIEnv which is passed to the delegates instead
-type NativeMethodDelegate<'a> = fn(Context<'a, '_>, Option<Reference<'a>>, Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>;
+type NativeMethodDelegate<'a> = fn(Context<'a, '_>, Option<Reference<'a>>, Vec<Value>) -> VMPartialResult<Option<Value>>;
 
 pub fn register_all_natives(registry: &mut NativeMethodRegistry) {
     java_io::register_natives(registry);
@@ -227,11 +214,11 @@ pub fn register_all_natives(registry: &mut NativeMethodRegistry) {
     sun_reflect::register_natives(registry);
 }
 
-fn non_failing_some<'a>(value: Value<'a>) -> VMPartialResult<Option<Value<'a>>>{
+fn non_failing_some<'a>(value: Value) -> VMPartialResult<Option<Value>>{
     Ok(VMResultType::Successful(Some(value)))
 }
 
-fn non_failing_none<'a>() -> VMPartialResult<Option<Value<'a>>> {
+fn non_failing_none<'a>() -> VMPartialResult<Option<Value>> {
     Ok(VMResultType::Successful(None))
 }
 macro_rules! invalidation {

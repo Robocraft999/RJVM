@@ -5,7 +5,7 @@ use crate::vm::class::{ClassAndMethod, ClassRef};
 use crate::vm::java_error::JavaError;
 use crate::vm::jni::types::JavaVM;
 use crate::vm::result::{VMPartialResult, VMResultType};
-use crate::vm::value::{Reference, Value};
+use crate::vm::value::{RefId, Reference, Value};
 use crate::vm::{executor, Context, ProgramCounter, VmError, VM};
 use crate::vm::constants::THROWABLE_detailsMessage_INDEX;
 use crate::vm::debug::DebugHelper;
@@ -15,16 +15,16 @@ pub type TID = u32;
 pub const NORM_PRIORITY: i32 = 5;
 pub const RUNNABLE: i32 = 1 + 4; //jvmti: alive + runnable
 
-pub struct JavaThread<'a> {
+pub struct JavaThread {
     pub id: TID,
-    pub thread_obj_id: Option<u32>,
+    pub thread_obj_id: Option<RefId>,
 
-    pub call_stack: CallStack<'a>,
+    pub call_stack: CallStack,
     pub debug_helper: DebugHelper,
-    pub caught_exception: RefCell<Option<(String, String, Value<'a>)>>,
+    pub caught_exception: RefCell<Option<(String, String, Value)>>,
 }
 
-impl<'a> JavaThread<'a> {
+impl JavaThread {
     pub fn new(id: TID) -> Self {
         Self {
             id,
@@ -35,27 +35,28 @@ impl<'a> JavaThread<'a> {
         }
     }
 
-    pub fn invoke_subroutine(ctx: Context<'a, '_>, class_and_method: ClassAndMethod<'a>, object: Option<Reference<'a>>, args: Vec<Value<'a>>) -> VMPartialResult<Option<Value<'a>>>{
+    pub fn invoke_subroutine<'a>(ctx: Context<'a, '_>, class_and_method: ClassAndMethod<'a>, object: Option<Reference<'a>>, args: Vec<Value>) -> VMPartialResult<Option<Value>>{
         let current_index = ctx.thread.call_stack.len() as isize -1;
         ctx.thread.call_stack.create_and_push_call_frame(class_and_method, object, args, false);
         Self::invoke_frames_until(ctx, current_index)
     }
 
     /// Returns only Err() or Ok(Successful())
-    pub fn invoke_frames_until(ctx: Context<'a, '_>, stop_index: isize) -> VMPartialResult<Option<Value<'a>>> {
+    pub fn invoke_frames_until<'a>(ctx: Context<'a, '_>, stop_index: isize) -> VMPartialResult<Option<Value>> {
         loop {
             let frame_amount = ctx.thread.call_stack.len();
 
             // if an exception is caught, try to let the current frame handle it
             let mut clear_exception = false;
-            if let Some((message, origin, throwable)) = ctx.thread.caught_exception.borrow().as_ref(){
-                let thrown_class_name = throwable.expect_reference().map(|r| r.class_name.clone())?;
+            if let Some((message, origin, Value::Reference(throwable_ref_id))) = ctx.thread.caught_exception.borrow().as_ref(){
+                let thrown_class_name = ctx.vm.resolve_object_by_id(*throwable_ref_id)?.class_name.clone();
                 if frame_amount as isize - 1 == stop_index {
                     ctx.thread.debug_helper.exception_helper.push(format!("Subroutine could not handle {} thrown by function {} with message: {}", thrown_class_name, origin, message));
                     return Err(VmError::JavaException(JavaError::JavaExceptionThrown(thrown_class_name, message.to_owned(), origin.to_owned())));
                 }
 
-                let class_and_method = ctx.thread.call_stack.get_class_and_method_cloned();
+                let camid = ctx.thread.call_stack.get_class_and_method_id_cloned();
+                let class_and_method = ClassAndMethod::try_resolve(ctx.vm, &camid)?;
                 if class_and_method.method.is_native(){
                     ctx.thread.call_stack.pop_call_frame();
                     debug!("Exception handler not in this native function {}", class_and_method.format());
@@ -65,7 +66,7 @@ impl<'a> JavaThread<'a> {
                 //[unchecked] class already loaded by method
                 if let Some(handler_pc) = class_and_method.resolve_exception_handler(ctx.vm, current_pc, thrown_class_name.as_str()){
                     ctx.thread.call_stack.set_pc(handler_pc);
-                    ctx.thread.call_stack.push_operand_value(throwable.clone());
+                    ctx.thread.call_stack.push_operand_value(Value::Reference(*throwable_ref_id));
                     ctx.thread.debug_helper.exception_helper.push(format!("Handled {} by {}\n└-- thrown by {} with message: {}", thrown_class_name, class_and_method.format(), origin, message));
                     debug!("Exception thrown handled by {}", class_and_method.format());
                     clear_exception = true;
@@ -76,7 +77,8 @@ impl<'a> JavaThread<'a> {
                 }
             }
 
-            let class_and_method = ctx.thread.call_stack.get_class_and_method_cloned();
+            let camid = ctx.thread.call_stack.get_class_and_method_id_cloned();
+            let class_and_method = ClassAndMethod::try_resolve(ctx.vm, &camid)?;
             if clear_exception {
                 ctx.thread.caught_exception.replace(None);
             }
@@ -112,7 +114,9 @@ impl<'a> JavaThread<'a> {
                     if reset_pc{
                         let last_frame_index = ctx.thread.call_stack.pcs.borrow().len() - frame_amount - 1;
                         let current_pc = ctx.thread.call_stack.pcs.borrow()[last_frame_index];
-                        let previous_pc = ctx.thread.call_stack.frames.borrow()[last_frame_index].class_and_method.method.previous_pc(current_pc);
+                        let camid = ctx.thread.call_stack.frames.borrow()[last_frame_index].class_and_method;
+                        let cam = ClassAndMethod::try_resolve(ctx.vm, &camid)?;
+                        let previous_pc = cam.method.previous_pc(current_pc);
                         *ctx.thread.call_stack.pcs.borrow_mut().get_mut(last_frame_index).unwrap() = ProgramCounter(previous_pc);
                     }
                 }
@@ -120,17 +124,23 @@ impl<'a> JavaThread<'a> {
         }
     }
 
-    fn execute_native(ctx: Context<'a, '_>, class_and_method: ClassAndMethod<'a>) -> VMPartialResult<Option<Value<'a>>> {
+    fn execute_native<'a>(ctx: Context<'a, '_>, class_and_method: ClassAndMethod<'a>) -> VMPartialResult<Option<Value>> {
         //let call_frame = self.call_stack.pop_call_frame();
 
         let object = if class_and_method.method.is_static() {
             None
         } else {
             match ctx.thread.call_stack.load_local(0) {
-                Some(local) => {
-                    Some(local.expect_reference()?)
+                Some(Value::Reference(local_id)) => {
+                    let local_ref = if local_id.is_null() {
+                        ctx.vm.null_ref()
+                    } else {
+                        ctx.vm.resolve_object_by_id(local_id)?
+                    };
+                    Some(local_ref)
                 },
-                None => None
+                None => None,
+                _ => return Err(VmError::ValidationError("Expected a reference".to_string()))
             }
         };
         let args = ctx.thread.call_stack.locals_stack.borrow().last().unwrap()
@@ -158,23 +168,23 @@ impl<'a> JavaThread<'a> {
     ///
     /// `throwable_class` has to be initialized beforehand
     ///
-    pub fn throw<T>(ctx: Context<'a, '_>, throwable_class: ClassRef<'a>, message: String, origin: String) -> VMPartialResult<T> {
+    pub fn throw<'a, T>(ctx: Context<'a, '_>, throwable_class: ClassRef<'a>, message: String, origin: String) -> VMPartialResult<T> {
         //let exception_class = self.get_or_initialize_class(&throwable_class_name)?;
         let exception_object = ctx.vm.new_object_from_class(throwable_class);
 
         let details = ctx.vm.try_new_string_object(message.as_str())?;
         //detailsMessage
-        exception_object.set_field(THROWABLE_detailsMessage_INDEX, Value::Reference(details));
+        exception_object.set_field(THROWABLE_detailsMessage_INDEX, Value::Reference(details.id));
 
         let prev = ctx.thread.caught_exception.replace(
             Some((
                 message,
                 origin,
-                Value::Reference(exception_object)
+                Value::Reference(exception_object.id)
             )));
         assert!(prev.is_none());
         Ok(VMResultType::ExceptionThrown)
     }
 }
 
-impl !Unpin for JavaThread<'_> {}
+impl !Unpin for JavaThread {}

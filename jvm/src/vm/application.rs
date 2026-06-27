@@ -1,5 +1,6 @@
 use std::cell::{Cell, RefCell, SyncUnsafeCell, UnsafeCell};
 use std::fmt::Debug;
+use std::ops::DerefMut;
 use crate::vm::class::ClassId;
 use crate::vm::jni::types::{JNIEnv, JavaVM};
 use crate::vm::result::{VMPartialResult, VMResultType};
@@ -13,25 +14,22 @@ use crate::vm::constants::{THREAD_threadStatus_INDEX, THREAD_eetop_INDEX, THREAD
 use crate::vm::java_thread::{JavaThread, NORM_PRIORITY, RUNNABLE};
 
 thread_local! {
-    pub static JAVA_THREAD: Cell<*mut ()> = Cell::new(std::ptr::null_mut());
+    pub static JAVA_THREAD: RefCell<JavaThread> = RefCell::new(JavaThread::new(0));
 }
 
-pub static THREADS: UnsafeCell<*mut ()> = UnsafeCell::new(std::ptr::null_mut());
-
-pub fn thread<'a>() -> &'static mut JavaThread<'a>{
-    unsafe {&mut* (JAVA_THREAD.get() as *mut JavaThread) }
+pub fn thread() -> &'static mut JavaThread {
+    JAVA_THREAD.with(|cell| unsafe { &mut*(&mut *cell.borrow_mut() as *mut JavaThread) })
 }
 
 pub struct Application<'a> {
     java_vm: Pin<Box<JavaVM<'a>>>,
     pub(crate) vm: Pin<Box<VM<'a>>>,
-    main_thread: Pin<Box<JavaThread<'a>>>,
 }
 
 impl <'a> Application<'a> {
     pub fn new(class_path: ClassPath) -> Self {
-        let mut main_thread = Box::pin(JavaThread::new(0));
-        JAVA_THREAD.set(unsafe {main_thread.as_mut().get_unchecked_mut() } as *mut JavaThread as _);
+        let main_thread = JavaThread::new(0);
+        JAVA_THREAD.set(main_thread);
 
         let vm = Box::pin(VM::new(class_path));
 
@@ -53,11 +51,11 @@ impl <'a> Application<'a> {
 
         println!("javavm: {:p}", javavm);
 
-        Self { java_vm: javavm, vm, main_thread}
+        Self { java_vm: javavm, vm}
     }
 
     fn context(&self) -> Context<'a, '_> {
-        let thread = unsafe {&mut* (JAVA_THREAD.get() as *mut JavaThread) };
+        let thread = thread();
         Context {thread, vm: &self.vm, java_vm: &self.java_vm}
     }
 
@@ -70,7 +68,7 @@ impl <'a> Application<'a> {
         Ok(())
     }
 
-    fn handle_partial(&self, result: VMPartialResult<Option<Value<'a>>>) -> Option<Value<'a>> {
+    fn handle_partial(&self, result: VMPartialResult<Option<Value>>) -> Option<Value> {
         match result {
             Ok(VMResultType::Successful(res)) => {
                 println!("result: {res:?}");
@@ -88,7 +86,7 @@ impl <'a> Application<'a> {
             Err(error) => {
                 error!("Error: {}", error);
                 println!("Frames:");
-                thread().call_stack.print_call_stack();
+                thread().call_stack.print_call_stack(&self.vm);
                 thread().debug_helper.print();
                 self.vm.vm_debug_helper.print();
                 panic!()
@@ -96,7 +94,7 @@ impl <'a> Application<'a> {
         }
     }
 
-    pub fn run_and_catch_method(&self, class_name: &str, method_name: &str, method_descriptor: &str, args: Vec<Value<'a>>) {
+    pub fn run_and_catch_method(&self, class_name: &str, method_name: &str, method_descriptor: &str, args: Vec<Value>) {
         self.init_class(class_name);
         let main_method = self.vm.resolve_class_method(class_name, method_name, method_descriptor).unwrap();
         let _result = self.handle_partial(JavaThread::invoke_subroutine(self.context(), main_method, None, args));
@@ -124,7 +122,7 @@ impl <'a> Application<'a> {
         };
         let name = self.vm.try_new_string_object("main").unwrap();
         let main_init = self.vm.resolve_class_method(JAVA_LANG_THREAD_GROUP, "<init>", "(Ljava/lang/ThreadGroup;Ljava/lang/String;)V").unwrap();
-        let _ = self.handle_partial(JavaThread::invoke_subroutine(self.context(), main_init, Some(main_group), vec![Value::Reference(system_group), Value::Reference(name)]));
+        let _ = self.handle_partial(JavaThread::invoke_subroutine(self.context(), main_init, Some(main_group), vec![Value::Reference(system_group.id), Value::Reference(name.id)]));
 
         main_group
     }
@@ -140,7 +138,7 @@ impl <'a> Application<'a> {
 
         let name = self.vm.try_new_string_object("main").unwrap();
         let init = self.vm.resolve_class_method(JAVA_LANG_THREAD, "<init>", "(Ljava/lang/ThreadGroup;Ljava/lang/String;)V").unwrap();
-        let _ = self.handle_partial(JavaThread::invoke_subroutine(self.context(), init, Some(thread), vec![Value::Reference(thread_group), Value::Reference(name)]));
+        let _ = self.handle_partial(JavaThread::invoke_subroutine(self.context(), init, Some(thread), vec![Value::Reference(thread_group.id), Value::Reference(name.id)]));
 
         thread
     }
