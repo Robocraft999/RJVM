@@ -1,10 +1,10 @@
 use std::cell::RefCell;
 use log::{debug, warn};
 use crate::vm::callstack::CallStack;
-use crate::vm::class::{ClassAndMethod, ClassRef};
+use crate::vm::class::{ClassAndMethod, ClassAndMethodId, ClassRef};
 use crate::vm::java_error::JavaError;
 use crate::vm::jni::types::JavaVM;
-use crate::vm::result::{VMPartialResult, VMResultType};
+use crate::vm::result::{VMPartialResult, VMResult, VMResultType};
 use crate::vm::value::{RefId, Reference, Value};
 use crate::vm::{executor, Context, ProgramCounter, VmError, VM};
 use crate::vm::constants::THROWABLE_detailsMessage_INDEX;
@@ -39,6 +39,14 @@ impl JavaThread {
         let current_index = ctx.thread.call_stack.len() as isize -1;
         ctx.thread.call_stack.create_and_push_call_frame(class_and_method, object, args, false);
         Self::invoke_frames_until(ctx, current_index)
+    }
+
+    pub fn thread_entry<'a>(ctx: Context<'a, '_>, camid: ClassAndMethodId, args: Vec<Value>) -> VMResult<()> {
+        let current_index = ctx.thread.call_stack.len() as isize -1;
+        let class_and_method = ClassAndMethod::try_resolve(ctx.vm, &camid)?;
+        ctx.thread.call_stack.create_and_push_call_frame(class_and_method, None, args, false);
+        let VMResultType::Successful(None) = Self::invoke_frames_until(ctx, current_index)? else { return Err(VmError::Unspecified("Thread exited unsuccessfully".to_string())) };
+        Ok(())
     }
 
     /// Returns only Err() or Ok(Successful())

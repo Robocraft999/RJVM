@@ -66,7 +66,7 @@ gen_delegate!(delegate_new_instance0, |ctx, _obj_ref, args| {
                 if let Some(method) = class.find_method("<init>", descriptor.as_str()) {
                     debug!("method: {:?}", method);
                     let class_and_method = ClassAndMethod {class, method};
-                    let constructor_args = if let Some(Value::Reference(argument_arr_id)) = args.get(1) {
+                    let constructor_args = if let Some(Value::Reference(argument_arr_id)) = args.get(1) && !argument_arr_id.is_null() {
                         let argument_arr_ref = ctx.vm.resolve_object_by_id(*argument_arr_id)?;
                         if let ReferenceType::Array(_, _, args_content) = &argument_arr_ref.reference_type{
                             args_content.borrow().clone()
@@ -142,9 +142,15 @@ gen_delegate!(delegate_invoke0, |ctx, _obj_ref, args| {
                     } else {
                         Vec::new()
                     };
-                    let _clazz = wrap_init!(ctx, ctx.ensure_initialized(clazz)?);
-                    let obj_ref = ctx.vm.resolve_object_by_id(*obj_ref_id)?;
-                    let res = JavaThread::invoke_subroutine(ctx, class_and_method, if !obj_ref.is_null() {Some(obj_ref)} else {None}, method_args);
+                    wrap_init!(ctx, ctx.ensure_initialized(clazz)?);
+                    let obj_ref = if !obj_ref_id.is_null() {
+                        let obj_ref = ctx.vm.resolve_object_by_id(*obj_ref_id)?;
+                        Some(obj_ref)
+                    } else {
+                        None
+                    };
+
+                    let res = JavaThread::invoke_subroutine(ctx, class_and_method, obj_ref, method_args);
                     // invoke_frames_until returns occurred exceptions as Err(VmError::JavaException(JavaError::JavaExceptionThrown))
                     // because it doesn't know whether it is a subroutine or not
                     return match res {

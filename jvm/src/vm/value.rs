@@ -217,28 +217,27 @@ impl ReferenceValue{
     }
 
     pub fn print<'a>(&self, vm: &VM<'a>) -> String {
-        format!("VRef [ id: {:?}, class: {}:{}, type: {}, components: {:?} ]",
+        format!("VRef [ id: {:?}, class: {}:{}, type: {}, components: [{}] ]",
                 self.id.0,
                 &self.class_name, &self.class_id.0,
                 if matches!(self.reference_type, ReferenceType::Object(..)) { "Object" } else { "Array" },
-                self.get_components_printable(vm)
+                self.get_components_printable(vm).join(", ")
         )
     }
 
     fn get_components_printable<'a>(&self, vm: &VM<'a>) -> Vec<String>{
         let object = |field: &Value| match field {
             Value::Reference(id) => {
+                if id.is_null() { return "Null".to_string(); }
                 let rv = vm.resolve_object_by_id(*id).unwrap();
                 if rv.class_name == "java/lang/String" {
-                    format!("{:?}:{}:{:?}->'{}'", rv.id, rv.class_name, rv.class_id.0, vm.extract_string_from_ref(rv).unwrap_or("VMError".to_string()))
+                    format!("{:?}:{}:{:?}->'{}'", rv.id.0, rv.class_name, rv.class_id.0, vm.extract_string_from_ref(rv).unwrap_or("VMError".to_string()))
                 } else if rv.class_name == "[C"{
-                    format!("{:?}:{}:{:?}->'{}'", rv.id, rv.class_name, rv.class_id.0, vm.extract_string_from_char_arr(field.clone()).unwrap_or("VMError".to_string()))
+                    format!("{:?}:{}:{:?}->'{}'", rv.id.0, rv.class_name, rv.class_id.0, vm.extract_string_from_char_arr(field.clone()).unwrap_or("VMError".to_string()))
                 } else if rv.class_name == "java/lang/Class" {
-                    format!("{:?}:{}:{:?}->'{}'", rv.id, rv.class_name, rv.class_id.0, vm.extract_class_name_from_class_ref(rv).unwrap_or("VMError".to_string()))
-                } else if rv.is_null(){
-                    "Null".to_string()
+                    format!("{:?}:{}:{:?}->'{}'", rv.id.0, rv.class_name, rv.class_id.0, vm.extract_class_name_from_class_ref(rv).unwrap_or("VMError".to_string()))
                 } else {
-                    format!("{:?}:{}:{:?}", rv.id, rv.class_name, rv.class_id.0)
+                    format!("{:?}:{}:{:?}", rv.id.0, rv.class_name, rv.class_id.0)
                 }
             }
             _ => format!("{:?}", field)

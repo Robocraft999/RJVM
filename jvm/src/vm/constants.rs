@@ -31,6 +31,7 @@ pub const THREAD_name_INDEX: usize = 0;
 pub const THREAD_priority_INDEX: usize = 1;
 pub const THREAD_eetop_INDEX: usize = 3;
 pub const THREAD_stillborn_INDEX: usize = 6;
+pub const THREAD_target_INDEX: usize = 7;
 pub const THREAD_group_INDEX: usize = 8;
 pub const THREAD_threadStatus_INDEX: usize = 18;
 

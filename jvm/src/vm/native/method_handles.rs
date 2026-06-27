@@ -296,14 +296,16 @@ fn resolve_signature<'a>(ctx: Context<'a, '_>, sig: Reference<'a>) -> VMResult<S
             let mut signature = String::from("(");
             for class_obj in content.borrow().iter(){
                 let Value::Reference(class_ref_id) = *class_obj else { return invalidation!("Expected Reference") };
-                let class_name = &ctx.vm.resolve_clazz_by_class_ref_id(class_ref_id)?.name;
+                let class_ref = ctx.vm.resolve_object_by_id(class_ref_id)?;
+                let class_name = ctx.vm.extract_class_name_from_class_ref(&class_ref)?;
                 signature.push_str(get_class_descriptor(class_name.as_str()).as_str());
             }
             signature.push_str(")");
             if rtype_ref_id.is_null(){
                 signature.push_str("V");
             } else {
-                let class_name = &ctx.vm.resolve_clazz_by_class_ref_id(rtype_ref_id)?.name;
+                let class_ref = ctx.vm.resolve_object_by_id(rtype_ref_id)?;
+                let class_name = ctx.vm.extract_class_name_from_class_ref(&class_ref)?;
                 signature.push_str(get_class_descriptor(class_name.as_str()).as_str())
             }
             Ok(signature)
