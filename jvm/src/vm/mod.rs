@@ -325,7 +325,7 @@ impl<'a> VM<'a>{
         }
     }
     
-    pub fn extract_class_name_from_class_ref(&self, object: Reference<'a>) -> VMResult<String>{
+    pub fn extract_class_name_from_class_ref(&self, object: Reference<'a>) -> VMResult<String> {
         let name_object = object.get_field(CLASS_name_INDEX);
         let name = self.extract_string_from_value(name_object)?;
         let name = name.replace(".", "/");
@@ -466,7 +466,7 @@ impl<'a> Context<'a, '_> {
             Value::Reference(get_or_init!(self.new_class_object_by_name(class_name.as_str())?))*/
             Value::Reference(get_or_init!(self.vm.new_class_object_from_field_type(&ft)?).id)
         } else {
-            self.vm.null()
+            Value::Reference(get_or_init!(self.vm.new_class_object("void", self.vm.class_manager.get_primitive_class(self.vm, "void"))?).id)
         };
         let b_args_arr = Value::Reference(get_or_init!(self.vm.new_class_array_1(b_args_classes)?).id);
         let helper = self.vm.resolve_class_method(
@@ -495,8 +495,10 @@ impl<'a> Context<'a, '_> {
 
     pub fn get_or_initialize_class(&self, class_name: &str) -> VMPartialResult<ClassRef<'a>>{
         let resolved = self.vm.get_or_resolve_class(class_name)?;
-        self.ensure_initialized(resolved)?;
-        successful_result(resolved)
+        match self.ensure_initialized(resolved)? {
+            VMResultType::Interrupted(c, flag) => Ok(VMResultType::Interrupted(c, flag)),
+            _ => successful_result(resolved)
+        }
     }
 
     pub fn ensure_initialized(&self, clazz: ClassRef<'a>) -> VMPartialResult<()> {

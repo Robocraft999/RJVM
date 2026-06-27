@@ -71,7 +71,13 @@ pub fn run() {
 
     println!("Booting up VM");
 
-    //simple_logger::SimpleLogger::new().with_level(LevelFilter::Info).without_timestamps().init().unwrap();
+    simple_logger::SimpleLogger::new()
+        .with_level(LevelFilter::Info)
+        .with_module_level("debug", LevelFilter::Debug)
+        .with_module_level("native", LevelFilter::Debug)
+        .without_timestamps()
+        .init()
+        .unwrap();
 
     /*unsafe {
         use libffi::middle::{Closure, Cif, Type, Arg};
@@ -91,13 +97,13 @@ pub fn run() {
     let mut app = Application::new(class_path);
     app.startup();
 
-    simple_logger::SimpleLogger::new()
+    /*simple_logger::SimpleLogger::new()
         .with_level(LevelFilter::Info)
         .with_module_level("debug", LevelFilter::Debug)
         .with_module_level("native", LevelFilter::Debug)
         .without_timestamps()
         .init()
-        .unwrap();
+        .unwrap();*/
 
 
 

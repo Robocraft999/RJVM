@@ -21,6 +21,13 @@ pub fn thread() -> &'static mut JavaThread {
     JAVA_THREAD.with(|cell| unsafe { &mut*(&mut *cell.borrow_mut() as *mut JavaThread) })
 }
 
+pub fn with_thread<R>(f: impl FnOnce(&mut JavaThread) -> R) -> R {
+    JAVA_THREAD.with(|cell| {
+        let mut thread = cell.borrow_mut();
+        f(&mut thread)
+    })
+}
+
 pub struct Application<'a> {
     java_vm: Pin<Box<JavaVM<'a>>>,
     pub(crate) vm: Pin<Box<VM<'a>>>,

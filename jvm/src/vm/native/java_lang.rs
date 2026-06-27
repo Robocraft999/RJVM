@@ -1,14 +1,14 @@
 use crate::class_file::fields::field_type::{FieldType, PrimitiveType};
 use crate::vm::constants::classes::{JAVA_LANG_PROCESS_ENVIRONMENT, JAVA_LANG_RUNTIME, JAVA_LANG_STRING, JAVA_LANG_THREAD, JAVA_LANG_THROWABLE};
-use crate::vm::constants::{THREADGROUP_maxPriority_INDEX, THREADGROUP_nUnstartedThreads_INDEX, THREADGROUP_name_INDEX, THREADGROUP_parent_INDEX, THREAD_group_INDEX, THREAD_name_INDEX, THREAD_priority_INDEX};
-use crate::vm::jni::types::JavaVM;
+use crate::vm::constants::{THREADGROUP_maxPriority_INDEX, THREADGROUP_nUnstartedThreads_INDEX, THREADGROUP_name_INDEX, THREADGROUP_parent_INDEX, THREAD_group_INDEX, THREAD_name_INDEX, THREAD_priority_INDEX, THREAD_target_INDEX};
 use crate::vm::native::{gen_delegate, invalidation, non_failing_none, non_failing_some, wrap_init, NativeMethodRegistry};
 use crate::vm::result::{VMPartialResult, VMResult};
 use crate::vm::value::{Reference, Value};
-use crate::vm::{VmError, VM};
+use crate::vm::{Context, VmError, VM};
 use std::cell::RefCell;
 use std::thread;
-use crate::vm::application::JAVA_THREAD;
+use crate::vm::application::{thread, JAVA_THREAD};
+use crate::vm::class::ClassAndMethod;
 use crate::vm::java_thread::JavaThread;
 
 pub fn register_natives(registry: &mut NativeMethodRegistry) {
@@ -18,6 +18,7 @@ pub fn register_natives(registry: &mut NativeMethodRegistry) {
     registry.register(JAVA_LANG_THREAD, "currentThread", "()Ljava/lang/Thread;", delegate_current_thread);
     registry.register(JAVA_LANG_THREAD, "isAlive", "()Z", delegate_is_alive);
     registry.register(JAVA_LANG_THREAD, "holdsLock", "(Ljava/lang/Object;)Z", delegate_holds_lock);
+    registry.register(JAVA_LANG_THREAD, "setPriority0", "(I)V", delegate_set_priority0);
     registry.register(JAVA_LANG_THREAD, "start0", "()V", delegate_start0);
     registry.register(JAVA_LANG_RUNTIME, "availableProcessors", "()I", delegate_available_processors);
     registry.register(JAVA_LANG_RUNTIME, "freeMemory", "()J", delegate_free_memory);
@@ -71,15 +72,37 @@ gen_delegate!(delegate_holds_lock, |ctx, _obj_ref, args| {
     non_failing_some(Value::from(ctx.vm.current_locks.read()?.contains_key(&lock_ref)))
 });
 
+gen_delegate!(delegate_set_priority0, |_ctx, obj_ref, args| {
+    let Some(thread_ref) = obj_ref else { return invalidation!("setPriority0 expected a Thread reference"); };
+    let Some(Value::Integer(java_prio)) = args.get(0) else { return invalidation!("setPriority0 expected a prio arg"); };
+    thread_ref.set_field(THREAD_priority_INDEX, Value::Integer(*java_prio));
+    non_failing_none()
+});
+
 gen_delegate!(delegate_start0, |ctx, obj_ref, _args| {
-   let Some(obj_ref) = obj_ref else { return invalidation!("Expected this to be present") };
+    let Some(obj_ref) = obj_ref else { return invalidation!("Expected this to be present") };
     let obj_id = obj_ref.id;
+    let target_id = obj_ref.get_ref_field(THREAD_target_INDEX)?;
+    let target = if target_id.is_null() {
+        obj_ref
+    } else {
+        ctx.vm.resolve_object_by_id(target_id)?
+    };
+    
+    let target_clazz = ctx.vm.find_class_by_id(target.class_id).unwrap();
+    let method = target_clazz.find_method("run", "()V").unwrap();
+    let cam = ClassAndMethod { class: target_clazz, method };
+    let camid = cam.as_ids();
     
     thread::spawn(move || {
         let mut java_thread = JavaThread::new(1);
         java_thread.thread_obj_id.replace(obj_id);
     
         JAVA_THREAD.set(java_thread);
+
+        let context = Context { thread: thread(), vm: ctx.vm, java_vm: ctx.java_vm };
+        
+        JavaThread::thread_entry(context, camid, Vec::new()).unwrap();
     });
     non_failing_none()
 });
