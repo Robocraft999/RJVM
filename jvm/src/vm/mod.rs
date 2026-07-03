@@ -63,7 +63,6 @@ pub struct VM<'a>{
     pub native_method_registry: NativeMethodRegistry<'a>,
     pub currently_open_files: RwLock<HashMap<String, (Vec<u8>, usize)>>,
     pub current_locks: RwLock<HashMap<RefId, usize>>,
-    pub vm_debug_helper: DebugHelper,
 }
 
 impl<'a> VM<'a>{
@@ -84,7 +83,6 @@ impl<'a> VM<'a>{
             native_method_registry,
             currently_open_files: RwLock::new(HashMap::new()),
             current_locks: RwLock::new(HashMap::new()),
-            vm_debug_helper: DebugHelper::new(),
         }
     }
 
@@ -135,7 +133,7 @@ impl<'a> VM<'a>{
         } else {
             unreachable!("Object couldn't be allocated")
         }
-        self.vm_debug_helper.tracker.push_object_event(obj.id, format!("Object ({})", class.name));
+        //self.vm_debug_helper.tracker.push_object_event(obj.id, format!("Object ({})", class.name));
         obj
     }
 
@@ -157,7 +155,7 @@ impl<'a> VM<'a>{
         let class = self.get_or_resolve_class(class_name.as_str())?;
         let obj = self.object_allocator.allocate_array(class, dims, *component_type, content);
         self.objects_by_id.write()?.insert(obj.id, obj);
-        self.vm_debug_helper.tracker.push_object_event(obj.id, format!("Array allocated:   \n{:?}", obj));
+        //self.vm_debug_helper.tracker.push_object_event(obj.id, format!("Array allocated:   \n{:?}", obj));
         Ok(VMResultType::Successful(obj))
         /*get_or_init_special!(self.get_or_initialize_class(class_name.as_str())?,
             |class| {
@@ -588,9 +586,9 @@ pub enum VmError{
     LockError(String)
 }
 
-impl<T: Debug> From<PoisonError<T>> for VmError {
+impl<T> From<PoisonError<T>> for VmError {
     fn from(value: PoisonError<T>) -> Self {
-        VmError::LockError(format!("{:?}", value))
+        VmError::LockError(format!("{}", value.to_string()))
     }
 }
 

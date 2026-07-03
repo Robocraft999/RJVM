@@ -47,14 +47,14 @@ gen_delegate!(delegate_clone, |ctx, obj_ref, _args| {
             ReferenceType::Array(dims, component_type, content) => {
                 debug!("Cloning array: {:?}", obj_ref);
                 let new_array_ref = wrap_init!(ctx, ctx.vm.new_array(*dims, component_type.clone().to_array_field_type(*dims), content.clone())?);
-                ctx.vm.vm_debug_helper.tracker.push_object_event(new_array_ref.id, format!("Cloned from:\n    {:?}", obj_ref));
+                ctx.thread.debug_helper.tracker.push_object_event(new_array_ref.id, format!("Cloned from:\n    {:?}", obj_ref));
                 non_failing_some(Value::Reference(new_array_ref.id))
             }
             ReferenceType::Object(content) => {
                 debug!("Cloning object: {:?}", obj_ref);
                 let clazz = ctx.vm.find_class_by_id(obj_ref.class_id).unwrap();
                 let new_object_ref = ctx.vm.new_object_from_class(clazz);
-                ctx.vm.vm_debug_helper.tracker.push_object_event(new_object_ref.id, format!("Cloned from:\n    {:?}", obj_ref));
+                ctx.thread.debug_helper.tracker.push_object_event(new_object_ref.id, format!("Cloned from:\n    {:?}", obj_ref));
                 if let ReferenceType::Object(new_content) = &new_object_ref.reference_type{
                     let _ = new_content.replace(content.borrow().clone());
                 }
