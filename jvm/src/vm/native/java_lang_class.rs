@@ -12,6 +12,7 @@ use crate::Value;
 use crate::VM;
 use log::{debug, info};
 use std::cell::RefCell;
+use std::sync::RwLock;
 use crate::vm::java_thread::JavaThread;
 
 pub fn register_natives(registry: &mut NativeMethodRegistry) {
@@ -106,7 +107,7 @@ gen_delegate!(delegate_get_declared_fields0, |ctx, class_ref, _args| {
             info!("field name: {}", field.name);
             content.push(Value::Reference(java_field.id));
         }
-        let fields_arr_ref = wrap_init!(ctx, ctx.vm.new_array(1, FieldType::Object(JAVA_LANG_REFLECT_FIELD.to_string()).to_array_field_type(1), RefCell::new(content.clone()))?);
+        let fields_arr_ref = wrap_init!(ctx, ctx.vm.new_array(1, FieldType::Object(JAVA_LANG_REFLECT_FIELD.to_string()).to_array_field_type(1), RwLock::new(content.clone()))?);
         non_failing_some(Value::Reference(fields_arr_ref.id))
     } else {
         //FIXME i dont know if this should be none
@@ -156,7 +157,7 @@ gen_delegate!(delegate_get_declared_constructors0, |ctx, class_ref, args| {
 
             content.push(Value::Reference(java_constructor_ref.id));
         }
-        let contructor_arr_ref = wrap_init!(ctx, ctx.vm.new_array(1, FieldType::Object(JAVA_LANG_REFLECT_CONSTRUCTOR.to_string()).to_array_field_type(1), RefCell::new(content.clone()))?);
+        let contructor_arr_ref = wrap_init!(ctx, ctx.vm.new_array(1, FieldType::Object(JAVA_LANG_REFLECT_CONSTRUCTOR.to_string()).to_array_field_type(1), RwLock::new(content.clone()))?);
         non_failing_some(Value::Reference(contructor_arr_ref.id))
     } else {
         invalidation!("Expected Class object and boolean")
@@ -218,7 +219,7 @@ gen_delegate!(delegate_get_declared_methods0, |ctx, class_ref, args| {
 
             content.push(Value::Reference(java_method_ref.id));
         }
-        let method_arr_ref = wrap_init!(ctx, ctx.vm.new_array(1, FieldType::Object(JAVA_LANG_REFLECT_METHOD.to_string()).to_array_field_type(1), RefCell::new(content.clone()))?);
+        let method_arr_ref = wrap_init!(ctx, ctx.vm.new_array(1, FieldType::Object(JAVA_LANG_REFLECT_METHOD.to_string()).to_array_field_type(1), RwLock::new(content.clone()))?);
         non_failing_some(Value::Reference(method_arr_ref.id))
     } else {
         invalidation!("Expected Class object and boolean")

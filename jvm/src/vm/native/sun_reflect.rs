@@ -52,7 +52,7 @@ gen_delegate!(delegate_new_instance0, |ctx, _obj_ref, args| {
             if let ReferenceType::Array(_, _, type_content) = &parameter_arr_ref.reference_type {
                 let class = ctx.vm.resolve_clazz_by_class_ref_id(class_ref_id)?;
                 let mut descriptor = String::from("(");
-                for constructor_parameter_type in type_content.borrow().iter() {
+                for constructor_parameter_type in type_content.read()?.iter() {
                     if let Value::Reference(parameter_type_ref_id) = constructor_parameter_type {
                         let class = ctx.vm.resolve_clazz_by_class_ref_id(*parameter_type_ref_id)?;
                         if !class.is_array(){
@@ -69,7 +69,7 @@ gen_delegate!(delegate_new_instance0, |ctx, _obj_ref, args| {
                     let constructor_args = if let Some(Value::Reference(argument_arr_id)) = args.get(1) && !argument_arr_id.is_null() {
                         let argument_arr_ref = ctx.vm.resolve_object_by_id(*argument_arr_id)?;
                         if let ReferenceType::Array(_, _, args_content) = &argument_arr_ref.reference_type{
-                            args_content.borrow().clone()
+                            args_content.read()?.clone()
                         } else {
                             Vec::new()
                         }
@@ -113,7 +113,7 @@ gen_delegate!(delegate_invoke0, |ctx, _obj_ref, args| {
             if let ReferenceType::Array(_, _, type_content) = &parameter_arr_ref.reference_type {
                 let clazz = ctx.vm.resolve_clazz_by_class_ref_id(class_ref_id)?;
                 let mut descriptor = String::from("(");
-                for method_parameter_type_val in type_content.borrow().iter() {
+                for method_parameter_type_val in type_content.read()?.iter() {
                     if let Value::Reference(parameter_type_ref_id) = method_parameter_type_val {
                         let class = ctx.vm.resolve_clazz_by_class_ref_id(*parameter_type_ref_id)?;
                         if !class.is_array(){
@@ -138,7 +138,7 @@ gen_delegate!(delegate_invoke0, |ctx, _obj_ref, args| {
                     let class_and_method = ClassAndMethod {class: clazz, method};
                     let args_arr_ref = ctx.vm.resolve_object_by_id(*args_arr_ref_id)?;
                     let method_args = if let ReferenceType::Array(_, _, args_content) = &args_arr_ref.reference_type {
-                        args_content.borrow().clone()
+                        args_content.read()?.clone()
                     } else {
                         Vec::new()
                     };

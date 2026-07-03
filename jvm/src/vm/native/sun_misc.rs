@@ -8,6 +8,7 @@ use crate::vm::{VmError, VM};
 use log::debug;
 use std::cell::RefCell;
 use std::env;
+use std::sync::RwLock;
 use crate::vm::java_thread::JavaThread;
 
 pub fn register_natives(registry: &mut NativeMethodRegistry) {
@@ -83,6 +84,6 @@ gen_delegate!(delegate_und_getcwd, |ctx, _obj_ref, _args| {
     let current_working_dir = env::current_dir().unwrap();
     debug!("getcwd -> '{}'", current_working_dir.display());
     let bytes = current_working_dir.into_os_string().as_encoded_bytes().iter().map(|b| Value::Integer(*b as i32)).collect::<Vec<_>>();
-    let path_ref = wrap_init!(ctx, ctx.vm.new_array(1, FieldType::Primitive(PrimitiveType::Byte).to_array_field_type(1), RefCell::new(bytes.clone()))?);
+    let path_ref = wrap_init!(ctx, ctx.vm.new_array(1, FieldType::Primitive(PrimitiveType::Byte).to_array_field_type(1), RwLock::new(bytes.clone()))?);
     non_failing_some(Value::Reference(path_ref.id))
 });

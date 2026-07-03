@@ -89,8 +89,8 @@ gen_delegate!(delegate_arraycopy, |ctx, _obj_ref, args| {
         if let (ReferenceType::Array(_, _, src), ReferenceType::Array(_, _, dst)) = (&src_ref.reference_type, &dst_ref.reference_type){
             let length = *length as usize;
             // if src and dst are the same, we must preserve the original content before we start copying.
-            let src_content = src.borrow()[src_pos..src_pos + length].to_vec();
-            dst.borrow_mut()[dst_pos..dst_pos+length].clone_from_slice(&src_content);
+            let src_content = src.read()?[src_pos..src_pos + length].to_vec();
+            dst.write()?[dst_pos..dst_pos+length].clone_from_slice(&src_content);
             ctx.thread.debug_helper.tracker.push_object_event(dst_ref.id, format!("Arraycopy from {:?} [{}:{}]->[{}:{}] :\n    {:?}", src_ref.id, src_pos, src_pos+length, dst_pos, dst_pos+length, dst_ref));
             return non_failing_none()
         }

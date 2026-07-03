@@ -6,6 +6,7 @@ use crate::vm::value::{Reference, ReferenceType, Value};
 use crate::vm::{VmError, VM};
 use log::{debug, trace};
 use std::hash::{DefaultHasher, Hash, Hasher};
+use std::sync::RwLock;
 
 pub fn register_natives(registry: &mut NativeMethodRegistry) {
     let mut register = |method_name, sig, delegate| registry.register(JAVA_LANG_OBJECT, method_name, sig, delegate);
@@ -46,7 +47,7 @@ gen_delegate!(delegate_clone, |ctx, obj_ref, _args| {
         match &obj_ref.reference_type {
             ReferenceType::Array(dims, component_type, content) => {
                 debug!("Cloning array: {:?}", obj_ref);
-                let new_array_ref = wrap_init!(ctx, ctx.vm.new_array(*dims, component_type.clone().to_array_field_type(*dims), content.clone())?);
+                let new_array_ref = wrap_init!(ctx, ctx.vm.new_array(*dims, component_type.clone().to_array_field_type(*dims), RwLock::new(content.read()?.clone()))?);
                 ctx.thread.debug_helper.tracker.push_object_event(new_array_ref.id, format!("Cloned from:\n    {:?}", obj_ref));
                 non_failing_some(Value::Reference(new_array_ref.id))
             }
@@ -56,7 +57,7 @@ gen_delegate!(delegate_clone, |ctx, obj_ref, _args| {
                 let new_object_ref = ctx.vm.new_object_from_class(clazz);
                 ctx.thread.debug_helper.tracker.push_object_event(new_object_ref.id, format!("Cloned from:\n    {:?}", obj_ref));
                 if let ReferenceType::Object(new_content) = &new_object_ref.reference_type{
-                    let _ = new_content.replace(content.borrow().clone());
+                    *new_content.write()? = content.read()?.clone();
                 }
                 non_failing_some(Value::Reference(new_object_ref.id))
             }

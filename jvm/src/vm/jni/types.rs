@@ -16,6 +16,7 @@ use std::ffi::{c_char, c_double, c_float, c_int, c_long, c_schar, c_short, c_uch
 use std::fmt::Debug;
 use std::os::unix::ffi::OsStrExt;
 use std::slice;
+use std::sync::RwLock;
 use crate::vm::application::thread;
 use crate::vm::java_thread::JavaThread;
 
@@ -877,7 +878,7 @@ impl JNINativeInterface_ {
         let array_ref = native_init_wrap!(env, vm.new_array(
             1,
             FieldType::Object(clazz.name.clone()).to_array_field_type(1),
-            RefCell::new(content.clone())
+            RwLock::new(content.clone())
         ));
         array_ref.id.nid() as jobjectArray
     }
@@ -899,7 +900,7 @@ impl JNINativeInterface_ {
         let array_ref = native_init_wrap!(env, vm.new_array(
             1,
             FieldType::Primitive(PrimitiveType::Byte).to_array_field_type(1),
-            RefCell::new(content.clone())
+            RwLock::new(content.clone())
         ));
         array_ref.id.nid() as jbyteArray
     }

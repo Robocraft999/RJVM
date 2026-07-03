@@ -87,7 +87,6 @@ impl <'a> Application<'a> {
             Ok(VMResultType::ExceptionThrown) => {
                 error!("Exception thrown");
                 thread().debug_helper.print();
-                self.vm.vm_debug_helper.print();
                 panic!()
             }
             Err(error) => {
@@ -95,7 +94,6 @@ impl <'a> Application<'a> {
                 println!("Frames:");
                 thread().call_stack.print_call_stack(&self.vm);
                 thread().debug_helper.print();
-                self.vm.vm_debug_helper.print();
                 panic!()
             }
         }
@@ -116,7 +114,6 @@ impl <'a> Application<'a> {
     fn create_initial_thread_group(&self) -> Reference<'a> {
         let Ok(VMResultType::Successful(system_group)) = self.context().new_object(JAVA_LANG_THREAD_GROUP) else {
             thread().debug_helper.print();
-            self.vm.vm_debug_helper.print();
             panic!("Could not allocate system thread group");
         };
         let system_init = self.vm.resolve_class_method(JAVA_LANG_THREAD_GROUP, "<init>", "()V").unwrap();
@@ -124,7 +121,6 @@ impl <'a> Application<'a> {
 
         let Ok(VMResultType::Successful(main_group)) = self.context().new_object(JAVA_LANG_THREAD_GROUP) else {
             thread().debug_helper.print();
-            self.vm.vm_debug_helper.print();
             panic!("Could not allocate system thread group");
         };
         let name = self.vm.try_new_string_object("main").unwrap();
@@ -136,7 +132,6 @@ impl <'a> Application<'a> {
     fn create_initial_thread(&self, thread_group: Reference<'a>) -> Reference<'a>{
         let Ok(VMResultType::Successful(thread)) = self.context().new_object(JAVA_LANG_THREAD) else {
             thread().debug_helper.print();
-            self.vm.vm_debug_helper.print();
             panic!("Could not allocate system thread group");
         };
         thread.set_field(THREAD_eetop_INDEX, Value::Long(crate::vm::application::thread().id as i64));
@@ -170,7 +165,6 @@ impl <'a> Application<'a> {
                 println!("'{}'", error);
                 error!("Init System: {}", error);
                 thread().debug_helper.print();
-                self.vm.vm_debug_helper.print();
                 panic!();
             }
         }

@@ -145,7 +145,7 @@ impl<'a> VM<'a>{
         }
     }
 
-    pub fn new_array(&self, dims: usize, array_field_type: FieldType, content: RefCell<Vec<Value>>) -> VMPartialResult<Reference<'a>>{
+    pub fn new_array(&self, dims: usize, array_field_type: FieldType, content: RwLock<Vec<Value>>) -> VMPartialResult<Reference<'a>>{
         let (class_name, component_type) = if let FieldType::Array(class_name, component_type) = array_field_type {
             (class_name, component_type)
         } else {
@@ -167,7 +167,7 @@ impl<'a> VM<'a>{
         )*/
     }
 
-    pub fn try_new_array(&self, dims: usize, array_field_type: FieldType, content: RefCell<Vec<Value>>) -> VMResult<Reference<'a>>{
+    pub fn try_new_array(&self, dims: usize, array_field_type: FieldType, content: RwLock<Vec<Value>>) -> VMResult<Reference<'a>>{
         let result = self.new_array(dims, array_field_type, content)?;
         if let VMResultType::Successful(object) = result {
             Ok(object)
@@ -177,11 +177,11 @@ impl<'a> VM<'a>{
     }
     
     pub fn new_class_array_1(&self, content: Vec<Value>) -> VMPartialResult<Reference<'a>>{
-        self.new_array(1, FieldType::Object("java/lang/Class".to_string()).to_array_field_type(1), RefCell::new(content))
+        self.new_array(1, FieldType::Object("java/lang/Class".to_string()).to_array_field_type(1), RwLock::new(content))
     }
 
     pub fn new_object_array_1(&self, content: Vec<Value>) -> VMPartialResult<Reference<'a>>{
-        self.new_array(1, FieldType::Object("java/lang/Object".to_string()).to_array_field_type(1), RefCell::new(content))
+        self.new_array(1, FieldType::Object("java/lang/Object".to_string()).to_array_field_type(1), RwLock::new(content))
     }
 
     pub fn try_new_string_object(&self, string: &str) -> VMResult<Reference<'a>>{
@@ -208,7 +208,7 @@ impl<'a> VM<'a>{
         }
         
         let char_array: Vec<Value> = string.chars().map(|c| Value::Integer(c as i32)).collect();
-        let char_array = RefCell::new(char_array);
+        let char_array = RwLock::new(char_array);
 
         let char_array = Value::Reference(get_or_init!(self.new_array(1, FieldType::Primitive(PrimitiveType::Char).to_array_field_type(1), char_array)?).id);
 
@@ -245,7 +245,7 @@ impl<'a> VM<'a>{
         if let Value::Reference(char_arr_id) = chars {
             let char_ref = self.resolve_object_by_id(char_arr_id)?;
             if let ReferenceType::Array(_, _, content) = &char_ref.reference_type{
-                let chars: Vec<u8> = content.borrow().iter().map(|v| if let Value::Integer(val) = v {*val as u8} else {0}).collect();
+                let chars: Vec<u8> = content.read()?.iter().map(|v| if let Value::Integer(val) = v {*val as u8} else {0}).collect();
                 let string = from_java_cesu8(chars.as_slice())?.to_string();
                 return Ok(string);
             }
@@ -335,7 +335,7 @@ impl<'a> VM<'a>{
 
         let mut desc = String::from("(");
         if let ReferenceType::Array(_, _, content) = &ptypes_array_ref.reference_type {
-            for p in content.borrow().iter() {
+            for p in content.read()?.iter() {
                 let Value::Reference(param_class_ref_id) = p else { return Err(VmError::ValidationError("Expected a reference".to_string())); };
                 let param_class_name = &self.resolve_clazz_by_class_ref_id(*param_class_ref_id)?.name;
                 println!("{}", param_class_name);

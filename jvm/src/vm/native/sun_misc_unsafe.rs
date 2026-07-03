@@ -266,7 +266,7 @@ gen_delegate!(delegate_define_class, |ctx, _obj_ref, args| {
         let class_name = ctx.vm.extract_string_from_value(*class_name_value)?;
         let bytes_ref = ctx.vm.resolve_object_by_id(*bytes_ref_id)?;
         let bytes = if let ReferenceType::Array(_, _, data) = &bytes_ref.reference_type{
-            data.borrow().iter().map(|val| if let Value::Integer(byte) = val {*byte as u8} else {0}).collect()
+            data.read()?.iter().map(|val| if let Value::Integer(byte) = val {*byte as u8} else {0}).collect()
         } else {
             Vec::new()
         };
@@ -283,14 +283,18 @@ gen_delegate!(delegate_define_anon_class, |ctx, _obj_ref, args| {
         let host_class_ref = ctx.vm.resolve_object_by_id(*host_class_id)?;
         let byte_arr_ref = ctx.vm.resolve_object_by_id(*byte_arr_ref_id)?;
         if let ReferenceType::Array(_, _, bytes ) = &byte_arr_ref.reference_type{
-            let bytes = bytes.borrow().iter().map(|val| if let Value::Integer(byte) = val {*byte as u8} else {0}).collect::<Vec<_>>();
+            let bytes = bytes.read()?.iter().map(|val| if let Value::Integer(byte) = val {*byte as u8} else {0}).collect::<Vec<_>>();
             let class = ctx.vm.class_manager.define_class(ctx.vm, None, None, bytes)?;
-
-            let class_ref = ctx.vm.class_manager.classes.lock()?.alloc(class);
-
-            let class_ref = unsafe {
-                let class_ptr: *const Class<'a> = class_ref;
-                &*class_ptr
+            
+            let class_ref = match ctx.vm.class_manager.classes.lock() {
+                Ok(class_lock) => {
+                    let class_ref = class_lock.alloc(class);
+                    unsafe {
+                        let class_ptr: *const Class<'a> = class_ref;
+                        &*class_ptr
+                    }
+                }
+                Err(e) => return Err(VmError::from(e))
             };
 
             ctx.vm.class_manager.classes_by_id.write()?.insert(class_ref.id, class_ref);
