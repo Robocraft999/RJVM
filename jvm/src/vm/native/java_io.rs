@@ -29,7 +29,7 @@ gen_delegate!(delegate_write_bytes, |ctx, _obj_ref, args| {
     ) = (args.get(0), args.get(1), args.get(2), args.get(3)) {
         let bytes_ref = ctx.vm.resolve_object_by_id(*bytes_ref_id)?;
         if let ReferenceType::Array(_, _, data) = &bytes_ref.reference_type{
-            let data = &data.borrow()[*offset as usize..(*offset + *amount) as usize];
+            let data = &data.read()?[*offset as usize..(*offset + *amount) as usize];
             let string: String = data.iter().map(|value| if let Value::Integer(int) = value { (*int as u8) as char} else { '?' }).collect();
             print!("{}", string);
             non_failing_none()

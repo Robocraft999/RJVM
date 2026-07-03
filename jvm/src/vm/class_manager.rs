@@ -103,7 +103,16 @@ impl<'a> ClassManager<'a>{
         }
 
         // alloc + register
-        let class_ref = self.classes.lock()?.alloc(class);
+        let class_ref = match self.classes.lock() {
+            Ok(class_lock) => {
+                let class_ref = class_lock.alloc(class);
+                unsafe {
+                    let class_ptr: *const Class<'a> = class_ref;
+                    &*class_ptr
+                }
+            }
+            Err(e) => return Err(VmError::from(e))
+        };
 
         let class_ref = unsafe {
             let class_ptr: *const Class<'a> = class_ref;

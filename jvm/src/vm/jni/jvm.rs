@@ -15,6 +15,7 @@ use std::fs::{File, OpenOptions};
 use std::os::fd::{AsFd, AsRawFd, FromRawFd, IntoRawFd, OwnedFd, RawFd};
 use std::path::Path;
 use std::str::FromStr;
+use std::sync::RwLock;
 
 pub const JVM_INTERFACE_VERSION: jint = 4;
 
@@ -449,7 +450,7 @@ pub unsafe extern "system-unwind" fn JVM_NewArray(env: *mut JNIEnv<'static>, elt
     let arr = native_init_wrap!(env, vm.new_array(
         1,
         FieldType::Object(clazz.name.clone()).to_array_field_type(1),
-        RefCell::new(content.clone())
+        RwLock::new(content.clone())
     ));
     arr.id.nid() as jobject
 }

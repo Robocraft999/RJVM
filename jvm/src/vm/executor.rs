@@ -1,5 +1,5 @@
 use std::{cell::RefCell, str::FromStr};
-
+use std::sync::RwLock;
 use crate::class_file::constant_pool::{ConstantPoolEntry};
 use crate::class_file::fields::field_type::{FieldType, PrimitiveType};
 use crate::class_file::methods::{descriptor};
@@ -1338,13 +1338,13 @@ fn execute_create_array<'a>(ctx: Context<'a, '_>, array_field_type: FieldType, d
                 continue
             }
             for _ in 0..current_dim{
-                let arr_ref = ctx.vm.try_new_array(dims, component_type.clone().to_array_field_type(i), RefCell::new(content.clone()))?;
+                let arr_ref = ctx.vm.try_new_array(dims, component_type.clone().to_array_field_type(i), RwLock::new(content.clone()))?;
                 local_content.push(Value::Reference(arr_ref.id))
             }
             content = local_content;
         }
         //FIXME component_type.to_array_field_type(dims) is just array_field_type
-        let arr_ref = ctx.vm.try_new_array(dims, component_type.to_array_field_type(dims), RefCell::new(content))?;
+        let arr_ref = ctx.vm.try_new_array(dims, component_type.to_array_field_type(dims), RwLock::new(content))?;
         Ok(VMResultType::Successful(Value::Reference(arr_ref.id)))
     } else {
         Err(VmError::ValidationError(format!("Field type for creating an array must be FieldType::Array but is {:?}", array_field_type)))
