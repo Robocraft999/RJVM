@@ -286,7 +286,7 @@ gen_delegate!(delegate_define_anon_class, |ctx, _obj_ref, args| {
             let bytes = bytes.borrow().iter().map(|val| if let Value::Integer(byte) = val {*byte as u8} else {0}).collect::<Vec<_>>();
             let class = ctx.vm.class_manager.define_class(ctx.vm, None, None, bytes)?;
 
-            let class_ref = ctx.vm.class_manager.classes.alloc(class);
+            let class_ref = ctx.vm.class_manager.classes.lock()?.alloc(class);
 
             let class_ref = unsafe {
                 let class_ptr: *const Class<'a> = class_ref;

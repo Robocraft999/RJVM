@@ -18,7 +18,7 @@ use std::cell::RefCell;
 use std::cmp::PartialEq;
 use std::collections::{HashMap};
 use std::str::FromStr;
-use std::sync::RwLock;
+use std::sync::{Mutex, RwLock};
 use typed_arena::Arena;
 
 #[derive(Debug, Clone)]
@@ -62,7 +62,7 @@ pub struct ClassManager<'a>{
     pub classes_by_id: RwLock<HashMap<ClassId, ClassRef<'a>>>,
     pub class_loading_states: RwLock<HashMap<ClassId, ClassLoadingState>>,
     pub anonymous_classes: RwLock<HashMap<RefId, AnonClassInfo<'a>>>,
-    pub classes: Arena<Class<'a>>,
+    pub classes: Mutex<Arena<Class<'a>>>,
     pub primitive_class_ids: RwLock<HashMap<String, ClassId>>,
     next_id: RwLock<u32>,
 }
@@ -75,7 +75,7 @@ impl<'a> ClassManager<'a>{
             classes_by_id: RwLock::new(HashMap::new()),
             class_loading_states: RwLock::new(HashMap::new()),
             anonymous_classes: RwLock::new(HashMap::new()),
-            classes: Arena::with_capacity(100),
+            classes: Mutex::new(Arena::with_capacity(100)),
             primitive_class_ids: RwLock::new(HashMap::new()),
             next_id: RwLock::new(1),
         }
@@ -103,7 +103,7 @@ impl<'a> ClassManager<'a>{
         }
 
         // alloc + register
-        let class_ref = self.classes.alloc(class);
+        let class_ref = self.classes.lock()?.alloc(class);
 
         let class_ref = unsafe {
             let class_ptr: *const Class<'a> = class_ref;
@@ -146,7 +146,7 @@ impl<'a> ClassManager<'a>{
         let mut class = Class{
             id: ClassId(next_id),
             name: class_name,
-            constants: RefCell::new(constants),
+            constants: RwLock::new(constants),
             flags: parsed_class.access_flags,
             superclass: None,
             interfaces: Vec::new(),
@@ -258,7 +258,7 @@ impl<'a> ClassManager<'a>{
             let class_ptr: *const Class<'a> = &class;
             &*class_ptr
         };
-        vm.vm_debug_helper.bytecode_helper.push_class(class_ref, bytes);
+        //vm.vm_debug_helper.bytecode_helper.push_class(class_ref, bytes);
 
         class.init_vtable();
         class.init_itable();

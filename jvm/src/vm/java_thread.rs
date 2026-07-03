@@ -22,6 +22,8 @@ pub struct JavaThread {
     pub call_stack: CallStack,
     pub debug_helper: DebugHelper,
     pub caught_exception: RefCell<Option<(String, String, Value)>>,
+
+    pub jni_env: *const (),
 }
 
 impl JavaThread {
@@ -32,6 +34,8 @@ impl JavaThread {
             call_stack: CallStack::new(),
             debug_helper: DebugHelper::new(),
             caught_exception: RefCell::new(None),
+
+            jni_env: std::ptr::null(),
         }
     }
 

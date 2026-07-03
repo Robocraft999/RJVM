@@ -88,7 +88,7 @@ gen_delegate!(delegate_start0, |ctx, obj_ref, _args| {
     } else {
         ctx.vm.resolve_object_by_id(target_id)?
     };
-    
+
     let target_clazz = ctx.vm.find_class_by_id(target.class_id).unwrap();
     let method = target_clazz.find_method("run", "()V").unwrap();
     let cam = ClassAndMethod { class: target_clazz, method };
@@ -97,12 +97,14 @@ gen_delegate!(delegate_start0, |ctx, obj_ref, _args| {
     thread::spawn(move || {
         let mut java_thread = JavaThread::new(1);
         java_thread.thread_obj_id.replace(obj_id);
+        let vm_ptr = ctx.vm as *const VM as _;
+        java_thread.jni_env = vm_ptr;
     
         JAVA_THREAD.set(java_thread);
 
-        let context = Context { thread: thread(), vm: ctx.vm, java_vm: ctx.java_vm };
-        
-        JavaThread::thread_entry(context, camid, Vec::new()).unwrap();
+        //let context = Context { thread: thread(), vm: ctx.vm, java_vm: ctx.java_vm };
+
+        //JavaThread::thread_entry(context, camid, Vec::new()).unwrap();
     });
     non_failing_none()
 });

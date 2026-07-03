@@ -415,11 +415,7 @@ pub unsafe extern "system-unwind" fn JVM_GetArrayLength(env: *mut JNIEnv, arr: j
     let vm = unsafe{&*(*env).vm};
 
     let obj_ref = vm.resolve_object_by_jobject(arr).unwrap();
-    if let ReferenceType::Array(_, _, content) = &obj_ref.reference_type {
-        content.borrow().len() as jint
-    } else {
-        unreachable!("fixme error handling")
-    }
+    obj_ref.get_length() as jint
 }
 
 #[unsafe(no_mangle)]

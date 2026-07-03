@@ -62,6 +62,8 @@ pub struct ExternNativeMethod{
     cif: Cif
 }
 
+unsafe impl Send for ExternNativeMethod {}
+
 impl ExternNativeMethod {
     pub fn new(ptr: CodePtr, desc: &MethodDescriptor) -> Self{
         let cif = descriptor_to_cif(desc);

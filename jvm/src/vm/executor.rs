@@ -804,11 +804,7 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                     let popped = ctx.thread.call_stack.pop_operand_value();
                     if let Some(Value::Reference(ref_id)) = popped{
                         let reference = wrap_error!(ctx.vm.resolve_object_by_id(ref_id));
-                        if let ReferenceType::Array(_, _, content) = &reference.reference_type{
-                            ctx.thread.call_stack.push_operand_value(Value::Integer(content.borrow().len() as i32));
-                        } else {
-                            return Some(Err(VmError::ValidationError(format!("Expected an Array ref but found: {:?}", reference))))
-                        }
+                        ctx.thread.call_stack.push_operand_value(Value::Integer(reference.get_length() as i32));
                     } else {
                         return Some(Err(VmError::ValidationError(format!("Expected an array ref but found: {:?}", &popped))))
                     }

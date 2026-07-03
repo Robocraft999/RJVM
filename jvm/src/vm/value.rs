@@ -5,6 +5,7 @@ use crate::vm::{VmError, VM};
 use std::cell::RefCell;
 use std::fmt::{Debug, Formatter};
 use std::mem;
+use std::sync::RwLock;
 use crate::vm::jni::types::jobject;
 use crate::vm::result::VMResult;
 
@@ -135,7 +136,7 @@ macro_rules! gen_typed_get_field {
         pub fn $name(&self, index: usize) -> VMResult<$res_type> {
             match &self.reference_type {
                 ReferenceType::Object(fields) => {
-                    if let Value::$typ(inner) = fields.borrow()[index] {
+                    if let Value::$typ(inner) = fields.read()?[index] {
                         Ok(inner)
                     } else {
                         Err(VmError::ValidationError(format!("Expected {} field at '{}'", stringify!($typ), index)))
@@ -149,7 +150,6 @@ macro_rules! gen_typed_get_field {
 
 pub type Reference<'a> = &'a ReferenceValue;
 
-#[derive(PartialEq, Clone)]
 pub struct ReferenceValue{
     pub(crate) id: RefId,
     pub(crate) class_id: ClassId,
@@ -161,14 +161,26 @@ impl ReferenceValue{
     //FIXME switch these to Option for safety
     pub fn set_field(&self, index: usize, value: Value) {
         match &self.reference_type {
-            ReferenceType::Object(fields) => {fields.borrow_mut()[index] = value}
+            ReferenceType::Object(fields) => {
+                if let Ok(mut fields) = fields.write() {
+                    fields[index] = value
+                } else {
+                    unreachable!("Could not acquire object field lock")
+                }
+            }
             ReferenceType::Array(_, _, _) => {unimplemented!("This reference represents an array, please use 'set_element()'")}
         };
     }
 
     pub fn get_field(&self, index: usize) -> Value{
         match &self.reference_type {
-            ReferenceType::Object(fields) => {fields.borrow()[index].clone()}
+            ReferenceType::Object(fields) => {
+                if let Ok(fields) = fields.read() {
+                    fields[index].clone()
+                } else {
+                    unreachable!("Could not acquire object field lock")
+                }
+            }
             ReferenceType::Array(_, _, _) => {unimplemented!("This reference represents an array, please use 'get_element()'")}
         }
     }
@@ -180,21 +192,39 @@ impl ReferenceValue{
     pub fn set_element(&self, index: usize, value: Value) {
         match &self.reference_type {
             ReferenceType::Object(_) => {unimplemented!("This reference represents an object, please use 'set_field()'")}
-            ReferenceType::Array(_, _, content) => {content.borrow_mut()[index] = value}
+            ReferenceType::Array(_, _, content) => {
+                if let Ok(mut content) = content.write() {
+                    content[index] = value
+                } else {
+                    unreachable!("Could not acquire array element lock")
+                }
+            }
         };
     }
 
     pub fn get_element(&self, index: usize) -> Value{
         match &self.reference_type {
             ReferenceType::Object(_) => {unimplemented!("This reference represents an object, please use 'get_field()'")}
-            ReferenceType::Array(_, _, content) => {content.borrow()[index].clone()}
+            ReferenceType::Array(_, _, content) => {
+                if let Ok(content) = content.read() {
+                    content[index].clone()
+                } else {
+                    unreachable!("Could not acquire array element lock")
+                }
+            }
         }
     }
 
     pub fn get_length(&self) -> usize{
         match &self.reference_type {
             ReferenceType::Object(_) => {unimplemented!("This reference represents an object, please use 'get_field()'")}
-            ReferenceType::Array(_, _, content) => {content.borrow().len()}
+            ReferenceType::Array(_, _, content) => {
+                if let Ok(content) = content.read() {
+                    content.len()
+                } else {
+                    unreachable!("Could not acquire array element lock")
+                }
+            }
         }
     }
 
@@ -248,24 +278,24 @@ impl ReferenceValue{
                     let internal = vm.extract_string_from_char_arr(self.get_field(STRING_value_INDEX)).unwrap_or("VMError".to_string());
                     let mut components = Vec::new();
                     components.push(internal);
-                    let mut other_fields = fields.borrow().iter().skip(1).map(object).collect();
+                    let mut other_fields = fields.read().unwrap().iter().skip(1).map(object).collect();
                     components.append(&mut other_fields);
                     components
                 } else {
-                    fields.borrow().iter().map(object).collect()
+                    fields.read().unwrap().iter().map(object).collect()
                 }
             },
             ReferenceType::Array(_, field_type, content) => {
                 //vec![String::from("<redacted>")]
                 if let FieldType::Primitive(PrimitiveType::Char) = field_type {
-                    let chars: Vec<char> = content.borrow().iter().map(|e| if let Value::Integer(val) = e {char::from_u32(*val as u32).unwrap()} else {'?'}).collect();
+                    let chars: Vec<char> = content.read().unwrap().iter().map(|e| if let Value::Integer(val) = e {char::from_u32(*val as u32).unwrap()} else {'?'}).collect();
                     vec![chars.iter().collect::<String>()]
                 } else if let FieldType::Primitive(PrimitiveType::Byte) = field_type {
-                    content.borrow().iter().map(|e| if let Value::Integer(val) = e {format!("{:02x}", val)} else {format!("{e:?}")}).collect()
+                    content.read().unwrap().iter().map(|e| if let Value::Integer(val) = e {format!("{:02x}", val)} else {format!("{e:?}")}).collect()
                 } else {
                     let mut vec = Vec::new();
                     let mut null_counter = 0;
-                    for value in content.borrow().iter(){
+                    for value in content.read().unwrap().iter(){
                         if value.is_null() {
                             null_counter += 1;
                         } else {
@@ -283,6 +313,12 @@ impl ReferenceValue{
                 }
             }
         }
+    }
+}
+
+impl PartialEq for ReferenceValue {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
     }
 }
 
@@ -306,8 +342,7 @@ impl Debug for ReferenceValue {
     }
 }
 
-#[derive(PartialEq, Clone)]
 pub enum ReferenceType{
-    Object(RefCell<Vec<Value>>),
-    Array(usize, FieldType, RefCell<Vec<Value>>)
+    Object(RwLock<Vec<Value>>),
+    Array(usize, FieldType, RwLock<Vec<Value>>)
 }

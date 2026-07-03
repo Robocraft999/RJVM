@@ -861,11 +861,7 @@ impl JNINativeInterface_ {
     pub unsafe extern "system-unwind" fn GetArrayLength(env: *mut JNIEnv, array: jarray) -> jsize{
         let vm: &VM = unsafe{&*(*env).vm};
         let array_ref = vm.resolve_object_by_jobject(array).unwrap();
-        if let ReferenceType::Array(_, _, content) = &array_ref.reference_type {
-            content.borrow().len() as jsize
-        } else {
-            unreachable!()
-        }
+        array_ref.get_length() as jsize
     }
 
     pub unsafe extern "system-unwind" fn NewObjectArray(env: *mut JNIEnv<'static>, length: jsize, clazz: jclass, init: jobject) -> jobjectArray{
@@ -912,7 +908,8 @@ impl JNINativeInterface_ {
         let vm: &VM = unsafe{&*(*env).vm};
         let array_ref = vm.resolve_object_by_jobject(array).unwrap();
         if let ReferenceType::Array(_, _, content) = &array_ref.reference_type{
-            content.borrow()
+            content.read()
+                .unwrap()
                 .iter()
                 .enumerate()
                 .skip(start as usize)
@@ -934,7 +931,8 @@ impl JNINativeInterface_ {
         let vm: &VM = unsafe { &*(*env).vm };
         let array_ref = vm.resolve_object_by_jobject(array).unwrap();
         if let ReferenceType::Array(_, _, content) = &array_ref.reference_type{
-            content.borrow_mut()
+            content.write()
+                .unwrap()
                 .iter_mut()
                 .enumerate()
                 .skip(start as usize)
