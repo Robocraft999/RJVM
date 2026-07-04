@@ -553,7 +553,7 @@ fn successful_result<T>(res: T) -> VMPartialResult<T> {
     Ok(VMResultType::Successful(res))
 }
 
-#[derive(Error, Debug, Clone)]
+#[derive(Error, Debug)]
 pub enum VmError{
     #[error("{0}")]
     JavaException(#[from] JavaError),

@@ -91,7 +91,7 @@ impl<'a> ClassManager<'a>{
 
     fn resolve_class(&self, vm: &VM<'a>, class_name: &str) -> Result<ClassRef<'a>, VmError>{
         let (class_to_load_name, array_info) = self.try_create_array_class(class_name)?;
-        let bytes = self.class_path.resolve(class_to_load_name.as_str()).map_err(|e| VmError::ParseError(ClassParseError::from(e)))?.ok_or(ClassParseError::ResolveError(class_name.to_string()))?;
+        let bytes = self.class_path.resolve(class_to_load_name.as_str())?.ok_or(ClassParseError::ClassResolveError(class_name.to_string()))?;
         self.parse_and_load_class(&vm, class_name, class_to_load_name.as_str(), array_info, bytes)
     }
 

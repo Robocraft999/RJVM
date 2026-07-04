@@ -342,7 +342,7 @@ gen_delegate!(delegate_for_name0, |ctx, _class_object, args| {
             Ok(..) => {
                 non_failing_some(Value::Reference(wrap_init!(ctx, ctx.vm.new_class_object_by_name(&name)?).id))
             },
-            Err(VmError::ParseError(ClassParseError::ResolveError(_))) => {
+            Err(VmError::ParseError(ClassParseError::EntryResolveError(_))) => {
                 exception(name.as_str())
             }
             Err(err) => Err(err)
