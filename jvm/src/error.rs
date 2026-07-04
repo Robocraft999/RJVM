@@ -3,7 +3,7 @@ use std::fmt::Formatter;
 
 use thiserror::Error;
 
-use crate::vm::class_path_entry::ClassLoadingError;
+use crate::vm::class_path_entry::ClassPathEntryResolveError;
 
 /// Error returned when a directory is not valid
 #[derive(Debug, PartialEq, Eq)]
@@ -19,14 +19,14 @@ impl fmt::Display for InvalidDirectoryError {
 
 impl std::error::Error for InvalidDirectoryError {}
 
-#[derive(Error, Debug, PartialEq, Clone)]
+#[derive(Error, Debug)]
 pub enum ClassParseError{
     #[error("Reached EOF when parsing a class")]
     ReadError,
-    #[error("Class loading failed")]
-    LoadingError(#[from] ClassLoadingError),
-    #[error("Could not resolve class {0}")]
-    ResolveError(String),
+    #[error("Classpath Entry Resolve failed: {0}")]
+    EntryResolveError(#[from] ClassPathEntryResolveError),
+    #[error("Class Resolve Error: {0}")]
+    ClassResolveError(String),
     #[error("{0}")]
     ConstantPoolError(String),
 }
