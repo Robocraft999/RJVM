@@ -155,7 +155,7 @@ impl <'a> NativeMethodRegistry<'a> {
                 };
                 println!("[try_resolve_extern_native]: {class_object_or_this:?} with args: \n{:?}", args);
                 info!("METHOD_NAME (extern native): {}", cam.format());
-                let jni_result = extern_native.call(ctx.java_vm, cam, class_object_or_this, args);
+                let jni_result = extern_native.call(cam, class_object_or_this, args);
                 let result = if let Some(val) = jni_result{
                     unsafe {
                         Some(match (cam.method.descriptor.return_type.clone().unwrap(), val){

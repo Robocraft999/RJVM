@@ -29,41 +29,28 @@ pub fn with_thread<R>(f: impl FnOnce(&mut JavaThread) -> R) -> R {
 }
 
 pub struct Application<'a> {
-    java_vm: Pin<Box<JavaVM<'a>>>,
     pub(crate) vm: Pin<Box<VM<'a>>>,
 }
 
 impl <'a> Application<'a> {
     pub fn new(class_path: ClassPath) -> Self {
-        let main_thread = JavaThread::new(0);
-        JAVA_THREAD.set(main_thread);
+        let mut main_thread = JavaThread::new(0);
 
         let vm = Box::pin(VM::new(class_path));
 
-        let env = JNIEnv{
-            methods: jni::env_function_table::METHODS,
-            vm: vm.as_ref().get_ref(),
-            pvm: std::ptr::null(),
-        };
-        let mut javavm = Box::pin(JavaVM{
-            methods: jni::vm_function_table::METHODS,
-            env
-        });
-        let javavm_ptr: *const JavaVM<'a> = javavm.as_ref().get_ref();
-        unsafe {
-            //SAFETY: JavaVM is !UnPin so it will not be moved and get_unchecked_mut has to be used
-            let javavm_mut = Pin::as_mut(&mut javavm).get_unchecked_mut();
-            javavm_mut.env.pvm = javavm_ptr;
-        }
+        let env = Box::pin(JNIEnv::new(vm.as_ref().get_ref() as *const VM as _));
+        let javavm = Box::pin(JavaVM::new());
 
-        println!("javavm: {:p}", javavm);
+        main_thread.jni_env = env;
+        main_thread.java_vm = javavm;
+        JAVA_THREAD.set(main_thread);
 
-        Self { java_vm: javavm, vm}
+        Self {vm}
     }
 
     fn context(&self) -> Context<'a, '_> {
         let thread = thread();
-        Context {thread, vm: &self.vm, java_vm: &self.java_vm}
+        Context {thread, vm: &self.vm}
     }
 
     fn init_system(&self) -> Result<(), VmError>{

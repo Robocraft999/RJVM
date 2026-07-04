@@ -4,12 +4,14 @@ use crate::vm::constants::{THREADGROUP_maxPriority_INDEX, THREADGROUP_nUnstarted
 use crate::vm::native::{gen_delegate, invalidation, non_failing_none, non_failing_some, wrap_init, NativeMethodRegistry};
 use crate::vm::result::{VMPartialResult, VMResult};
 use crate::vm::value::{Reference, Value};
-use crate::vm::{Context, VmError, VM};
+use crate::vm::{jni, Context, VmError, VM};
 use std::cell::RefCell;
+use std::sync::RwLock;
 use std::thread;
 use crate::vm::application::{thread, JAVA_THREAD};
 use crate::vm::class::ClassAndMethod;
-use crate::vm::java_thread::JavaThread;
+use crate::vm::java_thread::{JavaThread};
+use crate::vm::jni::types::{JNIEnv, JavaVM};
 
 pub fn register_natives(registry: &mut NativeMethodRegistry) {
     registry.register(JAVA_LANG_THROWABLE, "fillInStackTrace", "(I)Ljava/lang/Throwable;", delegate_fill_in_stacktrace);
@@ -93,19 +95,33 @@ gen_delegate!(delegate_start0, |ctx, obj_ref, _args| {
     let method = target_clazz.find_method("run", "()V").unwrap();
     let cam = ClassAndMethod { class: target_clazz, method };
     let camid = cam.as_ids();
+    let target_id = target.id;
+
+    let id = if let Ok(mut next_id) = ctx.vm.next_thread_id.lock() {
+        let current = *next_id;
+        *next_id += 1;
+        current
+    } else {
+        return Err(VmError::LockError("Could not acquire thread id lock".to_string()));
+    };
+    let vm_ptr = ctx.vm as *const VM as _;
+    let env = Box::pin(JNIEnv::new(vm_ptr));
+    let vm = unsafe { &*(vm_ptr as *const VM)};
+    let java_vm = Box::pin(JavaVM::new());
     
-    thread::spawn(move || {
-        let mut java_thread = JavaThread::new(1);
+    thread::Builder::new().name(format!("T<{}>", id)).spawn(move || {
+        let mut java_thread = JavaThread::new(id);
         java_thread.thread_obj_id.replace(obj_id);
-        let vm_ptr = ctx.vm as *const VM as _;
-        java_thread.jni_env = vm_ptr;
+
+        java_thread.jni_env = env;
+        java_thread.java_vm = java_vm;
     
         JAVA_THREAD.set(java_thread);
 
-        //let context = Context { thread: thread(), vm: ctx.vm, java_vm: ctx.java_vm };
+        let context = Context { thread: thread(), vm};
 
-        //JavaThread::thread_entry(context, camid, Vec::new()).unwrap();
-    });
+        JavaThread::thread_entry(context, camid, target_id, Vec::new()).unwrap();
+    }).unwrap();
     non_failing_none()
 });
 
@@ -122,15 +138,15 @@ gen_delegate!(delegate_environ, |ctx, _obj_ref, _args| {
         ("DISPLAY", ":0")
     ];
     fn byte_array_from_str<'s>(vm: &VM<'s>, string: &str) -> VMResult<Reference<'s>>{
-        vm.try_new_array(1, FieldType::Primitive(PrimitiveType::Byte).to_array_field_type(1), RefCell::new(string.as_bytes().iter().map(|c| Value::Integer(*c as i32)).collect()))
+        vm.try_new_array(1, FieldType::Primitive(PrimitiveType::Byte).to_array_field_type(1), RwLock::new(string.as_bytes().iter().map(|c| Value::Integer(*c as i32)).collect()))
     }
-    let _ = wrap_init!(ctx, ctx.vm.new_array(1, FieldType::Primitive(PrimitiveType::Byte).to_array_field_type(1), RefCell::new(Vec::new()))?);
+    let _ = wrap_init!(ctx, ctx.vm.new_array(1, FieldType::Primitive(PrimitiveType::Byte).to_array_field_type(1), RwLock::new(Vec::new()))?);
     let values: Vec<Value> = vars.iter()
         .flat_map(|(k, v)| vec![
             Value::Reference(byte_array_from_str(ctx.vm, k).unwrap().id),
             Value::Reference(byte_array_from_str(ctx.vm, v).unwrap().id),
         ])
         .collect();
-    let array_ref = wrap_init!(ctx, ctx.vm.new_array(2, FieldType::Primitive(PrimitiveType::Byte).to_array_field_type(2), RefCell::new(values.clone()))?);
+    let array_ref = wrap_init!(ctx, ctx.vm.new_array(2, FieldType::Primitive(PrimitiveType::Byte).to_array_field_type(2), RwLock::new(values.clone()))?);
     non_failing_some(Value::Reference(array_ref.id))
 });

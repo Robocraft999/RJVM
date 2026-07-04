@@ -16,6 +16,7 @@ impl fmt::Debug for MemoryChunk {
 }
 
 unsafe impl Sync for MemoryChunk { }
+unsafe impl Send for MemoryChunk { }
 
 impl MemoryChunk {
     pub fn new(capacity: usize) -> Self {

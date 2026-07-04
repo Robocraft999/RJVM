@@ -60,7 +60,7 @@ gen_delegate!(delegate_native_lib_load, |ctx, obj_ref, _args| {
         let name_val = obj_ref.get_field(CLASSLOADER_NATIVELIBRARY_name_INDEX);//args.get(0).unwrap();
         let name = ctx.vm.extract_string_from_value(name_val)?;
         println!("name: {name}");
-        println!("javavm: {:p}", ctx.java_vm);
+        println!("javavm: {:p}", &ctx.thread.java_vm);
 
         unsafe {
             use libffi::middle::{Arg, Cif, Type};
@@ -72,7 +72,7 @@ gen_delegate!(delegate_native_lib_load, |ctx, obj_ref, _args| {
             let func_ptr = *sym as * const c_void;
             ctx.vm.native_method_registry.add_loaded_library(lib);
 
-            let vm_ptr = ptr::from_ref(ctx.java_vm) as *const c_void;
+            let vm_ptr = ptr::from_ref(ctx.thread.java_vm.as_ref().get_ref()) as *const c_void;
             println!("javavmp: {:p}", vm_ptr);
             let reserved = std::ptr::null() as *const c_void;
             let cif = Cif::new(vec![Type::pointer(), Type::pointer()], Type::i32()); //JNI_OnLoad

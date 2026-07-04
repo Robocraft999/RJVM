@@ -413,7 +413,7 @@ pub unsafe extern "system-unwind" fn JVM_LoadClass0(env: *mut JNIEnv, obj: jobje
 
 #[unsafe(no_mangle)]
 pub unsafe extern "system-unwind" fn JVM_GetArrayLength(env: *mut JNIEnv, arr: jobject) -> jint {
-    let vm = unsafe{&*(*env).vm};
+    let vm = unsafe{(*env).vm()};
 
     let obj_ref = vm.resolve_object_by_jobject(arr).unwrap();
     obj_ref.get_length() as jint
@@ -440,8 +440,8 @@ pub unsafe extern "system-unwind" fn JVM_SetPrimitiveArrayElement(env: *mut JNIE
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "system-unwind" fn JVM_NewArray(env: *mut JNIEnv<'static>, eltClass: jclass, length: jint) -> jobject {
-    let vm = unsafe{&*(*env).vm};
+pub unsafe extern "system-unwind" fn JVM_NewArray(env: *mut JNIEnv, eltClass: jclass, length: jint) -> jobject {
+    let vm = unsafe{(*env).vm()};
     let clazz = vm.resolve_class_object_by_jclass(eltClass);
     // FIXME check if we only have objects or primitives too (and if its always 1 dimensional)
     // one could use FieldType::from_str to fix, but then the prefilled values are wrong

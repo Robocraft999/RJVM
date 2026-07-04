@@ -6,6 +6,7 @@ use crate::vm::value::{Reference, Value};
 use libffi::high::CodePtr;
 use libffi::middle::{Arg, Cif, Type};
 use std::ffi::c_void;
+use crate::vm::application::thread;
 
 fn primitive_type_to_native(primitive_type: &PrimitiveType) -> Type {
     match primitive_type {
@@ -62,6 +63,7 @@ pub struct ExternNativeMethod{
     cif: Cif
 }
 
+unsafe impl Sync for ExternNativeMethod {}
 unsafe impl Send for ExternNativeMethod {}
 
 impl ExternNativeMethod {
@@ -70,8 +72,8 @@ impl ExternNativeMethod {
         Self { ptr, cif }
     }
 
-    pub fn call<'a>(&self, java_vm: &JavaVM, class_and_method: &ClassAndMethod, object: Reference<'a>, args: Vec<Value>) -> Option<jvalue>{
-        let env: *const JNIEnv = &java_vm.env;
+    pub fn call<'a>(&self, class_and_method: &ClassAndMethod, object: Reference<'a>, args: Vec<Value>) -> Option<jvalue>{
+        let env: *const JNIEnv = thread().jni_env.as_ref().get_ref();
         let second = object.id.nid() as jobject;
         let mut jni_args = vec![Arg::new(&env), Arg::new(&second)];
         jni_args.extend(values_to_jni_args(&args));
