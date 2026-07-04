@@ -1,9 +1,10 @@
 use std::cell::RefCell;
+use std::pin::Pin;
 use log::{debug, warn};
 use crate::vm::callstack::CallStack;
 use crate::vm::class::{ClassAndMethod, ClassAndMethodId, ClassRef};
 use crate::vm::java_error::JavaError;
-use crate::vm::jni::types::JavaVM;
+use crate::vm::jni::types::{JNIEnv, JavaVM};
 use crate::vm::result::{VMPartialResult, VMResult, VMResultType};
 use crate::vm::value::{RefId, Reference, Value};
 use crate::vm::{executor, Context, ProgramCounter, VmError, VM};
@@ -23,7 +24,8 @@ pub struct JavaThread {
     pub debug_helper: DebugHelper,
     pub caught_exception: RefCell<Option<(String, String, Value)>>,
 
-    pub jni_env: *const (),
+    pub jni_env: Pin<Box<JNIEnv>>,
+    pub java_vm: Pin<Box<JavaVM>>,
 }
 
 impl JavaThread {
@@ -35,7 +37,8 @@ impl JavaThread {
             debug_helper: DebugHelper::new(),
             caught_exception: RefCell::new(None),
 
-            jni_env: std::ptr::null(),
+            jni_env: Box::pin(JNIEnv::new(std::ptr::null())),
+            java_vm: Box::pin(JavaVM::new()),
         }
     }
 
@@ -45,10 +48,11 @@ impl JavaThread {
         Self::invoke_frames_until(ctx, current_index)
     }
 
-    pub fn thread_entry<'a>(ctx: Context<'a, '_>, camid: ClassAndMethodId, args: Vec<Value>) -> VMResult<()> {
+    pub fn thread_entry<'a>(ctx: Context<'a, '_>, camid: ClassAndMethodId, obj_id: RefId, args: Vec<Value>) -> VMResult<()> {
         let current_index = ctx.thread.call_stack.len() as isize -1;
         let class_and_method = ClassAndMethod::try_resolve(ctx.vm, &camid)?;
-        ctx.thread.call_stack.create_and_push_call_frame(class_and_method, None, args, false);
+        let obj = ctx.vm.resolve_object_by_id(obj_id)?;
+        ctx.thread.call_stack.create_and_push_call_frame(class_and_method, Some(obj), args, false);
         let VMResultType::Successful(None) = Self::invoke_frames_until(ctx, current_index)? else { return Err(VmError::Unspecified("Thread exited unsuccessfully".to_string())) };
         Ok(())
     }

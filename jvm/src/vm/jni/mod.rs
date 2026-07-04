@@ -10,9 +10,8 @@ macro_rules! native_init_wrap {
     ($env:expr, $x:expr) => {
         {
             let macro_thread = crate::vm::application::thread();
-            let macro_vm: &VM = unsafe{&*(*$env).vm};
-            let macro_javavm: &JavaVM = unsafe{&*(*$env).pvm};
-            let macro_context = crate::vm::Context {vm: macro_vm, java_vm: macro_javavm, thread: macro_thread };
+            let macro_vm: &VM = unsafe{(*$env).vm()};
+            let macro_context = crate::vm::Context {vm: macro_vm, thread: macro_thread };
             let macro_current_frame_index: isize = macro_thread.call_stack.len() as isize -1;
             let macro_res = $x;
             match macro_res.unwrap(){

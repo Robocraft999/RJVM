@@ -1,10 +1,8 @@
-use callstack::CallStack;
 use cesu8::{from_java_cesu8, Cesu8DecodingError};
-use log::{debug, error, info, trace, warn};
-use std::cell::RefCell;
+use log::{error, info};
 use std::collections::HashMap;
 use std::fmt::Debug;
-use std::sync::{PoisonError, RwLock};
+use std::sync::{Mutex, PoisonError, RwLock};
 use thiserror::Error;
 
 use crate::class_file::constant_pool::BytecodeBehavior;
@@ -14,7 +12,6 @@ use crate::error::ClassParseError;
 use crate::vm::class::{ClassAndMethod, ClassId, ClassRef};
 use crate::vm::class_manager::ClassLoadingState;
 use crate::vm::constants::{CLASS_name_INDEX, LONG_value_INDEX, METHODTYPE_ptypes_INDEX, METHODTYPE_rtype_INDEX, STRING_hash_INDEX, STRING_value_INDEX, THROWABLE_detailsMessage_INDEX};
-use crate::vm::debug::DebugHelper;
 use crate::vm::gc::ObjectAllocator;
 use crate::vm::java_error::JavaError;
 use crate::vm::jni::types::{jclass, jobject, JavaVM};
@@ -27,8 +24,8 @@ use class_manager::ClassManager;
 use class_path::ClassPath;
 use value::Value;
 use crate::class_file::fields::get_class_descriptor;
-use crate::vm::constants::classes::{JAVA_LANG_CLASS, JAVA_LANG_INVOKE_METHOD_TYPE, JAVA_LANG_INVOKE_MHN, JAVA_LANG_LONG, JAVA_LANG_STRING};
-use crate::vm::java_thread::JavaThread;
+use crate::vm::constants::classes::{JAVA_LANG_CLASS, JAVA_LANG_INVOKE_MHN, JAVA_LANG_LONG, JAVA_LANG_STRING};
+use crate::vm::java_thread::{JavaThread, TID};
 
 pub mod class_path;
 pub mod class_path_entry;
@@ -63,6 +60,7 @@ pub struct VM<'a>{
     pub native_method_registry: NativeMethodRegistry<'a>,
     pub currently_open_files: RwLock<HashMap<String, (Vec<u8>, usize)>>,
     pub current_locks: RwLock<HashMap<RefId, usize>>,
+    pub next_thread_id: Mutex<TID>,
 }
 
 impl<'a> VM<'a>{
@@ -83,6 +81,7 @@ impl<'a> VM<'a>{
             native_method_registry,
             currently_open_files: RwLock::new(HashMap::new()),
             current_locks: RwLock::new(HashMap::new()),
+            next_thread_id: Mutex::new(1)
         }
     }
 
@@ -438,7 +437,6 @@ impl Drop for VM<'_>{
 pub struct Context<'a, 'b> {
     pub thread: &'b JavaThread,
     pub vm: &'b VM<'a>,
-    pub java_vm: &'b JavaVM<'a>,
 }
 
 impl<'a> Context<'a, '_> {

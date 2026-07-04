@@ -38,14 +38,15 @@ impl<'a> ObjectAllocator<'a>{
             reference_type: ReferenceType::Object(RwLock::new(fields))
         };
 
-        let new_object = if let Ok(arena) = self.arena.lock() {
-            arena.alloc(object)
-        } else { unreachable!("Could not acquire object lock") };
-        *current_id += 1;
-        unsafe {
-            let object_ptr: *const ReferenceValue = new_object;
-            &*object_ptr
-        }
+        if let Ok(arena) = self.arena.lock() {
+            let new_object = arena.alloc(object);
+
+            *current_id += 1;
+            unsafe {
+                let object_ptr: *const ReferenceValue = new_object;
+                &*object_ptr
+            }
+        } else { unreachable!("Could not acquire object lock") }
     }
 
     pub fn allocate_array(&self, class: ClassRef<'a>, dims: usize, component_type: FieldType, content: RwLock<Vec<Value>>) -> Reference<'a>{
@@ -57,13 +58,14 @@ impl<'a> ObjectAllocator<'a>{
             reference_type: ReferenceType::Array(dims, component_type, content),
         };
 
-        let new_object = if let Ok(arena) = self.arena.lock() {
-            arena.alloc(array)
-        } else { unreachable!("Could not acquire object lock") };
-        *current_id += 1;
-        unsafe {
-            let object_ptr: *const ReferenceValue = new_object;
-            &*object_ptr
-        }
+        if let Ok(arena) = self.arena.lock() {
+            let new_object = arena.alloc(array);
+
+            *current_id += 1;
+            unsafe {
+                let object_ptr: *const ReferenceValue = new_object;
+                &*object_ptr
+            }
+        } else { unreachable!("Could not acquire object lock") }
     }
 }
