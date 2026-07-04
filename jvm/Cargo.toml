@@ -12,7 +12,7 @@ zip = { version = "2.2.0", features = ["deflate"] }
 thiserror = "1.0.63"
 typed-arena = "2.0.2"
 log = "0.4.22"
-simple_logger = "5.0.0"
+simple_logger = { version = "5.0.0", features = ["threads"] }
 regex = "1.10.6"
 lazy-regex = "3.4.1"
 cesu8 = "1.1.0"

@@ -77,6 +77,7 @@ pub fn run() {
         .with_module_level("debug", LevelFilter::Debug)
         .with_module_level("native", LevelFilter::Debug)
         .without_timestamps()
+        .with_threads(true)
         .init()
         .unwrap();
 
