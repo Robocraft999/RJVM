@@ -121,7 +121,7 @@ impl <'a> Application<'a> {
             thread().debug_helper.print();
             panic!("Could not allocate system thread group");
         };
-        thread.set_field(THREAD_eetop_INDEX, Value::Long(crate::vm::application::thread().id as i64));
+        thread.set_field(THREAD_eetop_INDEX, Value::Long(crate::vm::application::thread().meta.id as i64));
         thread.set_field(THREAD_priority_INDEX, Value::Integer(NORM_PRIORITY));
         crate::vm::application::thread().thread_obj_id.replace(thread.id);
 

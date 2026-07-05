@@ -569,7 +569,7 @@ pub struct ClassAndField<'a>{
     pub field: &'a FieldInfo,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Hash, Eq)]
 pub struct ClassAndMethodId{
     pub class_id: ClassId,
     pub method_slot: usize,
