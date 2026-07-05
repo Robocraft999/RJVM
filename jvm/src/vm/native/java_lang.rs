@@ -71,7 +71,7 @@ gen_delegate!(delegate_holds_lock, |ctx, _obj_ref, args| {
     let Some(Value::Reference(lock_ref)) = args.get(0) else { return invalidation!("holdLock expected a potential lock"); };
     //let current_thread = ctx.vm.current_thread.borrow();
     //let Some(_current_thread) = current_thread.as_ref() else { return invalidation!("There is no thread lol"); };
-    non_failing_some(Value::from(ctx.vm.current_locks.read()?.contains_key(&lock_ref)))
+    non_failing_some(Value::from(ctx.vm.monitor_handler.holds_lock(ctx, *lock_ref)))
 });
 
 gen_delegate!(delegate_set_priority0, |_ctx, obj_ref, args| {

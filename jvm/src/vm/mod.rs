@@ -61,7 +61,6 @@ pub struct VM<'a>{
     pub object_payloads: RwLock<HashMap<RefId, Vec<Value>>>,
     pub native_method_registry: NativeMethodRegistry<'a>,
     pub currently_open_files: RwLock<HashMap<String, (Vec<u8>, usize)>>,
-    pub current_locks: RwLock<HashMap<RefId, usize>>,
     pub next_thread_id: Mutex<TID>,
     pub monitor_handler: MonitorHandler,
 }
@@ -83,7 +82,6 @@ impl<'a> VM<'a>{
             object_payloads: RwLock::new(HashMap::new()),
             native_method_registry,
             currently_open_files: RwLock::new(HashMap::new()),
-            current_locks: RwLock::new(HashMap::new()),
             next_thread_id: Mutex::new(1),
             monitor_handler: MonitorHandler::new(),
         }
