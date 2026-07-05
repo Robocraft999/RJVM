@@ -853,10 +853,10 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                 Instruction::MONITORENTER => {
                     if let Some(Value::Reference(lock_ref)) = ctx.thread.call_stack.pop_operand_value(){
                         debug!("MONITORENTER");
-                        /*if let Ok(mut res) = ctx.vm.current_locks.write() {
-                            *res.entry(lock_ref.id).or_default() += 1;
-                        }*/
-                        
+                        if lock_ref.is_null() {
+                            return Some(Err(VmError::ValidationError("Can not lock on null".to_string())))
+                        }
+                        wrap_error!(ctx.vm.monitor_handler.enter_ref_or_block(ctx, lock_ref));
                     } else {
                         warn!("No object to lock")
                     }
@@ -864,14 +864,10 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                 Instruction::MONITOREXIT => {
                     if let Some(Value::Reference(lock_ref)) = ctx.thread.call_stack.pop_operand_value(){
                         debug!("MONITOREXIT");
-                        /*let mut locks = ctx.vm.current_locks.borrow_mut();
-                        let Some(current_lock_count) = locks.get_mut(&lock_ref.id) else {
-                            return Some(Err(VmError::ValidationError(format!("Cannot unlock {:?} because it was not locked", lock_ref))));
-                        };
-                        *current_lock_count -= 1;
-                        if *current_lock_count == 0 {
-                            locks.remove(&lock_ref.id);
-                        }*/
+                        if lock_ref.is_null() {
+                            return Some(Err(VmError::ValidationError("Can not unlock on null".to_string())))
+                        }
+                        wrap_error!(ctx.vm.monitor_handler.exit_ref(ctx, lock_ref))
                     } else {
                         warn!("No object to lock")
                     }

@@ -1,6 +1,6 @@
 use crate::vm::constants::classes::{JAVA_LANG_OBJECT, JAVA_LANG_OBJECT_ARR};
 use crate::vm::jni::types::JavaVM;
-use crate::vm::native::{gen_delegate, invalidation, non_failing_some, wrap_init, NativeMethodRegistry};
+use crate::vm::native::{gen_delegate, invalidation, non_failing_none, non_failing_some, wrap_init, NativeMethodRegistry};
 use crate::vm::result::VMPartialResult;
 use crate::vm::value::{Reference, ReferenceType, Value};
 use crate::vm::{VmError, VM};
@@ -13,6 +13,9 @@ pub fn register_natives(registry: &mut NativeMethodRegistry) {
     register("getClass", "()Ljava/lang/Class;", delegate_get_class);
     register("hashCode", "()I", delegate_hashcode);
     register("clone", "()Ljava/lang/Object;", delegate_clone);
+    register("wait", "(J)V", delegate_wait);
+    register("notify", "()V", delegate_notify);
+    register("notifyAll", "()V", delegate_notify_all);
     registry.register(JAVA_LANG_OBJECT_ARR, "getClass", "()Ljava/lang/Class;", delegate_get_class);
     registry.register(JAVA_LANG_OBJECT_ARR, "clone", "()Ljava/lang/Object;", delegate_clone);
 }
@@ -62,6 +65,39 @@ gen_delegate!(delegate_clone, |ctx, obj_ref, _args| {
                 non_failing_some(Value::Reference(new_object_ref.id))
             }
         }
+    } else {
+        invalidation!("Expected object")
+    }
+});
+
+gen_delegate!(delegate_wait, |ctx, obj_ref, args| {
+    debug!("wait");
+    if let (Some(obj_ref), Some(Value::Long(millies))) = (obj_ref, args.get(0)){
+        if obj_ref.is_null() {
+            return invalidation!("Cannot wait on null object");
+        }
+        ctx.vm.monitor_handler.wait(ctx, obj_ref.id, *millies as u64);
+        non_failing_none()
+    } else {
+        invalidation!("Expected this and long param")
+    }
+});
+
+gen_delegate!(delegate_notify, |ctx, obj_ref, _args| {
+    debug!("notify");
+    if let Some(obj_ref) = obj_ref{
+        ctx.vm.monitor_handler.notify(ctx, obj_ref.id);
+        non_failing_none()
+    } else {
+        invalidation!("Expected object")
+    }
+});
+
+gen_delegate!(delegate_notify_all, |ctx, obj_ref, _args| {
+    debug!("notify all");
+    if let Some(obj_ref) = obj_ref{
+        ctx.vm.monitor_handler.notify_all(ctx, obj_ref.id);
+        non_failing_none()
     } else {
         invalidation!("Expected object")
     }

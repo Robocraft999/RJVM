@@ -1,6 +1,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc};
-use std::thread::park;
+use std::thread::{park, park_timeout};
+use std::time::Duration;
 use parking_lot::{Mutex, RwLock};
 use crate::vm::application::thread;
 use crate::vm::class::ClassAndMethodId;
@@ -45,6 +46,7 @@ impl Monitor {
 }
 
 pub struct MonitorHandler {
+    // TODO consider using RwLock again. because of mere holdsLock() check (enter can still lock as write)
     state: Mutex<HashMap<MonitorAssociate, Arc<Monitor>>>,
 }
 
@@ -55,21 +57,23 @@ impl MonitorHandler {
         }
     }
 
+    fn get_monitor(&self, ctx: Context, associate: MonitorAssociate) -> Arc<Monitor> {
+        let mut state = self.state.lock();
+
+        state
+            .entry(associate)
+            .or_insert_with(|| {
+                Arc::new(Monitor::new(Arc::clone(&ctx.thread.meta), associate))
+            })
+            .clone()
+    }
+
     pub fn enter_ref_or_block(&self, ctx: Context, ref_id: RefId) -> VMResult<()> {
         self.enter_or_block(ctx, MonitorAssociate::Ref(ref_id))
     }
 
     fn enter_or_block(&self, ctx: Context, associate: MonitorAssociate) -> VMResult<()> {
-        let monitor = {
-            let mut state = self.state.lock();
-
-            state
-                .entry(associate)
-                .or_insert_with(|| {
-                    Arc::new(Monitor::new(Arc::clone(&ctx.thread.meta), associate))
-                })
-                .clone()
-        };
+        let monitor = self.get_monitor(ctx, associate);
         let mut monitor_guard = monitor.state.lock();
 
         if let Some(owner) = &monitor_guard.owner {
@@ -120,5 +124,46 @@ impl MonitorHandler {
             }
         }
         Ok(())
+    }
+
+    pub fn holds_lock(&self, ctx: Context, ref_id: RefId) -> bool {
+        let state_guard = self.state.lock();
+        if let Some(monitor) = state_guard.get(&MonitorAssociate::Ref(ref_id)) {
+            let state_lock = monitor.state.lock();
+            if let Some(owner) = &state_lock.owner {
+                return owner == &ctx.thread.meta
+            }
+        }
+        false
+    }
+
+    pub fn wait(&self, ctx: Context, ref_id: RefId, timeout: u64) {
+        let monitor = self.get_monitor(ctx, MonitorAssociate::Ref(ref_id));
+
+        let mut monitor_guard = monitor.state.lock();
+        monitor_guard.wait_list.push_back(ctx.thread.meta.clone());
+        if timeout == 0 {
+            park();
+        } else {
+            park_timeout(Duration::from_millis(timeout));
+        }
+    }
+
+    pub fn notify(&self, ctx: Context, ref_id: RefId) {
+        let monitor = self.get_monitor(ctx, MonitorAssociate::Ref(ref_id));
+
+        let mut monitor_guard = monitor.state.lock();
+        if let Some(top) = monitor_guard.wait_list.pop_front() {
+            top.os_thread.unpark();
+        }
+    }
+
+    pub fn notify_all(&self, ctx: Context, ref_id: RefId) {
+        let monitor = self.get_monitor(ctx, MonitorAssociate::Ref(ref_id));
+
+        let mut monitor_guard = monitor.state.lock();
+        while let Some(top) = monitor_guard.wait_list.pop_front() {
+            top.os_thread.unpark();
+        }
     }
 }
