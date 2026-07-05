@@ -26,6 +26,7 @@ use value::Value;
 use crate::class_file::fields::get_class_descriptor;
 use crate::vm::constants::classes::{JAVA_LANG_CLASS, JAVA_LANG_INVOKE_MHN, JAVA_LANG_LONG, JAVA_LANG_STRING};
 use crate::vm::java_thread::{JavaThread, TID};
+use crate::vm::monitoring::{MonitorHandler};
 
 pub mod class_path;
 pub mod class_path_entry;
@@ -47,6 +48,7 @@ pub(crate) mod constants;
 mod native;
 mod java_thread;
 pub mod application;
+mod monitoring;
 
 pub struct VM<'a>{
     pub class_manager: ClassManager<'a>,
@@ -61,6 +63,7 @@ pub struct VM<'a>{
     pub currently_open_files: RwLock<HashMap<String, (Vec<u8>, usize)>>,
     pub current_locks: RwLock<HashMap<RefId, usize>>,
     pub next_thread_id: Mutex<TID>,
+    pub monitor_handler: MonitorHandler,
 }
 
 impl<'a> VM<'a>{
@@ -81,7 +84,8 @@ impl<'a> VM<'a>{
             native_method_registry,
             currently_open_files: RwLock::new(HashMap::new()),
             current_locks: RwLock::new(HashMap::new()),
-            next_thread_id: Mutex::new(1)
+            next_thread_id: Mutex::new(1),
+            monitor_handler: MonitorHandler::new(),
         }
     }
 

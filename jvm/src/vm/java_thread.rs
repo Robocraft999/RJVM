@@ -1,5 +1,7 @@
 use std::cell::RefCell;
 use std::pin::Pin;
+use std::sync::Arc;
+use std::thread::Thread;
 use log::{debug, warn};
 use crate::vm::callstack::CallStack;
 use crate::vm::class::{ClassAndMethod, ClassAndMethodId, ClassRef};
@@ -16,8 +18,20 @@ pub type TID = u32;
 pub const NORM_PRIORITY: i32 = 5;
 pub const RUNNABLE: i32 = 1 + 4; //jvmti: alive + runnable
 
-pub struct JavaThread {
+#[derive(Debug)]
+pub struct ThreadMeta {
     pub id: TID,
+    pub os_thread: Thread,
+}
+
+impl PartialEq for ThreadMeta {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id && self.os_thread.id() == other.os_thread.id()
+    }
+}
+
+pub struct JavaThread {
+    pub meta: Arc<ThreadMeta>,
     pub thread_obj_id: Option<RefId>,
 
     pub call_stack: CallStack,
@@ -31,7 +45,7 @@ pub struct JavaThread {
 impl JavaThread {
     pub fn new(id: TID) -> Self {
         Self {
-            id,
+            meta: Arc::new(ThreadMeta { id, os_thread: std::thread::current() }),
             thread_obj_id: None,
             call_stack: CallStack::new(),
             debug_helper: DebugHelper::new(),

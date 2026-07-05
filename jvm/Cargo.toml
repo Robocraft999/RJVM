@@ -22,6 +22,7 @@ serde = { version = "1.0.228", features = ["derive"], optional = true }
 nom = "8.0.0"
 nom-derive = {path = "../../nom-derive"}
 toml = {  version = "0.9.8", optional = true, features = ["serde"]}
+parking_lot = "0.12.5"
 
 [features]
 debug = ["dep:toml", "dep:serde"]
