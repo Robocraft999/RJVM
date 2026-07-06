@@ -89,7 +89,8 @@ impl <'a> Application<'a> {
     pub fn run_and_catch_method(&self, class_name: &str, method_name: &str, method_descriptor: &str, args: Vec<Value>) {
         self.init_class(class_name);
         let main_method = self.vm.resolve_class_method(class_name, method_name, method_descriptor).unwrap();
-        let _result = self.handle_partial(JavaThread::invoke_subroutine(self.context(), main_method, None, args));
+        let context = self.context();
+        let _result = self.handle_partial(JavaThread::invoke_subroutine(context, main_method, None, args));
     }
 
     fn init_class(&self, class_name: &str) {
