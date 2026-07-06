@@ -153,7 +153,7 @@ impl <'a> NativeMethodRegistry<'a> {
                 } else {
                     object.unwrap()
                 };
-                println!("[try_resolve_extern_native]: {class_object_or_this:?} with args: \n{:?}", args);
+                println!("[try_resolve_extern_native]: {} with args: \n{:?}", class_object_or_this.print(ctx.vm), args);
                 info!("METHOD_NAME (extern native): {}", cam.format());
                 let jni_result = extern_native.call(cam, class_object_or_this, args);
                 let result = if let Some(val) = jni_result{
