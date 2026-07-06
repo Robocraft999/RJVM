@@ -1,6 +1,6 @@
+use parking_lot::RwLock;
 use crate::vm::r#unsafe::memory_chunk::MemoryChunk;
-use std::cell::RefCell;
-use std::sync::RwLock;
+use crate::vm::result::VMResult;
 
 mod memory_chunk;
 
@@ -16,50 +16,46 @@ impl Unsafe {
     }
 
     pub fn allocate_memory(&self, amount: usize) -> i64 {
-        if let Ok(mut res) = self.memory.write() {
-            res.alloc(amount).map(|entry| entry.ptr as i64).unwrap_or(-1)
-        } else {
-            unreachable!("Could not acquire lock for unsafe memory")
-        }
+        let mut guard = self.memory.write();
+        guard.alloc(amount).map(|entry| entry.ptr as i64).unwrap_or(-1)
     }
 
     pub fn free_memory(&self, ptr: i64) {
         //TODO
     }
 
-    pub fn put_long(&self, ptr: i64, value: i64) {
-        if let Ok(mut res) = self.memory.write() {
-            res.put(ptr as usize, 8, &value.to_be_bytes());
-        } else {
-            unreachable!("Could not acquire lock for unsafe memory")
-        }
+    pub fn put_long(&self, ptr: i64, value: i64) -> VMResult<()> {
+        let mut guard = self.memory.write();
+        guard.put(ptr as u64, 8, &value.to_le_bytes())
     }
 
-    pub fn get_long(&self, ptr: i64) -> Option<i64> {
-        let mut value: i64 = 0;
-        let Ok(res) = self.memory.read() else { 
-            unreachable!("Could not acquire lock for unsafe memory") 
-        };
-        for (index, element) in res.get(ptr as usize, 8).iter().enumerate(){
-            value |= (*element as i64) << (8 * (7-index));
-        }
-        Some(value)
+    pub fn get_long(&self, ptr: i64) -> VMResult<i64> {
+        let guard = self.memory.read();
+        let bytes = guard.get(ptr as u64, 8)?;
+        let value = i64::from_le_bytes(bytes.try_into().unwrap());
+        Ok(value)
     }
 
-    pub fn put_byte(&self, ptr: i64, value: u8) {
-        if let Ok(mut res) = self.memory.write() {
-            res.put(ptr as usize, 1, &[value])
-        } else {
-            unreachable!("Could not acquire lock for unsafe memory")
-        }
+    pub fn put_int(&self, ptr: i64, value: i32) -> VMResult<()> {
+        let mut guard = self.memory.write();
+        guard.put(ptr as u64, 4, &value.to_le_bytes())
     }
 
-    pub fn get_byte(&self, ptr: i64) -> Option<u8> {
-        if let Ok(res) = self.memory.read() {
-            Some(res.get(ptr as usize, 1)[0])
-        } else {
-            unreachable!("Could not acquire lock for unsafe memory")
-        }
+    pub fn get_int(&self, ptr: i64) -> VMResult<i32> {
+        let guard = self.memory.read();
+        let bytes = guard.get(ptr as u64, 4)?;
+        let value = i32::from_le_bytes(bytes.try_into().unwrap());
+        Ok(value)
+    }
+
+    pub fn put_byte(&self, ptr: i64, value: u8) -> VMResult<()> {
+        let mut guard = self.memory.write();
+        guard.put(ptr as u64, 1, &[value])
+    }
+
+    pub fn get_byte(&self, ptr: i64) -> VMResult<u8> {
+        let guard = self.memory.read();
+        Ok(guard.get(ptr as u64, 1)?[0])
     }
 }
 
@@ -69,24 +65,24 @@ mod tests {
 
     #[test]
     fn test_allocate_memory() {
-        let mut unsafe_allocator = Unsafe::new();
+        let unsafe_allocator = Unsafe::new();
         assert_ne!(unsafe_allocator.allocate_memory(8), -1)
     }
 
     #[test]
     fn test_long(){
-        let mut unsafe_allocator = Unsafe::new();
+        let unsafe_allocator = Unsafe::new();
         let offset = unsafe_allocator.allocate_memory(8);
-        unsafe_allocator.put_long(offset, 12);
-        assert_eq!(unsafe_allocator.get_long(offset), Some(12));
+        unsafe_allocator.put_long(offset, 12).unwrap();
+        assert_eq!(unsafe_allocator.get_long(offset).unwrap(), 12);
     }
 
     #[test]
     fn test_long_and_byte(){
-        let mut unsafe_allocator = Unsafe::new();
+        let unsafe_allocator = Unsafe::new();
         let offset = unsafe_allocator.allocate_memory(8);
-        //bytes get stored as big endian (See put_long), so we expect 1 (See java/nio/Bits.<clinit>)
-        unsafe_allocator.put_long(offset, 72623859790382856);
-        assert_eq!(unsafe_allocator.get_byte(offset), Some(1));
+        //bytes get stored as little endian (See put_long), so we expect 8 (See java/nio/Bits.<clinit>)
+        unsafe_allocator.put_long(offset, 72623859790382856).unwrap();
+        assert_eq!(unsafe_allocator.get_byte(offset).unwrap(), 8);
     }
 }

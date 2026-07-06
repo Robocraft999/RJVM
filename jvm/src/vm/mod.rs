@@ -583,7 +583,10 @@ pub enum VmError{
     Native(String),
     
     #[error("VM thread is poisoned: {0}")]
-    LockError(String)
+    LockError(String),
+    
+    #[error("Error when using unsafe memory: {0}")]
+    UnsafeError(String),
 }
 
 impl<T> From<PoisonError<T>> for VmError {
