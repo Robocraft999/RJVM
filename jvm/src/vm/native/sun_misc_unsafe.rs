@@ -26,6 +26,8 @@ pub fn register_natives(registry: &mut NativeMethodRegistry) {
     register("allocateMemory", "(J)J", delegate_allocate_memory);
     register("putLong", "(JJ)V", delegate_put_long);
     register("getLong", "(J)J", delegate_get_long);
+    register("putInt", "(JI)V", delegate_put_int);
+    register("getInt", "(J)I", delegate_get_int);
     register("getByte", "(J)B", delegate_get_byte);
     register("getObject", "(Ljava/lang/Object;J)Ljava/lang/Object;", delegate_get_object_volatile);
     register("putOrderedObject", "(Ljava/lang/Object;JLjava/lang/Object;)V", delegate_put_ordered_object);
@@ -214,7 +216,7 @@ gen_delegate!(delegate_allocate_memory, |ctx, _obj_ref, args| {
 gen_delegate!(delegate_put_long, |ctx, _obj_ref, args| {
     //because args = [Long, Dummy, Long, Dummy]
     if let (Some(Value::Long(ptr)), Some(Value::Long(value))) = (args.get(0), args.get(2)){
-        ctx.vm.unsafe_allocator.put_long(*ptr, *value);
+        ctx.vm.unsafe_allocator.put_long(*ptr, *value)?;
         non_failing_none()
     } else {
         invalidation!("Expected a long as address and a long as value")
@@ -223,8 +225,27 @@ gen_delegate!(delegate_put_long, |ctx, _obj_ref, args| {
 
 gen_delegate!(delegate_get_long, |ctx, _obj_ref, args| {
     if let Some(Value::Long(ptr)) = args.get(0){
-        let long = ctx.vm.unsafe_allocator.get_long(*ptr);
-        Ok(VMResultType::Successful(long.map(|val| Value::Long(val))))
+        let val = ctx.vm.unsafe_allocator.get_long(*ptr)?;
+        non_failing_some(Value::Long(val))
+    } else {
+        invalidation!("Expected a long as address")
+    }
+});
+
+gen_delegate!(delegate_put_int, |ctx, _obj_ref, args| {
+    //because args = [Long, Dummy, Int]
+    if let (Some(Value::Long(ptr)), Some(Value::Integer(value))) = (args.get(0), args.get(2)){
+        ctx.vm.unsafe_allocator.put_int(*ptr, *value)?;
+        non_failing_none()
+    } else {
+        invalidation!("Expected a long as address and a int as value")
+    }
+});
+
+gen_delegate!(delegate_get_int, |ctx, _obj_ref, args| {
+    if let Some(Value::Long(ptr)) = args.get(0){
+        let val = ctx.vm.unsafe_allocator.get_int(*ptr)?;
+        non_failing_some(Value::Integer(val))
     } else {
         invalidation!("Expected a long as address")
     }
@@ -232,8 +253,8 @@ gen_delegate!(delegate_get_long, |ctx, _obj_ref, args| {
 
 gen_delegate!(delegate_get_byte, |ctx, _obj_ref, args| {
     if let Some(Value::Long(ptr)) = args.get(0){
-        let byte = ctx.vm.unsafe_allocator.get_byte(*ptr);
-        Ok(VMResultType::Successful(byte.map(|byte| Value::Integer(byte as i32))))
+        let val = ctx.vm.unsafe_allocator.get_byte(*ptr)?;
+        non_failing_some(Value::Integer(val as i32))
     } else {
         invalidation!("Expected a long as address")
     }

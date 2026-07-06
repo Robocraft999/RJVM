@@ -1,9 +1,13 @@
-use log::debug;
+use log::{debug, warn};
 use std::alloc::Layout;
 use std::fmt;
 use std::fmt::Formatter;
+use std::panic::catch_unwind;
+use crate::vm::result::VMResult;
+use crate::vm::VmError;
 
 pub struct MemoryChunk {
+    start: u64,
     memory: *mut u8,
     used: usize,
     capacity: usize,
@@ -28,6 +32,7 @@ impl MemoryChunk {
         );
 
         MemoryChunk {
+            start: ptr as u64,
             memory: ptr,
             capacity,
             used: 0,
@@ -51,22 +56,25 @@ impl MemoryChunk {
         })
     }
 
-    pub fn put(&mut self, offset: usize, bytes: usize, data: &[u8]) {
+    pub fn put(&mut self, ptr: u64, bytes: usize, data: &[u8]) -> VMResult<()>{
         //assert!(offset + data.len() <= self.capacity);
+        if ptr < self.start || ptr + bytes as u64 > self.start + self.capacity as u64 {
+            warn!("unsafe writing: Safe bounds are [{:#0x}-{:#0x}], ptr is: {:#0x}, writing {} bytes", self.start, self.start + self.capacity as u64, ptr, bytes)
+        }
         unsafe {
             for i in 0..bytes {
-                std::ptr::write((offset + i * 8) as *mut u8, data[i]);
+                std::ptr::write((ptr + i as u64) as *mut u8, data[i]);
             }
         }
+        Ok(())
     }
 
-    pub fn get(&self, offset: usize, bytes: usize) -> Vec<u8> {
+    pub fn get(&self, ptr: u64, bytes: usize) -> VMResult<Vec<u8>> {
+        if ptr < self.start || ptr + bytes as u64 > self.start + self.capacity as u64 {
+            warn!("unsafe reading: Safe bounds are [{:#0x}-{:#0x}], ptr is: {:#0x}, reading {} bytes", self.start, self.start + self.capacity as u64, ptr, bytes)
+        }
         unsafe {
-            let mut bytes_vec = Vec::with_capacity(bytes);
-            for i in 0..bytes {
-                bytes_vec.push(std::ptr::read((offset + i * 8) as *const u8));
-            }
-            bytes_vec
+            Ok(std::slice::from_raw_parts(ptr as *const u8, bytes).to_vec())
         }
     }
 }
