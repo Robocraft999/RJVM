@@ -139,3 +139,26 @@ pub fn resolve_virtual_call<'a>(receiver_class: ClassRef<'a>, resolved_class: Cl
     };
     CallInfo::new_virtual(resolved_class, receiver_class, resolved_method, selected_method, vtable_index)
 }
+
+pub fn resolve_special_call<'a>(resolved_class: ClassRef<'a>, method_name: &str, method_signature: &str) -> CallInfo<'a> {
+    let cam = if !resolved_class.is_interface() {
+        resolved_class.resolve_method_virtual(method_name, method_signature).unwrap()
+    } else {
+        resolved_class.resolve_interface_method_virtual(method_signature, method_signature).unwrap()
+    };
+    let resolved_method = cam.method;
+
+    //TODO more checks see (https://github.com/openjdk/jdk8u/blob/master/hotspot/src/share/vm/interpreter/linkResolver.cpp#L908)
+
+    let selected_method = resolved_method;
+
+    CallInfo::new_static(resolved_class, selected_method)
+}
+
+/*
+LinkResolver::resolve_special_call(CallInfo& result, Handle recv, KlassHandle resolved_klass, Symbol* method_name,
+                                        Symbol* method_signature, KlassHandle current_klass, bool check_access, TRAPS)
+LinkResolver::resolve_virtual_call(CallInfo& result, Handle recv, KlassHandle receiver_klass, KlassHandle resolved_klass,
+                                        Symbol* method_name, Symbol* method_signature, KlassHandle current_klass,
+                                        bool check_access, bool check_null_and_abstract, TRAPS)
+ */

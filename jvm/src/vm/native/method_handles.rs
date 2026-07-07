@@ -2,7 +2,7 @@ use crate::access_flags::{FieldFlag, MethodFlag};
 use crate::class_file::fields::{get_class_descriptor, FieldInfo};
 use crate::class_file::methods::descriptor::MethodDescriptor;
 use crate::class_file::methods::{descriptor, INVALID_VTABLE_INDEX, NONVIRTUAL_VTABLE_INDEX};
-use crate::vm::call_info::{resolve_virtual_call, CallInfo, CallInfoKind};
+use crate::vm::call_info::{resolve_special_call, resolve_virtual_call, CallInfo, CallInfoKind};
 use crate::vm::class::ClassAndMethod;
 use crate::vm::constants::classes::{JAVA_LANG_CLASS, JAVA_LANG_INVOKE_METHOD_HANDLE, JAVA_LANG_INVOKE_METHOD_TYPE, JAVA_LANG_INVOKE_MHN, JAVA_LANG_REFLECT_CONSTRUCTOR, JAVA_LANG_REFLECT_FIELD, JAVA_LANG_REFLECT_METHOD, JAVA_LANG_STRING};
 use crate::vm::constants::{LAMBDAFORM_vmentry_INDEX, MEMBERNAME_clazz_INDEX, MEMBERNAME_flags_INDEX, MEMBERNAME_name_INDEX, MEMBERNAME_type_INDEX, METHODHANDLE_form_INDEX, METHODTYPE_ptypes_INDEX, METHODTYPE_rtype_INDEX, METHOD_clazz_INDEX, METHOD_slot_INDEX};
@@ -345,6 +345,9 @@ gen_delegate!(delegate_resolve, |ctx, _obj_ref, args| {
                             let origin = "java/lang/invoke/MethodHandleNatives.resolve(Ljava/lang/invoke/MemberName;Ljava/lang/Class;)Ljava/lang/invoke/MemberName;".to_string();
                             return JavaThread::throw(ctx, exception_class, exception_message, origin);
                         }
+                    }
+                    REF_invokeSpecial => {
+                        resolve_special_call(clazz, name.as_str(), sig.as_str())
                     }
                     REF_invokeInterface => {
                         let cam = clazz.resolve_interface_method_virtual(name.as_str(), sig.as_str()).unwrap();
