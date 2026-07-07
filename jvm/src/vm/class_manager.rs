@@ -20,6 +20,7 @@ use std::collections::{HashMap};
 use std::str::FromStr;
 use std::sync::{Mutex, RwLock};
 use typed_arena::Arena;
+use crate::vm::application::thread;
 
 #[derive(Debug, Clone)]
 pub(crate) enum ResolvedClass<'a> {
@@ -267,7 +268,8 @@ impl<'a> ClassManager<'a>{
             let class_ptr: *const Class<'a> = &class;
             &*class_ptr
         };
-        //vm.vm_debug_helper.bytecode_helper.push_class(class_ref, bytes);
+
+        thread().debug_helper.bytecode_helper.push_class(class_ref, bytes);
 
         class.init_vtable();
         class.init_itable();

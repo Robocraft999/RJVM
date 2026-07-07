@@ -6,7 +6,8 @@ use std::io::Write;
 use serde::Deserialize;
 use crate::vm::class::ClassRef;
 
-#[derive(Deserialize, Debug)]
+#[derive(Debug)]
+#[cfg_attr(feature = "debug", derive(Deserialize))]
 pub struct ClassFilter {
     name: String,
     methods: Option<Vec<(String, String)>>
