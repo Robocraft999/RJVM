@@ -755,8 +755,13 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
 
                     let method = clazz.find_method(name.as_str(), desc.as_str()).unwrap();
                     let cam = ClassAndMethod { class: clazz, method};
-                    
-                    if let Some(res) = get_or_init_option!(JavaThread::invoke_subroutine(ctx, cam, None, vec![appendix_ref.get_element(0)])) {
+
+                    let mut args = vec![];
+                    for _ in 0..cam.method.get_args_count()-1 {
+                        args.push(ctx.thread.call_stack.pop_operand_value().unwrap())
+                    }
+                    args.push(appendix_ref.get_element(0));
+                    if let Some(res) = get_or_init_option!(JavaThread::invoke_subroutine(ctx, cam, None, args)) {
                         ctx.thread.call_stack.push_operand_value(res);
                     }
                     println!("schwubbel3");
