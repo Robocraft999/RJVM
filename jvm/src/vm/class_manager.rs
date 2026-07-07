@@ -159,6 +159,7 @@ impl<'a> ClassManager<'a>{
             constants: RwLock::new(constants),
             flags: parsed_class.access_flags,
             superclass: None,
+            this_index: parsed_class.this_class,
             interfaces: Vec::new(),
             fields: Vec::new(),
             methods: Vec::new(),

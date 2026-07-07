@@ -8,6 +8,7 @@ use crate::vm::result::{VMPartialResult, VMResultType};
 use crate::vm::value::{Reference, ReferenceType, Value};
 use crate::vm::{VmError, VM};
 use log::{debug, trace};
+use crate::class_file::constant_pool::ConstantPoolEntry;
 
 pub fn register_natives(registry: &mut NativeMethodRegistry) {
     let mut register = |method_name, sig, delegate| registry.register(SUN_MISC_UNSAFE, method_name, sig, delegate);
@@ -317,6 +318,9 @@ gen_delegate!(delegate_define_anon_class, |ctx, _obj_ref, args| {
                 }
                 Err(e) => return Err(VmError::from(e))
             };
+            
+            // we have to assign 'this' here, because we can't resolve it later by name
+            class_ref.constants.write()?[class_ref.this_index as usize - 1] = ConstantPoolEntry::Class(class_ref);
 
             ctx.vm.class_manager.classes_by_id.write()?.insert(class_ref.id, class_ref);
             //vm.class_manager.classes_by_name.borrow_mut().insert(class_ref.name.clone(), class_ref);

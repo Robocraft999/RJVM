@@ -24,6 +24,7 @@ pub struct Class<'a>{
     pub constants: RwLock<ConstantPool<'a>>,
     pub flags: u16,
     pub superclass: Option<ClassRef<'a>>,
+    pub this_index: u16,
     pub interfaces: Vec<ClassRef<'a>>,
     pub fields: Vec<FieldInfo>,
     pub methods: Vec<MethodInfo>,
