@@ -526,7 +526,7 @@ impl<'a> Context<'a, '_> {
 
     fn init_class(&self, class: ClassRef<'a>) -> Option<()>{
         info!("IC[{}]", class.name);
-        if class.transitive_field_count > 0 && !class.is_array(){
+        if !class.is_array(){
             let static_object = self.vm.new_object_from_class(class);
             if let Ok(mut res) = self.vm.static_class_objects.write() {
                 res.insert(class.id, static_object);

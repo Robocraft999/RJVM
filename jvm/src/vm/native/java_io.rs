@@ -1,3 +1,5 @@
+use std::fs::File;
+use std::os::unix::fs::PermissionsExt;
 use crate::vm::constants::classes::{JAVA_IO_FILE_INPUT_STREAM, JAVA_IO_FILE_OUTPUT_STREAM, JAVA_IO_UNIX_FILE_SYSTEM};
 use crate::vm::constants::{FILEINPUTSTREAM_path_INDEX, FILE_path_INDEX};
 use crate::vm::jni::types::JavaVM;
@@ -18,6 +20,8 @@ pub fn register_natives(registry: &mut NativeMethodRegistry) {
     registry.register(JAVA_IO_UNIX_FILE_SYSTEM, "getBooleanAttributes0", "(Ljava/io/File;)I", delegate_get_boolean_attribute);
     registry.register(JAVA_IO_UNIX_FILE_SYSTEM, "canonicalize0", "(Ljava/lang/String;)Ljava/lang/String;", delegate_canonicalize0);
     registry.register(JAVA_IO_UNIX_FILE_SYSTEM, "getLastModifiedTime", "(Ljava/io/File;)J", delegate_last_modified_time);
+    registry.register(JAVA_IO_UNIX_FILE_SYSTEM, "checkAccess", "(Ljava/io/File;I)Z", delegate_check_access);
+    registry.register(JAVA_IO_UNIX_FILE_SYSTEM, "list", "(Ljava/io/File;)[Ljava/lang/String;", delegate_list);
 }
 
 gen_delegate!(delegate_write_bytes, |ctx, _obj_ref, args| {
@@ -189,4 +193,54 @@ gen_delegate!(delegate_last_modified_time, |ctx, _obj_ref, args| {
     } else {
         invalidation!("Expected file as parameter")
     }
+});
+
+const ACCESS_READ:    i32 = 0x04;
+const ACCESS_WRITE:   i32 = 0x02;
+const ACCESS_EXECUTE: i32 = 0x01;
+
+gen_delegate!(delegate_check_access, |ctx, _obj_ref, args| {
+    if let (Some(Value::Reference(file_ref_id)), Some(Value::Integer(mode))) = (args.get(0), args.get(1)){
+        let file_ref = ctx.vm.resolve_object_by_id(*file_ref_id)?;
+        let string_val = file_ref.get_field(FILE_path_INDEX);
+        let path = ctx.vm.extract_string_from_value(string_val)?;
+        let path = Path::new(&path);
+        if !path.exists() {
+            return non_failing_some(Value::from(false))
+        }
+        let permissions = path.metadata().unwrap().permissions().mode();
+        let res = Value::from(match *mode {
+            ACCESS_READ => permissions & 0o400 != 0,
+            ACCESS_WRITE => permissions & 0o200 != 0,
+            ACCESS_EXECUTE => permissions & 0o100 != 0,
+            _ => unreachable!("Invalid file mode: {}", mode)
+        });
+        non_failing_some(res)
+    } else {
+        invalidation!("Expected file and mode as parameter")
+    }
+});
+
+gen_delegate!(delegate_list, |ctx, _obj_ref, args| {
+    if let Some(Value::Reference(file_ref_id)) = args.get(0){
+        let file_ref = ctx.vm.resolve_object_by_id(*file_ref_id)?;
+        let string_val = file_ref.get_field(FILE_path_INDEX);
+        let path = ctx.vm.extract_string_from_value(string_val)?;
+        let path = Path::new(&path);
+
+        if !path.exists() {
+            return non_failing_some(ctx.vm.null())
+        }
+
+        let names = path
+            .read_dir()
+            .unwrap()
+            .filter_map(|e| e.map(|de| de.file_name().into_string().ok()).ok().flatten())
+            .collect::<Vec<_>>();
+
+        non_failing_none()
+    } else {
+        invalidation!("")
+    }
+
 });

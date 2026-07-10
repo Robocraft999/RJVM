@@ -1,5 +1,5 @@
 use crate::vm::constants::classes::JAVA_LANG_SYSTEM;
-use crate::vm::constants::{SYSTEM_err_INDEX, SYSTEM_out_INDEX};
+use crate::vm::constants::{SYSTEM_err_INDEX, SYSTEM_in_INDEX, SYSTEM_out_INDEX};
 use crate::vm::jni::types::JavaVM;
 use crate::vm::native::{gen_delegate, invalidation, non_failing_none, non_failing_some, wrap_init, NativeMethodRegistry};
 use crate::vm::result::VMPartialResult;
@@ -16,6 +16,7 @@ pub fn register_natives(registry: &mut NativeMethodRegistry) {
     register("nanoTime", "()J", delegate_nano_time);
     register("currentTimeMillis", "()J", delegate_time_millis);
     register("identityHashCode", "(Ljava/lang/Object;)I", delegate_identity_hash_code);
+    register("setIn0", "(Ljava/io/InputStream;)V", delegate_set_in0);
     register("setOut0", "(Ljava/io/PrintStream;)V", delegate_set_out0);
     register("setErr0", "(Ljava/io/PrintStream;)V", delegate_set_err0);
     register("arraycopy", "(Ljava/lang/Object;ILjava/lang/Object;II)V", delegate_arraycopy);
@@ -42,6 +43,20 @@ gen_delegate!(delegate_identity_hash_code, |_ctx, _obj_ref, args| {
         non_failing_some(Value::Integer(addr))
     } else {
         invalidation!("Expected Object but found '{:?}'", args.get(0))
+    }
+});
+
+gen_delegate!(delegate_set_in0, |ctx, _obj_ref, args| {
+    let clazz = ctx.vm.get_or_resolve_class(JAVA_LANG_SYSTEM)?;
+    if let Some(static_obj_refect) = ctx.vm.get_static_class_object(clazz.id){
+        if let Some(Value::Reference(object)) = args.get(0){
+            static_obj_refect.set_field(SYSTEM_in_INDEX, Value::Reference(*object));
+            non_failing_none()
+        } else {
+            invalidation!("Expected Object but found '{:?}'", args.get(0))
+        }
+    } else {
+        invalidation!("Couldn't find static Object of class {}", clazz.name)
     }
 });
 

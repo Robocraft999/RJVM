@@ -28,11 +28,13 @@ pub fn register_natives(registry: &mut NativeMethodRegistry) {
     register("compareAndSwapInt", "(Ljava/lang/Object;JII)Z", delegate_compare_and_swap_int);
     register("compareAndSwapLong", "(Ljava/lang/Object;JJJ)Z", delegate_compare_and_swap_long);
     register("allocateMemory", "(J)J", delegate_allocate_memory);
+    register("freeMemory", "(J)V", delegate_free_memory);
     register("putLong", "(JJ)V", delegate_put_long);
     register("getLong", "(J)J", delegate_get_long);
     register("putInt", "(JI)V", delegate_put_int);
     register("getInt", "(J)I", delegate_get_int);
     register("getByte", "(J)B", delegate_get_byte);
+    register("putObject", "(Ljava/lang/Object;JLjava/lang/Object;)V", delegate_put_object_volatile);
     register("getObject", "(Ljava/lang/Object;J)Ljava/lang/Object;", delegate_get_object_volatile);
     register("putOrderedObject", "(Ljava/lang/Object;JLjava/lang/Object;)V", delegate_put_ordered_object);
     register("defineClass", "(Ljava/lang/String;[BIILjava/lang/ClassLoader;Ljava/security/ProtectionDomain;)Ljava/lang/Class;", delegate_define_class);
@@ -214,6 +216,15 @@ gen_delegate!(delegate_allocate_memory, |ctx, _obj_ref, args| {
         //return is address in memory
         let ptr = ctx.vm.unsafe_allocator.allocate_memory(*num as usize);
         non_failing_some(Value::Long(ptr))
+    } else {
+        invalidation!("Expected a long")
+    }
+});
+
+gen_delegate!(delegate_free_memory, |ctx, _obj_ref, args| {
+    if let Some(Value::Long(num)) = args.get(0){
+        ctx.vm.unsafe_allocator.free_memory(*num);
+        non_failing_none()
     } else {
         invalidation!("Expected a long")
     }

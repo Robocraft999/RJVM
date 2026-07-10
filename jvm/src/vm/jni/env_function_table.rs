@@ -224,7 +224,7 @@ const TABLE: JNINativeInterface = [
     //172
     //object array stuff
     JNINativeInterface_::NewObjectArray as _,
-    not_implemented as _,
+    JNINativeInterface_::GetObjectArrayElement as _,
     JNINativeInterface_::SetObjectArrayElement as _,
 
     //175
@@ -303,8 +303,8 @@ const TABLE: JNINativeInterface = [
 
     //222
     //primitive array critical
-    not_implemented as _,
-    not_implemented as _,
+    JNINativeInterface_::GetPrimitiveArrayCritical as _,
+    JNINativeInterface_::ReleasePrimitiveArrayCritical as _,
 
     //224
     //string critical

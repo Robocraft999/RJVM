@@ -343,6 +343,13 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                         Err(VmError::JavaException(JavaError::DivisionByZero))
                     }
                 })),
+                Instruction::DDIV => wrap_error!(execute_d_arithmetic(ctx.thread, |val1, val2| {
+                    if val2 != 0.0 {
+                        Ok(val1 / val2)
+                    } else {
+                        Err(VmError::JavaException(JavaError::DivisionByZero))
+                    }
+                })),
 
                 Instruction::IREM => wrap_error!(execute_i_arithmetic(ctx.thread, |val1, val2| Ok(val1.wrapping_rem(val2)))),
                 Instruction::LREM => wrap_error!(execute_l_arithmetic(ctx.thread, |val1, val2| Ok(val1.wrapping_rem(val2)))),
@@ -933,6 +940,10 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
         InstructionBlock::IConstReturn(val) => {
             ctx.thread.debug_helper.tracker.push_method_event(class_and_method.format(), format!("returning int: {}", val));
             return Some(Ok(VMResultType::Successful(Some(Value::Integer(*val)))))
+        }
+        InstructionBlock::LConstReturn(val) => {
+            ctx.thread.debug_helper.tracker.push_method_event(class_and_method.format(), format!("returning long: {}", val));
+            return Some(Ok(VMResultType::Successful(Some(Value::Long(*val)))))
         }
         other => {
             return Some(Err(VmError::Unspecified(format!("Block of type {:?} not executable", other))))

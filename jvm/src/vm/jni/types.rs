@@ -14,9 +14,10 @@ use log::{debug, error, warn};
 use std::ffi::{c_char, c_double, c_float, c_int, c_long, c_schar, c_short, c_uchar, c_ushort, c_void, CStr, CString, OsStr, VaList};
 use std::fmt::Debug;
 use std::os::unix::ffi::OsStrExt;
-use std::slice;
+use std::{ptr, slice};
 use std::sync::RwLock;
 use crate::vm::application::thread;
+use crate::vm::constants::THROWABLE_detailsMessage_INDEX;
 use crate::vm::java_thread::JavaThread;
 
 //Platform dependent
@@ -282,8 +283,35 @@ impl JNINativeInterface_ {
         assert!(prev.is_none());
         0 as jint
     }
-    pub fn ThrowNew(env: *mut JNIEnv, clazz: jclass, msg: *const c_char) -> jint{
-        unimplemented!()
+    pub unsafe extern "system-unwind" fn ThrowNew(env: *mut JNIEnv, clazz: jclass, msg: *const c_char) -> jint{
+        let vm: &VM = unsafe{(*env).vm()};
+        debug!(target: "native", "NATIVE: ThrowNew");
+
+        let msg = if !msg.is_null() {
+            unsafe { CStr::from_ptr(msg).to_owned().into_string().map_err(|e| VmError::Native(e.to_string())).unwrap() }
+        } else {
+            String::new()
+        };
+
+        let ctx = Context { thread: thread(), vm };
+
+        let clazz = vm.resolve_class_object_by_jclass(clazz);
+        native_init_wrap!(env, ctx.ensure_initialized(clazz));
+        let exception_object = ctx.vm.new_object_from_class(clazz);
+
+        let details = ctx.vm.try_new_string_object(msg.as_str()).unwrap();
+        //detailsMessage
+        exception_object.set_field(THROWABLE_detailsMessage_INDEX, Value::Reference(details.id));
+
+        let prev = ctx.thread.caught_exception.replace(
+            Some((
+                msg,
+                "<Native>::ThrowNew".to_owned(),
+                Value::Reference(exception_object.id)
+            )));
+        assert!(prev.is_none());
+
+        0 as jint
     }
     pub fn ExceptionOccurred(env: *mut JNIEnv) -> jthrowable{
         let vm: &VM = unsafe{(*env).vm()};
@@ -547,22 +575,40 @@ impl JNINativeInterface_ {
     }
 
     pub unsafe extern "system-unwind" fn GetObjectField(env: *mut JNIEnv, obj: jobject, fieldID: jfieldID) -> jobject{
-        unimplemented!()
+        let vm = unsafe{(*env).vm()};
+        let obj_ref = vm.resolve_object_by_jobject(obj).unwrap();
+        let Value::Reference(val) = obj_ref.get_field(fieldID as usize) else { unreachable!("") };
+        val.nid()
     }
     pub unsafe extern "system-unwind" fn GetBooleanField(env: *mut JNIEnv, obj: jobject, fieldID: jfieldID) -> jboolean{
-        unimplemented!()
+        let vm = unsafe{(*env).vm()};
+        let obj_ref = vm.resolve_object_by_jobject(obj).unwrap();
+        let Value::Integer(val) = obj_ref.get_field(fieldID as usize) else { unreachable!("") };
+        val as jboolean
     }
     pub unsafe extern "system-unwind" fn GetByteField(env: *mut JNIEnv, obj: jobject, fieldID: jfieldID) -> jbyte{
-        unimplemented!()
+        let vm = unsafe{(*env).vm()};
+        let obj_ref = vm.resolve_object_by_jobject(obj).unwrap();
+        let Value::Integer(val) = obj_ref.get_field(fieldID as usize) else { unreachable!("") };
+        val as jbyte
     }
     pub unsafe extern "system-unwind" fn GetCharField(env: *mut JNIEnv, obj: jobject, fieldID: jfieldID) -> jchar{
-        unimplemented!()
+        let vm = unsafe{(*env).vm()};
+        let obj_ref = vm.resolve_object_by_jobject(obj).unwrap();
+        let Value::Integer(val) = obj_ref.get_field(fieldID as usize) else { unreachable!("") };
+        val as jchar
     }
     pub unsafe extern "system-unwind" fn GetShortField(env: *mut JNIEnv, obj: jobject, fieldID: jfieldID) -> jshort{
-        unimplemented!()
+        let vm = unsafe{(*env).vm()};
+        let obj_ref = vm.resolve_object_by_jobject(obj).unwrap();
+        let Value::Integer(val) = obj_ref.get_field(fieldID as usize) else { unreachable!("") };
+        val as jshort
     }
     pub unsafe extern "system-unwind" fn GetIntField(env: *mut JNIEnv, obj: jobject, fieldID: jfieldID) -> jint{
-        unimplemented!()
+        let vm = unsafe{(*env).vm()};
+        let obj_ref = vm.resolve_object_by_jobject(obj).unwrap();
+        let Value::Integer(val) = obj_ref.get_field(fieldID as usize) else { unreachable!("") };
+        val as jint
     }
     pub unsafe extern "system-unwind" fn GetLongField(env: *mut JNIEnv, obj: jobject, fieldID: jfieldID) -> jlong{
         let vm = unsafe{(*env).vm()};
@@ -571,10 +617,16 @@ impl JNINativeInterface_ {
         val as jlong
     }
     pub unsafe extern "system-unwind" fn GetFloatField(env: *mut JNIEnv, obj: jobject, fieldID: jfieldID) -> jfloat{
-        unimplemented!()
+        let vm = unsafe{(*env).vm()};
+        let obj_ref = vm.resolve_object_by_jobject(obj).unwrap();
+        let Value::Float(val) = obj_ref.get_field(fieldID as usize) else { unreachable!("") };
+        val as jfloat
     }
     pub unsafe extern "system-unwind" fn GetDoubleField(env: *mut JNIEnv, obj: jobject, fieldID: jfieldID) -> jdouble{
-        unimplemented!()
+        let vm = unsafe{(*env).vm()};
+        let obj_ref = vm.resolve_object_by_jobject(obj).unwrap();
+        let Value::Double(val) = obj_ref.get_field(fieldID as usize) else { unreachable!("") };
+        val as jdouble
     }
 
     unsafe fn SetField(env: *mut JNIEnv, obj: jobject, fieldID: jfieldID, val: Value) {
@@ -870,6 +922,9 @@ impl JNINativeInterface_ {
     //0x7ffde0618390
     pub unsafe extern "system-unwind" fn NewStringUTF(env: *const JNIEnv, utf: *const c_char) -> jstring{
         debug!("NATIVE: NewStringUTF");
+        if utf.is_null() {
+            return 0 as jstring
+        }
         unsafe {
             let utf_r = CStr::from_ptr(utf).to_owned().into_string().map_err(|e| VmError::Native(e.to_string())).unwrap();
             let vm = (*env).vm();
@@ -909,6 +964,16 @@ impl JNINativeInterface_ {
             RwLock::new(content.clone())
         ));
         array_ref.id.nid() as jobjectArray
+    }
+
+    pub unsafe extern "system-unwind" fn GetObjectArrayElement(env: *mut JNIEnv, array: jobjectArray, index: jsize) -> jobject {
+        let vm: &VM = unsafe{(*env).vm()};
+        let array_ref = vm.resolve_object_by_jobject(array).unwrap();
+        if let Value::Reference(elem) = array_ref.get_element(index as usize) {
+            elem.nid()
+        } else {
+            unreachable!("ObjectArray element is not an object")
+        }
     }
 
     pub unsafe extern "system-unwind" fn SetObjectArrayElement(env: *mut JNIEnv, array: jarray, index: jsize, value: jobject){
@@ -981,6 +1046,67 @@ impl JNINativeInterface_ {
             println!("NATIVE: GetJavaVM: {:?} {:p}", *vm_ptr, *vm_ptr);
         }
         JNI_OK
+    }
+
+    pub unsafe extern "system-unwind" fn GetPrimitiveArrayCritical(env: *mut JNIEnv, array: jarray, isCopy: *mut jboolean) -> *const u8 {
+        let vm: &VM = unsafe{(*env).vm()};
+        let array_ref = vm.resolve_object_by_jobject(array).unwrap();
+
+        if !isCopy.is_null() {
+            unsafe {
+                *isCopy = JNI_TRUE;
+            }
+        }
+
+        if let ReferenceType::Array(_, ft, content) = &array_ref.reference_type {
+            let width = ft.get_locals_length() * 4;
+            let allocation_size = width * array_ref.get_length();
+            let ptr = vm.unsafe_allocator.allocate_memory(allocation_size);
+
+            let bytes: Vec<u8> = content.read()
+                .unwrap()
+                .iter()
+                .enumerate()
+                .flat_map(|(i, val)| match val {
+                    Value::Integer(val) => val.to_le_bytes().to_vec(),
+                    Value::Long(val) => val.to_le_bytes().to_vec(),
+                    Value::Float(val) => val.to_le_bytes().to_vec(),
+                    Value::Double(val) => val.to_le_bytes().to_vec(),
+                    _ => unreachable!()
+                })
+                .collect();
+            vm.unsafe_allocator.put_bytes(ptr, &bytes).unwrap();
+
+            ptr as *const u8
+        } else {
+            ptr::null()
+        }
+    }
+
+    pub unsafe extern "system-unwind" fn ReleasePrimitiveArrayCritical(env: *mut JNIEnv, array: jarray, carray: *const u8, mode: jint) {
+        let vm: &VM = unsafe{(*env).vm()};
+        let array_ref = vm.resolve_object_by_jobject(array).unwrap();
+
+        if let ReferenceType::Array(_, ft, content) = &array_ref.reference_type {
+            let width = ft.get_locals_length() * 4;
+            let allocation_size = width * array_ref.get_length();
+
+            let bytes = vm.unsafe_allocator.get_bytes(carray as i64, allocation_size).unwrap();
+            let vals= bytes.chunks(width).map(|bytes| match ft {
+                FieldType::Primitive(PrimitiveType::Boolean) => Value::Integer(i32::from_le_bytes(bytes.try_into().unwrap())),
+                FieldType::Primitive(PrimitiveType::Byte) => Value::Integer(i32::from_le_bytes(bytes.try_into().unwrap())),
+                FieldType::Primitive(PrimitiveType::Char) => Value::Integer(i32::from_le_bytes(bytes.try_into().unwrap())),
+                FieldType::Primitive(PrimitiveType::Short) => Value::Integer(i32::from_le_bytes(bytes.try_into().unwrap())),
+                FieldType::Primitive(PrimitiveType::Integer) => Value::Integer(i32::from_le_bytes(bytes.try_into().unwrap())),
+                FieldType::Primitive(PrimitiveType::Long) => Value::Long(i64::from_le_bytes(bytes.try_into().unwrap())),
+                FieldType::Primitive(PrimitiveType::Float) => Value::Float(f32::from_le_bytes(bytes.try_into().unwrap())),
+                FieldType::Primitive(PrimitiveType::Double) => Value::Double(f64::from_le_bytes(bytes.try_into().unwrap())),
+                _ => unreachable!()
+            }).collect::<Vec<_>>();
+
+            let mut guard = content.write().unwrap();
+            guard.copy_from_slice(vals.as_slice())
+        }
     }
 
     pub unsafe extern "system-unwind" fn ExceptionCheck(env: *mut JNIEnv) -> jboolean{

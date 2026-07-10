@@ -57,6 +57,16 @@ impl Unsafe {
         let guard = self.memory.read();
         Ok(guard.get(ptr as u64, 1)?[0])
     }
+
+    pub fn put_bytes(&self, ptr: i64, bytes: &[u8]) -> VMResult<()> {
+        let mut guard = self.memory.write();
+        guard.put(ptr as u64, bytes.len(), bytes)
+    }
+
+    pub fn get_bytes(&self, ptr: i64, length: usize) -> VMResult<Vec<u8>> {
+        let guard = self.memory.read();
+        Ok(guard.get(ptr as u64, length)?)
+    }
 }
 
 #[cfg(test)]

@@ -35,6 +35,7 @@ pub fn register_natives(registry: &mut NativeMethodRegistry) {
     register("isArray", "()Z", delegate_is_array);
     register("isPrimitive", "()Z", delegate_is_primitive);
     register("isAssignableFrom", "(Ljava/lang/Class;)Z", delegate_is_assignable_from);
+    register("getGenericSignature0", "()Ljava/lang/String;", delegate_get_generic_signature0);
 }
 
 gen_delegate!(delegate_get_primitive_class, |ctx, _obj, args| {
@@ -394,5 +395,21 @@ gen_delegate!(delegate_is_assignable_from, |ctx, class_ref, args| {
         non_failing_some(Value::from(ctx.vm.unchecked_check_if_subclass_of(this_class.name.as_str(), from_class.name.as_str())?))
     } else {
         invalidation!("expected a class reference")
+    }
+});
+
+gen_delegate!(delegate_get_generic_signature0, |ctx, class_ref, _args| {
+    debug!("getGenericSignature0");
+    if let Some(class_ref) = class_ref {
+        let clazz = ctx.vm.extract_class_from_class_object(class_ref)?;
+        if let Some(signature) = &clazz.attributes.signature {
+            let sig = clazz.get_utf_constant(signature.signature_index)?;
+            let sig_ref = wrap_init!(ctx, ctx.vm.new_string_object(sig.as_str())?);
+            non_failing_some(Value::Reference(sig_ref.id))
+        } else {
+            invalidation!("No signature attribute")
+        }
+    } else {
+        invalidation!("this is Null")
     }
 });

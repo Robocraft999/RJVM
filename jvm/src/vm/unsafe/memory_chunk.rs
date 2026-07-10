@@ -45,14 +45,15 @@ impl MemoryChunk {
         }
 
         // We require all allocations to be aligned to 8 bytes!
-        assert_eq!(required_size % 8, 0);
+        let allocated_size = required_size + required_size % 8;
+        assert_eq!(allocated_size % 8, 0);
 
         let ptr = unsafe { self.memory.add(self.used) };
-        self.used += required_size;
+        self.used += allocated_size;
 
         Some(AllocEntry {
             ptr,
-            alloc_size: required_size,
+            alloc_size: allocated_size,
         })
     }
 
@@ -62,6 +63,7 @@ impl MemoryChunk {
             warn!("unsafe writing: Safe bounds are [{:#0x}-{:#0x}], ptr is: {:#0x}, writing {} bytes", self.start, self.start + self.capacity as u64, ptr, bytes)
         }
         unsafe {
+            // std::ptr::copy(data.as_ptr(), ptr as *mut u8, bytes);
             for i in 0..bytes {
                 std::ptr::write((ptr + i as u64) as *mut u8, data[i]);
             }

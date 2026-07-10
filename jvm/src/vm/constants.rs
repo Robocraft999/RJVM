@@ -23,6 +23,7 @@ pub const STRING_value_INDEX: usize = 0;
 pub const STRING_hash_INDEX: usize = 1;
 
 // java.lang.System
+pub const SYSTEM_in_INDEX: usize = 0;
 pub const SYSTEM_out_INDEX: usize = 1;
 pub const SYSTEM_err_INDEX: usize = 2;
 
