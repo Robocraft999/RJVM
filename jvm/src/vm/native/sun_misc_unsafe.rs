@@ -1,3 +1,5 @@
+use std::thread::{park, park_timeout};
+use std::time::{Duration, Instant, SystemTime};
 use crate::vm::class::Class;
 use crate::vm::class_manager::{AnonClassInfo, ClassLoadingState};
 use crate::vm::constants::classes::{JAVA_LANG_CLASS, SUN_MISC_UNSAFE};
@@ -9,6 +11,7 @@ use crate::vm::value::{Reference, ReferenceType, Value};
 use crate::vm::{VmError, VM};
 use log::{debug, trace};
 use crate::class_file::constant_pool::ConstantPoolEntry;
+use crate::vm::java_thread::ThreadState;
 
 pub fn register_natives(registry: &mut NativeMethodRegistry) {
     let mut register = |method_name, sig, delegate| registry.register(SUN_MISC_UNSAFE, method_name, sig, delegate);
@@ -37,6 +40,8 @@ pub fn register_natives(registry: &mut NativeMethodRegistry) {
     register("allocateInstance", "(Ljava/lang/Class;)Ljava/lang/Object;", delegate_allocate_instance);
     register("shouldBeInitialized", "(Ljava/lang/Class;)Z", delegate_should_be_initialized);
     register("ensureClassInitialized", "(Ljava/lang/Class;)V", delegate_ensure_initialized);
+    register("park", "(ZJ)V", delegate_park);
+    register("unpark", "(Ljava/lang/Object;)V", delegate_unpark);
 }
 
 
@@ -365,4 +370,48 @@ gen_delegate!(delegate_ensure_initialized, |ctx, _obj_ref, args| {
     } else {
         invalidation!("Expected a class reference but got: {:?}", args)
     }
+});
+
+gen_delegate!(delegate_park, |ctx, _obj_ref, args| {
+    let (Some(Value::Integer(is_absolute)), Some(Value::Long(time))) = (args.get(0), args.get(1)) else { return invalidation!("Expected boolean and long parameters") };
+
+    {
+        let mut unparked_flag_lock = ctx.thread.meta.unsafe_unpark_count.lock();
+        if *unparked_flag_lock > 0 {
+            *unparked_flag_lock -= 1;
+            return non_failing_none();
+        }
+    }
+
+    if *time > 0 {
+        if *is_absolute == 0 {
+            park_timeout(Duration::from_millis(*time as u64));
+        } else if *is_absolute == 1 {
+            let amount = Duration::from_millis(*time as u64) - SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap();
+            park_timeout(amount);
+        } else {
+            unreachable!("Boolean cannot be {}", is_absolute);
+        }
+    } else {
+        ctx.thread.meta.park();
+        park();
+    }
+    ctx.thread.meta.unpark();
+    non_failing_none()
+});
+
+gen_delegate!(delegate_unpark, |ctx, _obj_ref, args| {
+    let Some(Value::Reference(thread_ref_id)) = args.get(0) else { return invalidation!("Expected Thread ref") };
+    let Some(meta) = ctx.vm.thread_lookup.read()?.get(thread_ref_id).cloned() else {
+        return invalidation!("Reference with {:?} has no associated JavaThread", thread_ref_id)
+    };
+
+    if *meta.state.read() == ThreadState::Parked {
+        meta.unpark();
+        meta.os_thread.unpark();
+    } else {
+        let mut unpark_count_lock = meta.unsafe_unpark_count.lock();
+        *unpark_count_lock += 1;
+    };
+    non_failing_none()
 });

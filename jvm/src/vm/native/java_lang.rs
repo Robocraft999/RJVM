@@ -8,6 +8,7 @@ use crate::vm::{jni, Context, VmError, VM};
 use std::cell::RefCell;
 use std::sync::RwLock;
 use std::thread;
+use log::error;
 use crate::vm::application::{thread, JAVA_THREAD};
 use crate::vm::class::ClassAndMethod;
 use crate::vm::java_thread::{JavaThread};
@@ -22,6 +23,7 @@ pub fn register_natives(registry: &mut NativeMethodRegistry) {
     registry.register(JAVA_LANG_THREAD, "holdsLock", "(Ljava/lang/Object;)Z", delegate_holds_lock);
     registry.register(JAVA_LANG_THREAD, "setPriority0", "(I)V", delegate_set_priority0);
     registry.register(JAVA_LANG_THREAD, "start0", "()V", delegate_start0);
+    registry.register(JAVA_LANG_THREAD, "isInterrupted", "(Z)Z", delegate_is_interrupted);
     registry.register(JAVA_LANG_RUNTIME, "availableProcessors", "()I", delegate_available_processors);
     registry.register(JAVA_LANG_RUNTIME, "freeMemory", "()J", delegate_free_memory);
     registry.register(JAVA_LANG_PROCESS_ENVIRONMENT, "environ", "()[[B", delegate_environ);
@@ -84,6 +86,7 @@ gen_delegate!(delegate_set_priority0, |_ctx, obj_ref, args| {
 gen_delegate!(delegate_start0, |ctx, obj_ref, _args| {
     let Some(obj_ref) = obj_ref else { return invalidation!("Expected this to be present") };
     let obj_id = obj_ref.id;
+    let thread_name = ctx.vm.extract_string_from_value(obj_ref.get_field(THREAD_name_INDEX))?;
     let target_id = obj_ref.get_ref_field(THREAD_target_INDEX)?;
     let target = if target_id.is_null() {
         obj_ref
@@ -109,20 +112,37 @@ gen_delegate!(delegate_start0, |ctx, obj_ref, _args| {
     let vm = unsafe { &*(vm_ptr as *const VM)};
     let java_vm = Box::pin(JavaVM::new());
     
-    thread::Builder::new().name(format!("T<{}>", id)).spawn(move || {
+    thread::Builder::new().name(format!("T<{}>({})", id, thread_name)).spawn(move || {
         let mut java_thread = JavaThread::new(id);
         java_thread.thread_obj_id.replace(obj_id);
 
         java_thread.jni_env = env;
         java_thread.java_vm = java_vm;
+
+        vm.thread_lookup.write().unwrap().insert(obj_id, java_thread.meta.clone());
     
         JAVA_THREAD.set(java_thread);
 
         let context = Context { thread: thread(), vm};
 
-        JavaThread::thread_entry(context, camid, target_id, Vec::new()).unwrap();
+        let result = JavaThread::thread_entry(context, camid, target_id, Vec::new());
+        if let Err(err) = result {
+            error!("Thread failed with: {}", err);
+        }
     }).unwrap();
     non_failing_none()
+});
+
+gen_delegate!(delegate_is_interrupted, |ctx, _obj_ref, args| {
+    let Some(Value::Integer(clear_interrupted)) = args.get(0) else { return invalidation!("Expected a boolean parameter") };
+
+    let was_interrupted = ctx.thread.meta.interrupted.read().clone();
+
+    if *clear_interrupted == 1 {
+        *ctx.thread.meta.interrupted.write() = false;
+    }
+
+    non_failing_some(Value::from(was_interrupted))
 });
 
 gen_delegate!(delegate_available_processors, |_ctx, _obj_ref, _args| {

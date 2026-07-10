@@ -1,14 +1,13 @@
-use std::collections::{HashMap, VecDeque};
-use std::sync::{Arc};
-use std::thread::{park, park_timeout};
-use std::time::Duration;
-use parking_lot::{Mutex, RwLock};
-use crate::vm::application::thread;
 use crate::vm::class::ClassAndMethodId;
-use crate::vm::{Context, VmError};
-use crate::vm::java_thread::{JavaThread, ThreadMeta, TID};
+use crate::vm::java_thread::ThreadMeta;
 use crate::vm::result::VMResult;
 use crate::vm::value::RefId;
+use crate::vm::{Context, VmError};
+use parking_lot::Mutex;
+use std::collections::{HashMap, VecDeque};
+use std::sync::Arc;
+use std::thread::{park, park_timeout};
+use std::time::Duration;
 
 #[derive(Debug, PartialEq, Copy, Clone, Hash, Eq)]
 pub enum MonitorAssociate {
@@ -84,6 +83,7 @@ impl MonitorHandler {
                 // the monitor is currently held by another thread -> park
                 monitor_guard.entry_list.push_back(Arc::clone(&ctx.thread.meta));
                 drop(monitor_guard);
+                ctx.thread.meta.block();
                 park();
             }
         } else {
@@ -117,6 +117,7 @@ impl MonitorHandler {
             if let Some(to_wake) = state_guard.entry_list.pop_front() {
                 state_guard.owner = Some(to_wake.clone());
                 state_guard.counter = 1;
+                to_wake.unblock();
                 to_wake.os_thread.unpark();
             } else {
                 state_guard.owner = None;
@@ -138,14 +139,18 @@ impl MonitorHandler {
     }
 
     pub fn wait(&self, ctx: Context, ref_id: RefId, timeout: u64) {
-        let monitor = self.get_monitor(ctx, MonitorAssociate::Ref(ref_id));
+        let associate = MonitorAssociate::Ref(ref_id);
+        let monitor = self.get_monitor(ctx, associate);
 
         let mut monitor_guard = monitor.state.lock();
         monitor_guard.wait_list.push_back(ctx.thread.meta.clone());
         if timeout == 0 {
+            ctx.thread.meta.wait(associate);
             park();
         } else {
+            ctx.thread.meta.wait(associate);
             park_timeout(Duration::from_millis(timeout));
+            ctx.thread.meta.notified();
         }
     }
 
@@ -154,6 +159,7 @@ impl MonitorHandler {
 
         let mut monitor_guard = monitor.state.lock();
         if let Some(top) = monitor_guard.wait_list.pop_front() {
+            top.notified();
             top.os_thread.unpark();
         }
     }
@@ -163,6 +169,7 @@ impl MonitorHandler {
 
         let mut monitor_guard = monitor.state.lock();
         while let Some(top) = monitor_guard.wait_list.pop_front() {
+            top.notified();
             top.os_thread.unpark();
         }
     }
