@@ -141,6 +141,7 @@ impl <'a> Application<'a> {
         self.init_class(JAVA_LANG_THREAD);
         let thread_obj_ref = self.create_initial_thread(thread_group_ref);
         thread().thread_obj_id.replace(thread_obj_ref.id);
+        self.vm.thread_lookup.write().unwrap().insert(thread_obj_ref.id, thread().meta.clone());
         thread_obj_ref.set_field(THREAD_threadStatus_INDEX, Value::Integer(RUNNABLE));
 
         self.init_class(JAVA_LANG_CLASS);

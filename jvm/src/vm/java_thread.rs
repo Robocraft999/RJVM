@@ -3,6 +3,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::thread::Thread;
 use log::{debug, warn};
+use parking_lot::{Mutex, RwLock};
 use crate::vm::callstack::CallStack;
 use crate::vm::class::{ClassAndMethod, ClassAndMethodId, ClassRef};
 use crate::vm::java_error::JavaError;
@@ -12,16 +13,70 @@ use crate::vm::value::{RefId, Reference, Value};
 use crate::vm::{executor, Context, ProgramCounter, VmError, VM};
 use crate::vm::constants::THROWABLE_detailsMessage_INDEX;
 use crate::vm::debug::DebugHelper;
+use crate::vm::monitoring::MonitorAssociate;
 use crate::vm::native::NativeMethodRegistry;
 
 pub type TID = u32;
 pub const NORM_PRIORITY: i32 = 5;
 pub const RUNNABLE: i32 = 1 + 4; //jvmti: alive + runnable
 
+#[derive(Debug, PartialEq)]
+pub enum ThreadState {
+    Running,
+    Sleeping,
+    Waiting(MonitorAssociate),
+    Blocked,
+    Parked,
+}
+
 #[derive(Debug)]
 pub struct ThreadMeta {
     pub id: TID,
     pub os_thread: Thread,
+
+    pub interrupted: RwLock<bool>,
+    pub state: RwLock<ThreadState>,
+    pub unsafe_unpark_count: Mutex<usize>,
+}
+
+impl ThreadMeta {
+    pub fn new(id: TID, os_thread: Thread) -> Self {
+        Self {
+            id,
+            os_thread,
+            interrupted: RwLock::new(false),
+            state: RwLock::new(ThreadState::Running),
+            unsafe_unpark_count: Mutex::new(0),
+        }
+    }
+
+    pub fn block(&self) {
+        *self.state.write() = ThreadState::Blocked
+    }
+    pub fn unblock(&self) {
+        *self.state.write() = ThreadState::Running
+    }
+
+    pub fn sleep(&self) {
+        *self.state.write() = ThreadState::Sleeping
+    }
+    pub fn woken(&self) {
+        *self.state.write() = ThreadState::Running
+    }
+
+    pub fn wait(&self, associate: MonitorAssociate) {
+        *self.state.write() = ThreadState::Waiting(associate)
+    }
+    pub fn notified(&self) {
+        *self.state.write() = ThreadState::Running
+    }
+
+    pub fn park(&self) {
+        *self.state.write() = ThreadState::Parked
+    }
+    pub fn unpark(&self) {
+        *self.state.write() = ThreadState::Running
+    }
 }
 
 impl PartialEq for ThreadMeta {
@@ -45,7 +100,7 @@ pub struct JavaThread {
 impl JavaThread {
     pub fn new(id: TID) -> Self {
         Self {
-            meta: Arc::new(ThreadMeta { id, os_thread: std::thread::current() }),
+            meta: Arc::new(ThreadMeta::new(id, std::thread::current())),
             thread_obj_id: None,
             call_stack: CallStack::new(),
             debug_helper: DebugHelper::new(),

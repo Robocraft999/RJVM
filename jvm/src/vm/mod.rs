@@ -2,7 +2,7 @@ use cesu8::{from_java_cesu8, Cesu8DecodingError};
 use log::{error, info};
 use std::collections::HashMap;
 use std::fmt::Debug;
-use std::sync::{Mutex, PoisonError, RwLock};
+use std::sync::{Arc, Mutex, PoisonError, RwLock};
 use thiserror::Error;
 
 use crate::class_file::constant_pool::BytecodeBehavior;
@@ -25,7 +25,7 @@ use class_path::ClassPath;
 use value::Value;
 use crate::class_file::fields::get_class_descriptor;
 use crate::vm::constants::classes::{JAVA_LANG_CLASS, JAVA_LANG_INVOKE_MHN, JAVA_LANG_LONG, JAVA_LANG_STRING};
-use crate::vm::java_thread::{JavaThread, TID};
+use crate::vm::java_thread::{JavaThread, ThreadMeta, TID};
 use crate::vm::monitoring::{MonitorHandler};
 
 pub mod class_path;
@@ -63,6 +63,7 @@ pub struct VM<'a>{
     pub currently_open_files: RwLock<HashMap<String, (Vec<u8>, usize)>>,
     pub next_thread_id: Mutex<TID>,
     pub monitor_handler: MonitorHandler,
+    pub thread_lookup: RwLock<HashMap<RefId, Arc<ThreadMeta>>>
 }
 
 impl<'a> VM<'a>{
@@ -84,6 +85,7 @@ impl<'a> VM<'a>{
             currently_open_files: RwLock::new(HashMap::new()),
             next_thread_id: Mutex::new(1),
             monitor_handler: MonitorHandler::new(),
+            thread_lookup: RwLock::new(HashMap::new()),
         }
     }
 
