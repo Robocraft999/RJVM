@@ -40,11 +40,11 @@ impl DebugHelper{
 
 #[cfg(feature="debug")]
 mod loader{
+    use crate::vm::debug::bytecode::ClassFilter;
     use serde::Deserialize;
     use std::collections::HashSet;
     use std::fs::File;
     use std::io::Read;
-    use crate::vm::debug::bytecode::ClassFilter;
 
     #[derive(Deserialize, Debug)]
     pub struct Config{

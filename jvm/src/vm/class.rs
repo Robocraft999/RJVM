@@ -1,4 +1,4 @@
-use crate::access_flags::{ClassFlag, MethodFlag};
+use crate::access_flags::{class_flags, method_flags};
 use crate::class_file::attributes::ClassFileAttributes;
 use crate::class_file::constant_pool::{BytecodeBehavior, ConstantPool, ConstantPoolEntry};
 use crate::class_file::field_info::{native_escape, native_escaped_descriptor};
@@ -11,7 +11,6 @@ use crate::vm::result::VMResult;
 use crate::vm::value::Value;
 use crate::vm::VM;
 use crate::vm::{ProgramCounter, VmError};
-use std::cell::RefCell;
 use std::fmt::{Debug, Formatter};
 use std::hash::Hash;
 use std::ops::Deref;
@@ -41,7 +40,7 @@ impl<'a> Class<'a>{
 
     //https://docs.oracle.com/javase/specs/jvms/se8/html/jvms-2.html#jvms-2.9
     pub fn has_method_polymorphic_signature(&self, info: &MethodInfo) -> bool {
-        info.flags & MethodFlag::Native as u16 > 0 && info.flags & MethodFlag::VarArgs as u16 > 0 &&
+        info.flags & method_flags::NATIVE > 0 && info.flags & method_flags::VARARGS > 0 &&
             info.descriptor.matches("([Ljava/lang/Object;)Ljava/lang/Object;") &&
             self.name == "java/lang/invoke/MethodHandle"
     }
@@ -113,10 +112,10 @@ impl<'a> Class<'a>{
     }
 
     pub fn is_interface(&self) -> bool {
-        !self.is_array() && self.flags & ClassFlag::Interface as u16 > 0
+        !self.is_array() && self.flags & class_flags::INTERFACE > 0
     }
     pub fn is_final(&self) -> bool {
-        self.flags & ClassFlag::Final as u16 > 0
+        self.flags & class_flags::FINAL > 0
     }
 
     pub fn is_array(&self) -> bool {
@@ -160,14 +159,14 @@ impl<'a> Class<'a>{
 
     pub fn get_methods(&self, public_only: bool) -> Vec<&MethodInfo>{
         self.methods.iter()
-            .filter(|m| !public_only || m.flags & MethodFlag::Public as u16 > 0)
+            .filter(|m| !public_only || m.flags & method_flags::PUBLIC> 0)
             .collect()
     }
 
     pub fn get_constructors(&self, public_only: bool) -> Vec<&MethodInfo>{
         self.methods.iter()
             .filter(|m| m.name == "<init>")
-            .filter(|m| !public_only || m.flags & MethodFlag::Public as u16 > 0)
+            .filter(|m| !public_only || m.flags & method_flags::PUBLIC > 0)
             .collect()
     }
 
@@ -197,7 +196,7 @@ impl<'a> Class<'a>{
 
         let mut allocate_new: bool = true;
 
-        let mut target_method = self.methods.get_mut(index).unwrap();
+        let target_method = self.methods.get_mut(index).unwrap();
 
         // TODO account for default methods
         target_method.vtable_index = NONVIRTUAL_VTABLE_INDEX;

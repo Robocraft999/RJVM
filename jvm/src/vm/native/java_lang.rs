@@ -1,18 +1,17 @@
 use crate::class_file::fields::field_type::{FieldType, PrimitiveType};
+use crate::vm::application::{thread, JAVA_THREAD};
+use crate::vm::class::ClassAndMethod;
 use crate::vm::constants::classes::{JAVA_LANG_PROCESS_ENVIRONMENT, JAVA_LANG_RUNTIME, JAVA_LANG_STRING, JAVA_LANG_THREAD, JAVA_LANG_THROWABLE};
 use crate::vm::constants::{THREADGROUP_maxPriority_INDEX, THREADGROUP_nUnstartedThreads_INDEX, THREADGROUP_name_INDEX, THREADGROUP_parent_INDEX, THREAD_group_INDEX, THREAD_name_INDEX, THREAD_priority_INDEX, THREAD_target_INDEX};
+use crate::vm::java_thread::JavaThread;
+use crate::vm::jni::types::{JNIEnv, JavaVM};
 use crate::vm::native::{gen_delegate, invalidation, non_failing_none, non_failing_some, wrap_init, NativeMethodRegistry};
 use crate::vm::result::{VMPartialResult, VMResult};
 use crate::vm::value::{Reference, Value};
 use crate::vm::{jni, Context, VmError, VM};
-use std::cell::RefCell;
-use std::sync::RwLock;
-use std::thread;
 use log::error;
-use crate::vm::application::{thread, JAVA_THREAD};
-use crate::vm::class::ClassAndMethod;
-use crate::vm::java_thread::{JavaThread};
-use crate::vm::jni::types::{JNIEnv, JavaVM};
+use parking_lot::RwLock;
+use std::thread;
 
 pub fn register_natives(registry: &mut NativeMethodRegistry) {
     registry.register(JAVA_LANG_THROWABLE, "fillInStackTrace", "(I)Ljava/lang/Throwable;", delegate_fill_in_stacktrace);
@@ -48,8 +47,8 @@ gen_delegate!(delegate_stack_trace_depth, |_ctx, obj_ref, _args| {
 gen_delegate!(delegate_intern, |ctx, obj_ref, _args| {
     if let Some(obj) = obj_ref{
         let content = ctx.vm.extract_string_from_ref(obj)?;
-        if ctx.vm.string_objects.read()?.contains_key(&content){
-            non_failing_some(Value::Reference(ctx.vm.string_objects.read()?[&content].id))
+        if ctx.vm.string_objects.read().contains_key(&content){
+            non_failing_some(Value::Reference(ctx.vm.string_objects.read()[&content].id))
         } else {
             non_failing_some(Value::Reference(obj.id))
         }
@@ -100,12 +99,11 @@ gen_delegate!(delegate_start0, |ctx, obj_ref, _args| {
     let camid = cam.as_ids();
     let target_id = target.id;
 
-    let id = if let Ok(mut next_id) = ctx.vm.next_thread_id.lock() {
+    let id = {
+        let mut next_id = ctx.vm.next_thread_id.lock();
         let current = *next_id;
         *next_id += 1;
         current
-    } else {
-        return Err(VmError::LockError("Could not acquire thread id lock".to_string()));
     };
     let vm_ptr = ctx.vm as *const VM as _;
     let env = Box::pin(JNIEnv::new(vm_ptr));
@@ -119,7 +117,7 @@ gen_delegate!(delegate_start0, |ctx, obj_ref, _args| {
         java_thread.jni_env = env;
         java_thread.java_vm = java_vm;
 
-        vm.thread_lookup.write().unwrap().insert(obj_id, java_thread.meta.clone());
+        vm.thread_lookup.write().insert(obj_id, java_thread.meta.clone());
     
         JAVA_THREAD.set(java_thread);
 

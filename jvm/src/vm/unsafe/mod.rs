@@ -1,6 +1,6 @@
-use parking_lot::RwLock;
 use crate::vm::r#unsafe::memory_chunk::MemoryChunk;
 use crate::vm::result::VMResult;
+use parking_lot::RwLock;
 
 mod memory_chunk;
 

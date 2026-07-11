@@ -1,15 +1,13 @@
 use crate::class_file::fields::field_type::{FieldType, PrimitiveType};
 use crate::vm::constants::classes::{SUN_MISC_PERF, SUN_MISC_SIGNAL, SUN_MISC_URL_CLASSPATH, SUN_MISC_VM, SUN_NIO_FS_UND};
-use crate::vm::jni::types::JavaVM;
+use crate::vm::java_thread::JavaThread;
 use crate::vm::native::{gen_delegate, invalidation, non_failing_none, non_failing_some, wrap_init, NativeMethodRegistry};
 use crate::vm::result::{VMPartialResult, VMResultType};
 use crate::vm::value::{Reference, Value};
-use crate::vm::{VmError, VM};
+use crate::vm::VmError;
 use log::debug;
-use std::cell::RefCell;
+use parking_lot::RwLock;
 use std::env;
-use std::sync::RwLock;
-use crate::vm::java_thread::JavaThread;
 
 pub fn register_natives(registry: &mut NativeMethodRegistry) {
     registry.register(SUN_MISC_VM, "initialize", "()V", delegate_initialize);

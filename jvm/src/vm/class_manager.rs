@@ -1,5 +1,5 @@
 use crate::class_file::attributes::ClassFileAttributes;
-use crate::class_file::constant_pool::{ConstantPoolEntry};
+use crate::class_file::constant_pool::ConstantPoolEntry;
 use crate::class_file::fields::attributes::FieldInfoAttributes;
 use crate::class_file::fields::field_type::{extract_component_type_from_array_class, FieldType};
 use crate::class_file::fields::{primitive_to_wrapper_name, FieldInfo};
@@ -8,40 +8,18 @@ use crate::class_file::methods::descriptor::MethodDescriptor;
 use crate::class_file::methods::{MethodInfo, GARBAGE_VTABLE_INDEX};
 use crate::class_file::nom::parse_class_file;
 use crate::error::ClassParseError;
+use crate::vm::application::thread;
 use crate::vm::class::{ArrayInfo, Class, ClassId, ClassRef};
 use crate::vm::class_path::ClassPath;
 use crate::vm::result::VMResult;
 use crate::vm::value::{RefId, Reference};
 use crate::vm::{bytecode, VmError, VM};
 use log::{info, warn};
-use std::cell::RefCell;
 use std::cmp::PartialEq;
-use std::collections::{HashMap};
+use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::{Mutex, RwLock};
 use typed_arena::Arena;
-use crate::vm::application::thread;
-
-#[derive(Debug, Clone)]
-pub(crate) enum ResolvedClass<'a> {
-    AlreadyLoaded(ClassRef<'a>),
-    NewClass(ClassesToLoad<'a>),
-}
-
-impl<'a> ResolvedClass<'a> {
-    pub fn get_class(&self) -> ClassRef<'a> {
-        match self {
-            ResolvedClass::AlreadyLoaded(class) => class,
-            ResolvedClass::NewClass(classes_to_initialize) => classes_to_initialize.resolved_class,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct ClassesToLoad<'a> {
-    resolved_class: ClassRef<'a>,
-    pub(crate) to_load: Vec<ClassRef<'a>>,
-}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ClassLoadingState{

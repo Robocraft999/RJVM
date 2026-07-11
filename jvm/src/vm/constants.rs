@@ -1,4 +1,5 @@
 #![allow(non_upper_case_globals)]
+#![allow(unused)]
 // FIELD INDICES
 
 // java.io.FileInputStream

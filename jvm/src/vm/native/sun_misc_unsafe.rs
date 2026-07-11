@@ -1,17 +1,16 @@
-use std::thread::{park, park_timeout};
-use std::time::{Duration, Instant, SystemTime};
+use crate::class_file::constant_pool::ConstantPoolEntry;
 use crate::vm::class::Class;
 use crate::vm::class_manager::{AnonClassInfo, ClassLoadingState};
 use crate::vm::constants::classes::{JAVA_LANG_CLASS, SUN_MISC_UNSAFE};
 use crate::vm::constants::{FIELD_clazz_INDEX, FIELD_name_INDEX};
-use crate::vm::jni::types::JavaVM;
-use crate::vm::native::{gen_delegate, invalidation, non_failing_none, non_failing_some, wrap_init, NativeMethodRegistry};
-use crate::vm::result::{VMPartialResult, VMResultType};
-use crate::vm::value::{Reference, ReferenceType, Value};
-use crate::vm::{VmError, VM};
-use log::{debug, trace};
-use crate::class_file::constant_pool::ConstantPoolEntry;
 use crate::vm::java_thread::ThreadState;
+use crate::vm::native::{gen_delegate, invalidation, non_failing_none, non_failing_some, wrap_init, NativeMethodRegistry};
+use crate::vm::result::VMPartialResult;
+use crate::vm::value::{Reference, ReferenceType, Value};
+use crate::vm::VmError;
+use log::{debug, trace};
+use std::thread::{park, park_timeout};
+use std::time::{Duration, SystemTime};
 
 pub fn register_natives(registry: &mut NativeMethodRegistry) {
     let mut register = |method_name, sig, delegate| registry.register(SUN_MISC_UNSAFE, method_name, sig, delegate);
@@ -119,7 +118,7 @@ gen_delegate!(delegate_get_object_volatile, |ctx, _obj_ref, args| {
         }
         let field_value = if o.class_name == JAVA_LANG_CLASS {
             let class_ref = ctx.vm.extract_class_from_class_object(o)?;
-            let static_object = ctx.vm.static_class_objects.read()?.get(&class_ref.id).unwrap().clone();
+            let static_object = ctx.vm.static_class_objects.read().get(&class_ref.id).unwrap().clone();
             static_object.get_field(*index as usize)
         } else {
             o.get_field(*index as usize)
@@ -139,7 +138,7 @@ gen_delegate!(delegate_get_int_volatile, |ctx, _obj_ref, args| {
         }
         let field_value = if o.class_name == JAVA_LANG_CLASS {
             let class_ref = ctx.vm.extract_class_from_class_object(o)?;
-            let static_object = ctx.vm.static_class_objects.read()?.get(&class_ref.id).unwrap().clone();
+            let static_object = ctx.vm.static_class_objects.read().get(&class_ref.id).unwrap().clone();
             static_object.get_field(*index as usize)
         } else {
             o.get_field(*index as usize)
@@ -288,7 +287,7 @@ gen_delegate!(delegate_put_ordered_object, |ctx, _obj_ref, args| {
         if o.class_name == JAVA_LANG_CLASS {
             let class_ref = ctx.vm.extract_class_from_class_object(o)?;
             let _ = wrap_init!(ctx, ctx.ensure_initialized(class_ref)?);
-            let static_object = ctx.vm.static_class_objects.read()?.get(&class_ref.id).unwrap().clone();
+            let static_object = ctx.vm.static_class_objects.read().get(&class_ref.id).unwrap().clone();
             static_object.set_field(*index as usize, x.clone());
         } else {
             o.set_field(*index as usize, x.clone());
@@ -304,7 +303,7 @@ gen_delegate!(delegate_define_class, |ctx, _obj_ref, args| {
         let class_name = ctx.vm.extract_string_from_value(*class_name_value)?;
         let bytes_ref = ctx.vm.resolve_object_by_id(*bytes_ref_id)?;
         let bytes = if let ReferenceType::Array(_, _, data) = &bytes_ref.reference_type{
-            data.read()?.iter().map(|val| if let Value::Integer(byte) = val {*byte as u8} else {0}).collect()
+            data.read().iter().map(|val| if let Value::Integer(byte) = val {*byte as u8} else {0}).collect()
         } else {
             Vec::new()
         };
@@ -321,7 +320,7 @@ gen_delegate!(delegate_define_anon_class, |ctx, _obj_ref, args| {
         let host_class_ref = ctx.vm.resolve_object_by_id(*host_class_id)?;
         let byte_arr_ref = ctx.vm.resolve_object_by_id(*byte_arr_ref_id)?;
         if let ReferenceType::Array(_, _, bytes ) = &byte_arr_ref.reference_type{
-            let bytes = bytes.read()?.iter().map(|val| if let Value::Integer(byte) = val {*byte as u8} else {0}).collect::<Vec<_>>();
+            let bytes = bytes.read().iter().map(|val| if let Value::Integer(byte) = val {*byte as u8} else {0}).collect::<Vec<_>>();
             let class = ctx.vm.class_manager.define_class(ctx.vm, None, None, bytes)?;
             
             let class_ref = match ctx.vm.class_manager.classes.lock() {
@@ -413,7 +412,7 @@ gen_delegate!(delegate_park, |ctx, _obj_ref, args| {
 
 gen_delegate!(delegate_unpark, |ctx, _obj_ref, args| {
     let Some(Value::Reference(thread_ref_id)) = args.get(0) else { return invalidation!("Expected Thread ref") };
-    let Some(meta) = ctx.vm.thread_lookup.read()?.get(thread_ref_id).cloned() else {
+    let Some(meta) = ctx.vm.thread_lookup.read().get(thread_ref_id).cloned() else {
         return invalidation!("Reference with {:?} has no associated JavaThread", thread_ref_id)
     };
 

@@ -1,3 +1,4 @@
+#![allow(non_camel_case_types)]
 use crate::bytecode::Instruction::*;
 use crate::error::ClassParseError;
 use crate::vm::VmError;
@@ -54,7 +55,7 @@ pub fn parse_instruction(code_bytes: &Vec<u8>, mut pc: usize) -> Result<(Instruc
     let result = if let Some(instruction) = Instruction::from_repr(opcode){
         match instruction{
             TABLESWITCH(_, _, _, _) => {
-                let instruction_pc = pc - 1;
+                let _instruction_pc = pc - 1;
                 //let padding = pc % 4;
                 //ti: 4 -> pc = 5 -> padding = 1 -> dbi = 5+1=6  X
                 //ti: 5 -> pc = 6 -> padding = 2 -> dbi = 6+2=8  J
@@ -86,7 +87,7 @@ pub fn parse_instruction(code_bytes: &Vec<u8>, mut pc: usize) -> Result<(Instruc
                     parse_u1(code_bytes, &mut pc)?;
                 }
 
-                let default = (instruction_pc as i32 + parse_i4(code_bytes, &mut pc)?);
+                let default = instruction_pc as i32 + parse_i4(code_bytes, &mut pc)?;
                 let npairs = parse_i4(code_bytes, &mut pc)?;
 
                 let mut offsets = Vec::new();

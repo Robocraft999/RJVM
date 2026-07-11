@@ -1,22 +1,18 @@
 #![feature(negative_impls)]
 #![feature(c_variadic)]
 #![feature(iterator_try_collect)]
-#![feature(sync_unsafe_cell)]
-#![feature(unsafe_cell_access)]
 extern crate core;
 
-use log::{error, LevelFilter};
-use std::cell::RefCell;
+use log::LevelFilter;
+use parking_lot::RwLock;
 use std::env;
-use std::sync::RwLock;
 use vm::class_path::ClassPath;
 
-use vm::application::Application;
 use crate::class_file::fields::field_type::FieldType;
 use crate::vm::value::Value;
-use crate::vm::{VmError, VM};
+use crate::vm::VM;
+use vm::application::Application;
 
-mod bytes;
 mod access_flags;
 mod vm;
 mod error;

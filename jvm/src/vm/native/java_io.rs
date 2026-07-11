@@ -1,16 +1,15 @@
-use std::fs::File;
-use std::os::unix::fs::PermissionsExt;
 use crate::vm::constants::classes::{JAVA_IO_FILE_INPUT_STREAM, JAVA_IO_FILE_OUTPUT_STREAM, JAVA_IO_UNIX_FILE_SYSTEM};
 use crate::vm::constants::{FILEINPUTSTREAM_path_INDEX, FILE_path_INDEX};
-use crate::vm::jni::types::JavaVM;
+use crate::vm::java_thread::JavaThread;
 use crate::vm::native::{gen_delegate, invalidation, non_failing_none, non_failing_some, wrap_init, NativeMethodRegistry};
 use crate::vm::result::VMPartialResult;
 use crate::vm::value::{Reference, ReferenceType, Value};
-use crate::vm::{VmError, VM};
+use crate::vm::VmError;
 use log::{debug, warn};
+use std::fs::File;
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::time::SystemTime;
-use crate::vm::java_thread::JavaThread;
 
 pub fn register_natives(registry: &mut NativeMethodRegistry) {
     registry.register(JAVA_IO_FILE_OUTPUT_STREAM, "writeBytes", "([BIIZ)V", delegate_write_bytes);
@@ -33,7 +32,7 @@ gen_delegate!(delegate_write_bytes, |ctx, _obj_ref, args| {
     ) = (args.get(0), args.get(1), args.get(2), args.get(3)) {
         let bytes_ref = ctx.vm.resolve_object_by_id(*bytes_ref_id)?;
         if let ReferenceType::Array(_, _, data) = &bytes_ref.reference_type{
-            let data = &data.read()?[*offset as usize..(*offset + *amount) as usize];
+            let data = &data.read()[*offset as usize..(*offset + *amount) as usize];
             let string: String = data.iter().map(|value| if let Value::Integer(int) = value { (*int as u8) as char} else { '?' }).collect();
             print!("{}", string);
             non_failing_none()
@@ -52,7 +51,7 @@ gen_delegate!(delegate_read_bytes, |ctx, obj_ref, args| {
         if let Some(fis_ref) = obj_ref{
             let path = ctx.vm.extract_string_from_value(fis_ref.get_field(FILEINPUTSTREAM_path_INDEX))?;
 
-            let existing_file = ctx.vm.currently_open_files.write()?.remove(&path);
+            let existing_file = ctx.vm.currently_open_files.write().remove(&path);
             if let Some((content, index)) = existing_file {
                 let data_ref = ctx.vm.resolve_object_by_id(*data_ref_id)?;
                 //file: len 20, i 5
@@ -69,24 +68,24 @@ gen_delegate!(delegate_read_bytes, |ctx, obj_ref, args| {
                 if new_index > index{
                     if new_index == content.len(){
                         //read >0 bytes to end
-                        ctx.vm.currently_open_files.write()?.insert(path.clone(), (content, new_index));
+                        ctx.vm.currently_open_files.write().insert(path.clone(), (content, new_index));
                         //println!("read >0 bytes to end");
                         non_failing_some(Value::Integer((new_index - index) as i32))
                     } else {
                         //read >0 bytes
-                        ctx.vm.currently_open_files.write()?.insert(path.clone(), (content, new_index));
+                        ctx.vm.currently_open_files.write().insert(path.clone(), (content, new_index));
                         //println!("read >0 bytes");
                         non_failing_some(Value::Integer((end - start) as i32))
                     }
                 } else {
                     if new_index == content.len(){
                         //read 0 bytes from end to end
-                        ctx.vm.currently_open_files.write()?.insert(path.clone(), (content, new_index));
+                        ctx.vm.currently_open_files.write().insert(path.clone(), (content, new_index));
                         //println!("read 0 bytes from end to end");
                         non_failing_some(Value::Integer(-1))
                     } else {
                         //read 0 bytes
-                        ctx.vm.currently_open_files.write()?.insert(path.clone(), (content, new_index));
+                        ctx.vm.currently_open_files.write().insert(path.clone(), (content, new_index));
                         //println!("read 0 bytes");
                         non_failing_some(Value::Integer(0))
                     }
@@ -120,10 +119,10 @@ gen_delegate!(delegate_read_bytes, |ctx, obj_ref, args| {
 gen_delegate!(delegate_open0, |ctx, _obj_ref, args| {
     if let Some(path_val) = args.get(0) && !path_val.is_null(){
         let path = ctx.vm.extract_string_from_value(*path_val)?;
-        if !ctx.vm.currently_open_files.read()?.contains_key(&path) {
+        if !ctx.vm.currently_open_files.read().contains_key(&path) {
             let file_content = ctx.vm.class_manager.class_path.resolve_file(path.as_str())?;
             if let Some(file_content) = file_content {
-                ctx.vm.currently_open_files.write()?.insert(path.clone(), (file_content, 0));
+                ctx.vm.currently_open_files.write().insert(path.clone(), (file_content, 0));
             }
         }
         non_failing_none()
@@ -138,7 +137,7 @@ gen_delegate!(delegate_close0, |ctx, obj_ref, _args| {
     };
     let path_val = fis_ref.get_field(FILEINPUTSTREAM_path_INDEX);
     let path = ctx.vm.extract_string_from_value(path_val)?;
-    if ctx.vm.currently_open_files.write()?.remove(&path).is_none() {
+    if ctx.vm.currently_open_files.write().remove(&path).is_none() {
         warn!("Closing non existent file: '{}'", path)
     }
     non_failing_none()

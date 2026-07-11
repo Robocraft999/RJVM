@@ -1,12 +1,12 @@
 use crate::class_file::fields::field_type::{FieldType, PrimitiveType};
 use crate::class_file::methods::descriptor::MethodDescriptor;
+use crate::vm::application::thread;
 use crate::vm::class::ClassAndMethod;
-use crate::vm::jni::types::{jboolean, jbyte, jchar, jdouble, jfloat, jint, jlong, jobject, jshort, jvalue, JNIEnv, JavaVM};
+use crate::vm::jni::types::{jboolean, jbyte, jchar, jdouble, jfloat, jint, jlong, jobject, jshort, jvalue, JNIEnv};
 use crate::vm::value::{Reference, Value};
 use libffi::high::CodePtr;
 use libffi::middle::{Arg, Cif, Type};
 use std::ffi::c_void;
-use crate::vm::application::thread;
 
 fn primitive_type_to_native(primitive_type: &PrimitiveType) -> Type {
     match primitive_type {

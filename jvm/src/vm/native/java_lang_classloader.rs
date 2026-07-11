@@ -1,10 +1,9 @@
 use crate::vm::constants::classes::JAVA_LANG_CLASSLOADER;
 use crate::vm::constants::{CLASSLOADER_NATIVELIBRARY_handle_INDEX, CLASSLOADER_NATIVELIBRARY_loaded_INDEX, CLASSLOADER_NATIVELIBRARY_name_INDEX};
-use crate::vm::jni::types::JavaVM;
 use crate::vm::native::{gen_delegate, invalidation, non_failing_none, non_failing_some, wrap_init, NativeMethodRegistry};
 use crate::vm::result::VMPartialResult;
 use crate::vm::value::{Reference, Value};
-use crate::vm::{VmError, VM};
+use crate::vm::VmError;
 use libloading::{Library, Symbol};
 use log::debug;
 

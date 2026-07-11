@@ -1,14 +1,9 @@
 use super::call_frame::CallFrame;
-use crate::bytecode::Instruction;
-use crate::error;
-use crate::vm::class::{Class, ClassAndMethodId, ClassId, ClassRef};
-use crate::vm::info;
-use crate::vm::result::{VMPartialResult, VMResult, VMResultType};
+use crate::vm::class::ClassAndMethodId;
 use crate::vm::value::Reference;
 use crate::vm::ClassAndMethod;
 use crate::vm::ProgramCounter;
 use crate::Value;
-use crate::VmError;
 use crate::VM;
 use log::{trace, warn};
 use std::cell::RefCell;

@@ -3,13 +3,12 @@ use crate::vm::class::ClassAndMethod;
 use crate::vm::constants::classes::{SUN_REFLECT_NCAI, SUN_REFLECT_NMAI, SUN_REFLECT_REFLECTION};
 use crate::vm::constants::{CONSTRUCTOR_clazz_INDEX, CONSTRUCTOR_parameterTypes_INDEX, METHOD_clazz_INDEX, METHOD_name_INDEX, METHOD_parameterTypes_INDEX, METHOD_returnType_INDEX};
 use crate::vm::java_error::JavaError;
-use crate::vm::jni::types::JavaVM;
+use crate::vm::java_thread::JavaThread;
 use crate::vm::native::{gen_delegate, invalidation, non_failing_some, wrap_init, NativeMethodRegistry};
 use crate::vm::result::{VMPartialResult, VMResultType};
 use crate::vm::value::{Reference, ReferenceType, Value};
-use crate::vm::{VmError, VM};
+use crate::vm::VmError;
 use log::debug;
-use crate::vm::java_thread::JavaThread;
 
 pub fn register_natives(registry: &mut NativeMethodRegistry) {
     registry.register(SUN_REFLECT_REFLECTION, "getCallerClass", "()Ljava/lang/Class;", delegate_get_caller_class);
@@ -52,7 +51,7 @@ gen_delegate!(delegate_new_instance0, |ctx, _obj_ref, args| {
             if let ReferenceType::Array(_, _, type_content) = &parameter_arr_ref.reference_type {
                 let class = ctx.vm.resolve_clazz_by_class_ref_id(class_ref_id)?;
                 let mut descriptor = String::from("(");
-                for constructor_parameter_type in type_content.read()?.iter() {
+                for constructor_parameter_type in type_content.read().iter() {
                     if let Value::Reference(parameter_type_ref_id) = constructor_parameter_type {
                         let class = ctx.vm.resolve_clazz_by_class_ref_id(*parameter_type_ref_id)?;
                         if !class.is_array(){
@@ -69,7 +68,7 @@ gen_delegate!(delegate_new_instance0, |ctx, _obj_ref, args| {
                     let constructor_args = if let Some(Value::Reference(argument_arr_id)) = args.get(1) && !argument_arr_id.is_null() {
                         let argument_arr_ref = ctx.vm.resolve_object_by_id(*argument_arr_id)?;
                         if let ReferenceType::Array(_, _, args_content) = &argument_arr_ref.reference_type{
-                            args_content.read()?.clone()
+                            args_content.read().clone()
                         } else {
                             Vec::new()
                         }
@@ -113,7 +112,7 @@ gen_delegate!(delegate_invoke0, |ctx, _obj_ref, args| {
             if let ReferenceType::Array(_, _, type_content) = &parameter_arr_ref.reference_type {
                 let clazz = ctx.vm.resolve_clazz_by_class_ref_id(class_ref_id)?;
                 let mut descriptor = String::from("(");
-                for method_parameter_type_val in type_content.read()?.iter() {
+                for method_parameter_type_val in type_content.read().iter() {
                     if let Value::Reference(parameter_type_ref_id) = method_parameter_type_val {
                         let class = ctx.vm.resolve_clazz_by_class_ref_id(*parameter_type_ref_id)?;
                         if !class.is_array(){
@@ -138,7 +137,7 @@ gen_delegate!(delegate_invoke0, |ctx, _obj_ref, args| {
                     let class_and_method = ClassAndMethod {class: clazz, method};
                     let args_arr_ref = ctx.vm.resolve_object_by_id(*args_arr_ref_id)?;
                     let method_args = if let ReferenceType::Array(_, _, args_content) = &args_arr_ref.reference_type {
-                        args_content.read()?.clone()
+                        args_content.read().clone()
                     } else {
                         Vec::new()
                     };

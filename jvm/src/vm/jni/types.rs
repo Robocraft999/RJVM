@@ -6,19 +6,19 @@
 
 use crate::class_file::fields::field_type::{FieldType, PrimitiveType};
 use crate::native_init_wrap;
+use crate::vm::application::thread;
 use crate::vm::class::{ClassAndMethod, ClassId};
+use crate::vm::constants::THROWABLE_detailsMessage_INDEX;
+use crate::vm::java_thread::JavaThread;
 use crate::vm::result::{VMPartialResult, VMResult, VMResultType};
 use crate::vm::value::{RefId, ReferenceType, Value};
 use crate::vm::{jni, jni::{env_function_table::JNINativeInterface, vm_function_table::JNIInvokeInterface}, Context, VmError, VM};
 use log::{debug, error, warn};
+use parking_lot::RwLock;
 use std::ffi::{c_char, c_double, c_float, c_int, c_long, c_schar, c_short, c_uchar, c_ushort, c_void, CStr, CString, OsStr, VaList};
 use std::fmt::Debug;
 use std::os::unix::ffi::OsStrExt;
 use std::{ptr, slice};
-use std::sync::RwLock;
-use crate::vm::application::thread;
-use crate::vm::constants::THROWABLE_detailsMessage_INDEX;
-use crate::vm::java_thread::JavaThread;
 
 //Platform dependent
 pub type jint = c_int;
@@ -802,12 +802,9 @@ impl JNINativeInterface_ {
 
         let clazz = vm.resolve_class_object_by_jclass(clazz);
 
-        if let Ok(res) = vm.static_class_objects.read() {
-            let class_ref = res.get(&clazz.id).unwrap();
-            class_ref.get_field(fieldID as usize)
-        } else {
-            unreachable!("Could not acquire static class objects lock")
-        }
+        let guard = vm.static_class_objects.read();
+        let class_ref = guard.get(&clazz.id).unwrap();
+        class_ref.get_field(fieldID as usize)
     }
 
     pub unsafe extern "system-unwind" fn GetStaticFieldID(env: *mut JNIEnv, clazz: jclass, name: *mut c_char, sig: *const c_char) -> jfieldID{
@@ -1003,7 +1000,6 @@ impl JNINativeInterface_ {
         let array_ref = vm.resolve_object_by_jobject(array).unwrap();
         if let ReferenceType::Array(_, _, content) = &array_ref.reference_type{
             content.read()
-                .unwrap()
                 .iter()
                 .enumerate()
                 .skip(start as usize)
@@ -1026,7 +1022,6 @@ impl JNINativeInterface_ {
         let array_ref = vm.resolve_object_by_jobject(array).unwrap();
         if let ReferenceType::Array(_, _, content) = &array_ref.reference_type{
             content.write()
-                .unwrap()
                 .iter_mut()
                 .enumerate()
                 .skip(start as usize)
@@ -1064,7 +1059,6 @@ impl JNINativeInterface_ {
             let ptr = vm.unsafe_allocator.allocate_memory(allocation_size);
 
             let bytes: Vec<u8> = content.read()
-                .unwrap()
                 .iter()
                 .enumerate()
                 .flat_map(|(i, val)| match val {
@@ -1104,7 +1098,7 @@ impl JNINativeInterface_ {
                 _ => unreachable!()
             }).collect::<Vec<_>>();
 
-            let mut guard = content.write().unwrap();
+            let mut guard = content.write();
             guard.copy_from_slice(vals.as_slice())
         }
     }

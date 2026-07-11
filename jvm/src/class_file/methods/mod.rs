@@ -1,7 +1,7 @@
 pub mod attributes;
 pub mod descriptor;
 
-use crate::access_flags::MethodFlag;
+use crate::access_flags::method_flags;
 use crate::class_file::methods::attributes::{ExceptionTableEntry, MethodInfoAttributes};
 use crate::class_file::methods::descriptor::MethodDescriptor;
 use crate::vm::bytecode::InstructionBlock;
@@ -36,26 +36,26 @@ impl MethodInfo{
     }
 
     pub fn is_native(&self) -> bool {
-        self.flags & MethodFlag::Native as u16 > 0
+        self.flags & method_flags::NATIVE > 0
     }
 
     pub fn is_static(&self) -> bool{
-        self.flags & MethodFlag::Static as u16 > 0
+        self.flags & method_flags::STATIC > 0
     }
 
     pub fn is_abstract(&self) -> bool {
-        self.flags & MethodFlag::Abstract as u16 > 0
+        self.flags & method_flags::ABSTRACT > 0
     }
 
     pub fn is_final(&self) -> bool {
-        self.flags & MethodFlag::Final as u16 > 0
+        self.flags & method_flags::FINAL > 0
     }
 
-    pub fn is_public(&self) -> bool { self.flags & MethodFlag::Public as u16 > 0 }
+    pub fn is_public(&self) -> bool { self.flags & method_flags::PUBLIC > 0 }
     pub fn is_private(&self) -> bool {
-        self.flags & MethodFlag::Private as u16 > 0
+        self.flags & method_flags::PRIVATE > 0
     }
-    pub fn is_protected(&self) -> bool { self.flags & MethodFlag::Protected as u16 > 0 }
+    pub fn is_protected(&self) -> bool { self.flags & method_flags::PROTECTED > 0 }
     pub fn is_package_private(&self) -> bool { !self.is_private() && !self.is_public() && !self.is_protected() }
 
     pub fn is_initializer(&self) -> bool {

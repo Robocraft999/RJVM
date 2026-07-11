@@ -1,10 +1,8 @@
+use crate::vm::result::VMResult;
 use log::{debug, warn};
 use std::alloc::Layout;
 use std::fmt;
 use std::fmt::Formatter;
-use std::panic::catch_unwind;
-use crate::vm::result::VMResult;
-use crate::vm::VmError;
 
 pub struct MemoryChunk {
     start: u64,

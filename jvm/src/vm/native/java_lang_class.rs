@@ -3,17 +3,13 @@ use crate::class_file::fields::field_type::FieldType;
 use crate::error::ClassParseError;
 use crate::vm::constants::classes::{JAVA_LANG_CLASS, JAVA_LANG_REFLECT_CONSTRUCTOR, JAVA_LANG_REFLECT_FIELD, JAVA_LANG_REFLECT_METHOD};
 use crate::vm::constants::{CONSTRUCTOR_clazz_INDEX, CONSTRUCTOR_exceptionTypes_INDEX, CONSTRUCTOR_modifiers_INDEX, CONSTRUCTOR_parameterTypes_INDEX, CONSTRUCTOR_slot_INDEX, FIELD_clazz_INDEX, FIELD_modifiers_INDEX, FIELD_name_INDEX, FIELD_type_INDEX, METHOD_clazz_INDEX, METHOD_exceptionTypes_INDEX, METHOD_modifiers_INDEX, METHOD_name_INDEX, METHOD_parameterTypes_INDEX, METHOD_returnType_INDEX, METHOD_slot_INDEX};
+use crate::vm::java_thread::JavaThread;
 use crate::vm::native::{gen_delegate, invalidation, non_failing_none, non_failing_some, wrap_init, NativeMethodRegistry};
-use crate::vm::value::ReferenceType;
-use crate::vm::JavaVM;
 use crate::vm::Reference;
 use crate::vm::{VMPartialResult, VmError};
 use crate::Value;
-use crate::VM;
 use log::{debug, info};
-use std::cell::RefCell;
-use std::sync::RwLock;
-use crate::vm::java_thread::JavaThread;
+use parking_lot::RwLock;
 
 pub fn register_natives(registry: &mut NativeMethodRegistry) {
     let mut register = |method_name, sig, delegate|registry.register(JAVA_LANG_CLASS, method_name, sig, delegate);

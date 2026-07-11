@@ -1,17 +1,15 @@
-use std::cell::{Cell, RefCell, SyncUnsafeCell, UnsafeCell};
-use std::fmt::Debug;
-use std::ops::DerefMut;
 use crate::vm::class::ClassId;
+use crate::vm::class_path::ClassPath;
+use crate::vm::constants::classes::{JAVA_LANG_CLASS, JAVA_LANG_INVOKE_METHOD_HANDLE, JAVA_LANG_INVOKE_METHOD_TYPE, JAVA_LANG_INVOKE_MHN, JAVA_LANG_REFLECT_METHOD, JAVA_LANG_STRING, JAVA_LANG_SYSTEM, JAVA_LANG_THREAD, JAVA_LANG_THREAD_GROUP};
+use crate::vm::constants::{THREAD_eetop_INDEX, THREAD_priority_INDEX, THREAD_threadStatus_INDEX};
+use crate::vm::java_thread::{JavaThread, NORM_PRIORITY, RUNNABLE};
 use crate::vm::jni::types::{JNIEnv, JavaVM};
 use crate::vm::result::{VMPartialResult, VMResultType};
 use crate::vm::value::{Reference, Value};
 use crate::vm::{jni, Context, VmError, VM};
 use log::error;
+use std::cell::RefCell;
 use std::pin::Pin;
-use crate::vm::class_path::ClassPath;
-use crate::vm::constants::classes::{JAVA_LANG_CLASS, JAVA_LANG_INVOKE_METHOD_HANDLE, JAVA_LANG_INVOKE_METHOD_TYPE, JAVA_LANG_INVOKE_MHN, JAVA_LANG_REFLECT_METHOD, JAVA_LANG_STRING, JAVA_LANG_SYSTEM, JAVA_LANG_THREAD, JAVA_LANG_THREAD_GROUP, SUN_MISC_VM};
-use crate::vm::constants::{THREAD_threadStatus_INDEX, THREAD_eetop_INDEX, THREAD_priority_INDEX};
-use crate::vm::java_thread::{JavaThread, NORM_PRIORITY, RUNNABLE};
 
 thread_local! {
     pub static JAVA_THREAD: RefCell<JavaThread> = RefCell::new(JavaThread::new(0));
@@ -141,7 +139,7 @@ impl <'a> Application<'a> {
         self.init_class(JAVA_LANG_THREAD);
         let thread_obj_ref = self.create_initial_thread(thread_group_ref);
         thread().thread_obj_id.replace(thread_obj_ref.id);
-        self.vm.thread_lookup.write().unwrap().insert(thread_obj_ref.id, thread().meta.clone());
+        self.vm.thread_lookup.write().insert(thread_obj_ref.id, thread().meta.clone());
         thread_obj_ref.set_field(THREAD_threadStatus_INDEX, Value::Integer(RUNNABLE));
 
         self.init_class(JAVA_LANG_CLASS);

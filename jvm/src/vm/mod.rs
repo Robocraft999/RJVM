@@ -1,20 +1,25 @@
 use cesu8::{from_java_cesu8, Cesu8DecodingError};
 use log::{error, info};
+use parking_lot::{Mutex, RwLock};
 use std::collections::HashMap;
 use std::fmt::Debug;
-use std::sync::{Arc, Mutex, PoisonError, RwLock};
+use std::sync::{Arc, PoisonError};
 use thiserror::Error;
 
 use crate::class_file::constant_pool::BytecodeBehavior;
 use crate::class_file::fields::field_type::{FieldType, PrimitiveType};
+use crate::class_file::fields::get_class_descriptor;
 use crate::class_file::methods::descriptor::MethodDescriptor;
 use crate::error::ClassParseError;
 use crate::vm::class::{ClassAndMethod, ClassId, ClassRef};
 use crate::vm::class_manager::ClassLoadingState;
-use crate::vm::constants::{CLASS_name_INDEX, LONG_value_INDEX, METHODTYPE_ptypes_INDEX, METHODTYPE_rtype_INDEX, STRING_hash_INDEX, STRING_value_INDEX, THROWABLE_detailsMessage_INDEX};
+use crate::vm::constants::classes::{JAVA_LANG_CLASS, JAVA_LANG_INVOKE_MHN, JAVA_LANG_LONG, JAVA_LANG_STRING};
+use crate::vm::constants::{CLASS_name_INDEX, LONG_value_INDEX, METHODTYPE_ptypes_INDEX, METHODTYPE_rtype_INDEX, STRING_hash_INDEX, STRING_value_INDEX};
 use crate::vm::gc::ObjectAllocator;
 use crate::vm::java_error::JavaError;
-use crate::vm::jni::types::{jclass, jobject, JavaVM};
+use crate::vm::java_thread::{JavaThread, ThreadMeta, TID};
+use crate::vm::jni::types::{jclass, jobject};
+use crate::vm::monitoring::MonitorHandler;
 use crate::vm::native::{register_all_natives, NativeMethodRegistry};
 use crate::vm::r#unsafe::Unsafe;
 use crate::vm::result::{VMPartialResult, VMResult, VMResultType};
@@ -23,10 +28,6 @@ use crate::{get_or_init, get_or_init_special};
 use class_manager::ClassManager;
 use class_path::ClassPath;
 use value::Value;
-use crate::class_file::fields::get_class_descriptor;
-use crate::vm::constants::classes::{JAVA_LANG_CLASS, JAVA_LANG_INVOKE_MHN, JAVA_LANG_LONG, JAVA_LANG_STRING};
-use crate::vm::java_thread::{JavaThread, ThreadMeta, TID};
-use crate::vm::monitoring::{MonitorHandler};
 
 pub mod class_path;
 pub mod class_path_entry;
@@ -68,7 +69,7 @@ pub struct VM<'a>{
 
 impl<'a> VM<'a>{
     pub fn new(class_path: ClassPath) -> Self{
-        let mut class_manager = ClassManager::new(class_path);
+        let class_manager = ClassManager::new(class_path);
         let mut native_method_registry = NativeMethodRegistry::new();
         register_all_natives(&mut native_method_registry);
         let unsafe_allocator = Unsafe::new();
@@ -131,21 +132,14 @@ impl<'a> VM<'a>{
         info!("CC[{:?}] = {}", class.id, class.name);
         let fields = class.get_fields(&self);
         let obj = self.object_allocator.allocate_object(class, fields);
-        if let Ok(mut res) = self.objects_by_id.write() {
-            res.insert(obj.id, obj);
-        } else {
-            unreachable!("Object couldn't be allocated")
-        }
+        let mut guard = self.objects_by_id.write();
+        guard.insert(obj.id, obj);
         //self.vm_debug_helper.tracker.push_object_event(obj.id, format!("Object ({})", class.name));
         obj
     }
 
     pub fn get_static_class_object(&self, id: ClassId) -> Option<Reference<'a>>{
-        if let Ok(res) = self.static_class_objects.read() {
-            res.get(&id).cloned()
-        } else {
-            None
-        }
+        self.static_class_objects.read().get(&id).cloned()
     }
 
     pub fn new_array(&self, dims: usize, array_field_type: FieldType, content: RwLock<Vec<Value>>) -> VMPartialResult<Reference<'a>>{
@@ -157,7 +151,7 @@ impl<'a> VM<'a>{
         //FIXME verify if this is correct / maybe have to init the component type
         let class = self.get_or_resolve_class(class_name.as_str())?;
         let obj = self.object_allocator.allocate_array(class, dims, *component_type, content);
-        self.objects_by_id.write()?.insert(obj.id, obj);
+        self.objects_by_id.write().insert(obj.id, obj);
         //self.vm_debug_helper.tracker.push_object_event(obj.id, format!("Array allocated:   \n{:?}", obj));
         Ok(VMResultType::Successful(obj))
         /*get_or_init_special!(self.get_or_initialize_class(class_name.as_str())?,
@@ -206,8 +200,8 @@ impl<'a> VM<'a>{
     }
     
     pub fn new_string_object(&self, string: &str) -> VMPartialResult<Reference<'a>>{
-        if self.string_objects.read()?.contains_key(string){
-            return Ok(VMResultType::Successful(self.string_objects.read()?[string]))
+        if self.string_objects.read().contains_key(string){
+            return Ok(VMResultType::Successful(self.string_objects.read()[string]))
         }
         
         let char_array: Vec<Value> = string.chars().map(|c| Value::Integer(c as i32)).collect();
@@ -223,7 +217,7 @@ impl<'a> VM<'a>{
         //hash
         string_object.set_field(STRING_hash_INDEX, Value::Integer(0));
 
-        self.string_objects.write()?.insert(string.to_owned(), string_object);
+        self.string_objects.write().insert(string.to_owned(), string_object);
         Ok(VMResultType::Successful(string_object))
     }
 
@@ -248,7 +242,7 @@ impl<'a> VM<'a>{
         if let Value::Reference(char_arr_id) = chars {
             let char_ref = self.resolve_object_by_id(char_arr_id)?;
             if let ReferenceType::Array(_, _, content) = &char_ref.reference_type{
-                let chars: Vec<u8> = content.read()?.iter().map(|v| if let Value::Integer(val) = v {*val as u8} else {0}).collect();
+                let chars: Vec<u8> = content.read().iter().map(|v| if let Value::Integer(val) = v {*val as u8} else {0}).collect();
                 let string = from_java_cesu8(chars.as_slice())?.to_string();
                 return Ok(string);
             }
@@ -258,7 +252,7 @@ impl<'a> VM<'a>{
 
     // FIXME use only ClassRef instead
     fn new_class_object(&self, class_name: &str, class_id: ClassId) -> VMPartialResult<Reference<'a>>{
-        if !self.class_objects.read()?.contains_key(&class_id){
+        if !self.class_objects.read().contains_key(&class_id){
             let class_clazz = self.get_or_resolve_class(JAVA_LANG_CLASS)?;
             let class_object = self.new_object_from_class(class_clazz);
             let string_object = get_or_init!(self.new_string_object(class_name.replace("/", ".").as_str())?);
@@ -266,10 +260,10 @@ impl<'a> VM<'a>{
             //name
             class_object.set_field(CLASS_name_INDEX, Value::Reference(string_object.id));
 
-            self.class_objects.write()?.insert(class_id, class_object);
+            self.class_objects.write().insert(class_id, class_object);
             Ok(VMResultType::Successful(class_object))
         } else {
-            Ok(VMResultType::Successful(self.class_objects.read()?[&class_id]))
+            Ok(VMResultType::Successful(self.class_objects.read()[&class_id]))
         }
     }
 
@@ -338,7 +332,7 @@ impl<'a> VM<'a>{
 
         let mut desc = String::from("(");
         if let ReferenceType::Array(_, _, content) = &ptypes_array_ref.reference_type {
-            for p in content.read()?.iter() {
+            for p in content.read().iter() {
                 let Value::Reference(param_class_ref_id) = p else { return Err(VmError::ValidationError("Expected a reference".to_string())); };
                 let param_class_name = &self.resolve_clazz_by_class_ref_id(*param_class_ref_id)?.name;
                 println!("{}", param_class_name);
@@ -363,16 +357,13 @@ impl<'a> VM<'a>{
     }
     
     pub fn resolve_object_by_jobject(&self, id: jobject) -> Option<Reference<'a>> {
-        if let Ok(res) = self.objects_by_id.read() {
-            res.get(&RefId(id)).copied()
-        } else {
-            unreachable!("Could not acquire objects lock")
-        }
+        let guard = self.objects_by_id.read();
+        guard.get(&RefId(id)).copied()
     }
 
     // object access
     pub fn resolve_object_by_id(&self, id: RefId) -> VMResult<Reference<'a>> {
-        self.objects_by_id.read()?.get(&id).copied().ok_or(VmError::ValidationError(format!("Object not found: {:?}", id)))
+        self.objects_by_id.read().get(&id).copied().ok_or(VmError::ValidationError(format!("Object not found: {:?}", id)))
     }
 
     pub fn resolve_clazz_by_class_ref_id(&self, ref_id: RefId) -> VMResult<ClassRef<'a>> {
@@ -528,11 +519,7 @@ impl<'a> Context<'a, '_> {
         info!("IC[{}]", class.name);
         if !class.is_array(){
             let static_object = self.vm.new_object_from_class(class);
-            if let Ok(mut res) = self.vm.static_class_objects.write() {
-                res.insert(class.id, static_object);
-            } else {
-                unreachable!("Could not acquire lock for class init")
-            }
+            self.vm.static_class_objects.write().insert(class.id, static_object);
             if let Some(clinit_method) = class.find_method("<clinit>", "()V"){
                 let class_and_method = ClassAndMethod{
                     class,

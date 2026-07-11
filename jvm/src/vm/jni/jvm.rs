@@ -9,13 +9,12 @@ use crate::vm::jni::types::*;
 use crate::vm::value::ReferenceType;
 use crate::vm::{VMResultType, VM};
 use log::debug;
-use std::cell::RefCell;
+use parking_lot::RwLock;
 use std::ffi::{c_char, c_int, c_long, c_uchar, c_ushort, c_void, CStr, CString};
 use std::fs::{File, OpenOptions};
 use std::os::fd::{AsFd, AsRawFd, FromRawFd, IntoRawFd, OwnedFd, RawFd};
 use std::path::Path;
 use std::str::FromStr;
-use std::sync::RwLock;
 
 pub const JVM_INTERFACE_VERSION: jint = 4;
 

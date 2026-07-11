@@ -1,10 +1,9 @@
+use crate::vm::class::ClassRef;
 use log::warn;
+use serde::Deserialize;
 use std::cell::RefCell;
-use std::collections::HashSet;
 use std::fs::File;
 use std::io::Write;
-use serde::Deserialize;
-use crate::vm::class::ClassRef;
 
 #[derive(Debug)]
 #[cfg_attr(feature = "debug", derive(Deserialize))]

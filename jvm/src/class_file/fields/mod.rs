@@ -1,4 +1,4 @@
-use crate::access_flags::FieldFlag;
+use crate::access_flags::field_flags;
 use crate::class_file::fields::attributes::FieldInfoAttributes;
 use crate::class_file::fields::field_type::{FieldType, PrimitiveType};
 use crate::vm::class::ClassId;
@@ -18,7 +18,7 @@ pub struct FieldInfo{
 
 impl FieldInfo {
     pub fn is_static(&self) -> bool {
-        self.flags & FieldFlag::Static as u16 > 0
+        self.flags & field_flags::STATIC > 0
     }
 }
 

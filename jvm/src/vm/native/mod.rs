@@ -1,16 +1,14 @@
 use crate::class_file::fields::field_type::{FieldType, PrimitiveType};
 use crate::class_file::methods::descriptor::MethodDescriptor;
 use crate::vm::class::ClassAndMethod;
-use crate::vm::java_thread::JavaThread;
-use crate::vm::jni::types::{jvalue, JavaVM};
+use crate::vm::jni::types::jvalue;
 use crate::vm::native::external::ExternNativeMethod;
 use crate::vm::result::{VMPartialResult, VMResultType};
 use crate::vm::value::{RefId, Reference, Value};
-use crate::vm::{Context, VmError, VM};
+use crate::vm::{Context, VmError};
 use libffi::high::CodePtr;
 use libloading::Library;
 use log::{info, warn};
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::c_void;
 use std::sync::RwLock;
