@@ -1,3 +1,4 @@
+use std::ffi::CString;
 use crate::vm::constants::classes::{JAVA_IO_FILE_INPUT_STREAM, JAVA_IO_FILE_OUTPUT_STREAM, JAVA_IO_UNIX_FILE_SYSTEM, JAVA_IO_IOEXCEPTION, JAVA_LANG_STRING};
 use crate::vm::constants::{FILEDESCRIPTOR_fd_INDEX, FILEINPUTSTREAM_fd_INDEX, FILEINPUTSTREAM_path_INDEX, FILE_path_INDEX};
 use crate::vm::java_thread::JavaThread;
@@ -9,6 +10,7 @@ use log::{debug, error, warn};
 use std::fs::File;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
+use std::str::FromStr;
 use std::time::SystemTime;
 use libc::{c_int, stat64, FIONREAD};
 use parking_lot::RwLock;
@@ -119,8 +121,30 @@ gen_delegate!(delegate_read_bytes, |ctx, obj_ref, args| {
     }
 });
 
+unsafe fn handle_open(path: CString, oflags: i32, mode: i32) -> i32 {
+    let fd = libc::open64(path.as_ptr(), oflags, mode);
+    if fd != -1 {
+        let mut buf64: stat64 = std::mem::zeroed();
+        let result = libc::fstat64(fd, &mut buf64);
+        if result != -1 {
+            if buf64.st_mode & libc::S_IFDIR > 0 {
+                error!("Cannot open a dir");
+                libc::close(fd);
+                return -1;
+            }
+        } else {
+            libc::close(fd);
+            return -1;
+        }
+    }
+    fd as i32
+}
+
 //obsolete because libjava.so is loaded
-gen_delegate!(delegate_open0, |ctx, _obj_ref, args| {
+gen_delegate!(delegate_open0, |ctx, obj_ref, args| {
+    let Some(fis_ref) = obj_ref else {
+        return invalidation!("Expected this")
+    };
     if let Some(path_val) = args.get(0) && !path_val.is_null(){
         let path = ctx.vm.extract_string_from_value(*path_val)?;
         if !ctx.vm.currently_open_files.read().contains_key(&path) {
@@ -129,6 +153,11 @@ gen_delegate!(delegate_open0, |ctx, _obj_ref, args| {
                 ctx.vm.currently_open_files.write().insert(path.clone(), (file_content, 0));
             }
         }
+        let fd = unsafe { handle_open(CString::from_str(path.as_str()).unwrap(), libc::O_RDONLY, 0o666) };
+        let fd_val = fis_ref.get_ref_field(FILEINPUTSTREAM_fd_INDEX)?;
+        let fd_ref = ctx.vm.resolve_object_by_id(fd_val)?;
+        fd_ref.set_field(FILEDESCRIPTOR_fd_INDEX, Value::Integer(fd));
+
         non_failing_none()
     } else {
         invalidation!("Expected a string for the path but got: {:?}", args.get(0))
