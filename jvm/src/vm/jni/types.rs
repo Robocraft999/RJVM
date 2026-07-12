@@ -9,6 +9,7 @@ use crate::native_init_wrap;
 use crate::vm::application::thread;
 use crate::vm::class::{ClassAndMethod, ClassId};
 use crate::vm::constants::THROWABLE_detailsMessage_INDEX;
+use crate::vm::debug::validation::FieldTypeExt;
 use crate::vm::java_thread::JavaThread;
 use crate::vm::result::{VMPartialResult, VMResult, VMResultType};
 use crate::vm::value::{RefId, ReferenceType, Value};
@@ -620,13 +621,19 @@ impl JNINativeInterface_ {
     unsafe fn SetField(env: *mut JNIEnv, obj: jobject, fieldID: jfieldID, val: Value) {
         let vm = unsafe{(*env).vm()};
         let obj_ref = vm.resolve_object_by_jobject(obj).unwrap();
+        #[cfg(feature = "validation")]
+        {
+            let clazz = vm.find_class_by_id(obj_ref.class_id).unwrap();
+            let ctx = Context { vm, thread: thread() };
+            clazz.field_at_index(fieldID as usize - 1).unwrap().field_type.validate(val, ctx).unwrap();
+        }
         // See not on GetField
         obj_ref.set_field(fieldID as usize - 1, val);
     }
     pub unsafe extern "system-unwind" fn SetObjectField(env: *mut JNIEnv, obj: jobject, fieldID: jfieldID, val: jobject) {
         let vm = unsafe{(*env).vm()};
         let val = if val != 0 {
-            Value::Reference(RefId(obj))
+            Value::Reference(RefId(val))
         } else {
             vm.null()
         };

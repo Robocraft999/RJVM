@@ -7,6 +7,7 @@ use crate::Value;
 use crate::VM;
 use log::{trace, warn};
 use std::cell::RefCell;
+use crate::vm::debug::validation::FieldTypeExt;
 
 pub struct CallStack{
     pub frames: RefCell<Vec<CallFrame>>,
@@ -23,38 +24,6 @@ impl CallStack {
             locals_stack: RefCell::new(Vec::new()),
             pcs: RefCell::new(Vec::new()),
         }
-    }
-
-    pub fn create_and_push_call_frame<'a>(&self, class_and_method: ClassAndMethod<'a>, object: Option<Reference<'a>>, args: Vec<Value>, should_push_return: bool){
-        let mut locals = vec![Value::Uninitialized; class_and_method.get_max_locals()];
-        let mut offset = 0;
-        if !class_and_method.method.is_static(){
-            locals[0] = Value::Reference(object.unwrap().id);
-            offset = 1;
-        }
-        if !class_and_method.class.has_method_polymorphic_signature(class_and_method.method) {
-            for (i, provided_arg) in args.iter().filter(|a| if let Value::Dummy = a {false} else {true}).enumerate(){
-                if !(&class_and_method.method.descriptor.args[i] == provided_arg){
-                    //unreachable!("Expected arg type: {:?} but got value: {:?}", class_and_method.method.descriptor.args[i], provided_arg);
-                }
-            }
-        } else {
-            locals.resize(offset + args.len(), Value::Uninitialized);
-            println!("cam: {}, ({}), args:\n    {:?}", class_and_method.format(), locals.len(), args);
-        }
-
-        for (dest, src) in locals[offset..].iter_mut().zip(args) {
-            *dest = src;
-        }
-        self.locals_stack.borrow_mut().push(locals);
-        self.operand_stacks.borrow_mut().push(Vec::with_capacity(class_and_method.get_max_stack_size()));
-        self.pcs.borrow_mut().push(ProgramCounter(0));
-        trace!("Pushing frame for: {}", class_and_method.format());
-        let frame = CallFrame{
-            class_and_method: class_and_method.as_ids(),
-            should_push_return,
-        };
-        self.frames.borrow_mut().push(frame);
     }
 
     pub fn pop_call_frame(&self) -> CallFrame{

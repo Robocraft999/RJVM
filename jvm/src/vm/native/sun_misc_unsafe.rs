@@ -11,6 +11,7 @@ use crate::vm::VmError;
 use log::{debug, trace};
 use std::thread::{park, park_timeout};
 use std::time::{Duration, SystemTime};
+use crate::vm::debug::validation::FieldTypeExt;
 
 pub fn register_natives(registry: &mut NativeMethodRegistry) {
     let mut register = |method_name, sig, delegate| registry.register(SUN_MISC_UNSAFE, method_name, sig, delegate);
@@ -109,6 +110,11 @@ gen_delegate!(delegate_put_object_volatile, |ctx, _obj_ref, args| {
         if o.is_array(){
             o.set_element(*index as usize - ARRAY_BASE_OFFSET, Value::Reference(*x_id));
         } else {
+            #[cfg(feature = "validation")]
+            {
+                let clazz = ctx.vm.find_class_by_id(o.class_id).unwrap();
+                clazz.field_at_index(*index as usize).unwrap().field_type.validate(Value::Reference(*x_id), ctx)?;
+            }
             o.set_field(*index as usize, Value::Reference(*x_id));
         }
         non_failing_none()
@@ -131,6 +137,15 @@ gen_delegate!(delegate_get_object_volatile, |ctx, _obj_ref, args| {
         } else {
             o.get_field(*index as usize)
         };
+        #[cfg(feature = "validation")]
+        {
+            let clazz = if o.class_name == JAVA_LANG_CLASS {
+                ctx.vm.extract_class_from_class_object(o)?
+            } else {
+                ctx.vm.find_class_by_id(o.class_id).unwrap()
+            };
+            clazz.field_at_index(*index as usize).unwrap().field_type.validate(field_value, ctx)?;
+        }
         non_failing_some(field_value)
     } else {
         invalidation!("Expected an Reference or Array but got: {:?}", args)
@@ -228,6 +243,11 @@ gen_delegate!(delegate_compare_and_swap_object, |ctx, _obj_ref, args| {
         } else if o.is_object(){
             if let Value::Reference(current_id) = o.get_field(*offset as usize){
                 if current_id == *expected_id{
+                    #[cfg(feature = "validation")]
+                    {
+                        let clazz = ctx.vm.find_class_by_id(o.class_id).unwrap();
+                        clazz.field_at_index(*offset as usize).unwrap().field_type.validate(Value::Reference(*x), ctx)?;
+                    }
                     o.set_field(*offset as usize, Value::Reference(*x));
                     return non_failing_some(Value::from(true));
                 }
@@ -353,8 +373,17 @@ gen_delegate!(delegate_put_ordered_object, |ctx, _obj_ref, args| {
             let class_ref = ctx.vm.extract_class_from_class_object(o)?;
             let _ = wrap_init!(ctx, ctx.ensure_initialized(class_ref)?);
             let static_object = ctx.vm.static_class_objects.read().get(&class_ref.id).unwrap().clone();
+            #[cfg(feature = "validation")]
+            {
+                class_ref.field_at_index(*index as usize).unwrap().field_type.validate(x.clone(), ctx)?;
+            }
             static_object.set_field(*index as usize, x.clone());
         } else {
+            #[cfg(feature = "validation")]
+            {
+                let class_ref = ctx.vm.find_class_by_id(o.class_id).unwrap();
+                class_ref.field_at_index(*index as usize).unwrap().field_type.validate(x.clone(), ctx)?;
+            }
             o.set_field(*index as usize, x.clone());
         }
         non_failing_none()

@@ -5,6 +5,7 @@ use crate::vm::debug::tracker::Tracker;
 mod exceptions;
 mod tracker;
 mod bytecode;
+pub(crate) mod validation;
 
 pub struct DebugHelper{
     pub exception_helper: ExceptionHelper,

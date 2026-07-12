@@ -1,5 +1,5 @@
 use cesu8::{from_java_cesu8, Cesu8DecodingError};
-use log::{error, info};
+use log::{error, info, trace};
 use parking_lot::{Mutex, RwLock};
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -131,10 +131,18 @@ impl<'a> VM<'a>{
     pub fn new_object_from_class(&self, class: ClassRef<'a>) -> Reference<'a>{
         info!("CC[{:?}] = {}", class.id, class.name);
         let fields = class.get_fields(&self);
+        #[cfg(feature = "validation")]
+        {
+            for field_idx in 0..class.transitive_field_count {
+                let info = class.field_at_index(field_idx).unwrap();
+                let ctx = Context { vm: self, thread: thread() };
+                info.field_type.validate(fields[field_idx], ctx).unwrap();
+            }
+        }
         let obj = self.object_allocator.allocate_object(class, fields);
         let mut guard = self.objects_by_id.write();
         guard.insert(obj.id, obj);
-        //self.vm_debug_helper.tracker.push_object_event(obj.id, format!("Object ({})", class.name));
+        thread().debug_helper.tracker.push_object_event(obj.id, format!("Object ({})", class.name));
         obj
     }
 
@@ -152,7 +160,7 @@ impl<'a> VM<'a>{
         let class = self.get_or_resolve_class(class_name.as_str())?;
         let obj = self.object_allocator.allocate_array(class, dims, *component_type, content);
         self.objects_by_id.write().insert(obj.id, obj);
-        //self.vm_debug_helper.tracker.push_object_event(obj.id, format!("Array allocated:   \n{:?}", obj));
+        thread().debug_helper.tracker.push_object_event(obj.id, format!("Array allocated:   \n{:?}", obj.print(self)));
         Ok(VMResultType::Successful(obj))
         /*get_or_init_special!(self.get_or_initialize_class(class_name.as_str())?,
             |class| {
@@ -525,7 +533,7 @@ impl<'a> Context<'a, '_> {
                     class,
                     method: clinit_method,
                 };
-                self.thread.call_stack.create_and_push_call_frame(class_and_method, Some(static_object), Vec::new(), false);
+                self.create_and_push_call_frame(class_and_method, Some(static_object), Vec::new(), false);
                 return Some(());
             }
         }
@@ -535,6 +543,41 @@ impl<'a> Context<'a, '_> {
 
     pub fn new_object(&self, class_name: &str) -> VMPartialResult<Reference<'a>>{
         get_or_init_special!(self.get_or_initialize_class(class_name)?, |class| Ok(VMResultType::Successful(self.vm.new_object_from_class(class))))
+    }
+
+    pub fn create_and_push_call_frame(&self, class_and_method: ClassAndMethod<'a>, object: Option<Reference<'a>>, args: Vec<Value>, should_push_return: bool){
+        let mut locals = vec![Value::Uninitialized; class_and_method.get_max_locals()];
+        let mut offset = 0;
+        if !class_and_method.method.is_static(){
+            locals[0] = Value::Reference(object.unwrap().id);
+            offset = 1;
+        }
+        if !class_and_method.class.has_method_polymorphic_signature(class_and_method.method) {
+            #[cfg(feature = "validation")]
+            {
+                let provided_args_count = args.iter().filter(|a| !matches!(a, Value::Dummy)).count();
+                assert_eq!(class_and_method.method.get_args_count(), provided_args_count, "[Validation]: Invalid Argument Count. Expected: {}, Got: {}", class_and_method.method.get_args_count(), provided_args_count);
+                for (i, provided_arg) in args.iter().filter(|a| !matches!(a, Value::Dummy)).enumerate(){
+                    class_and_method.method.descriptor.args[i].validate(provided_arg.clone(), self.clone()).unwrap();
+                }
+            }
+        } else {
+            locals.resize(offset + args.len(), Value::Uninitialized);
+            println!("cam: {}, ({}), args:\n    {:?}", class_and_method.format(), locals.len(), args);
+        }
+
+        for (dest, src) in locals[offset..].iter_mut().zip(args) {
+            *dest = src;
+        }
+        self.thread.call_stack.locals_stack.borrow_mut().push(locals);
+        self.thread.call_stack.operand_stacks.borrow_mut().push(Vec::with_capacity(class_and_method.get_max_stack_size()));
+        self.thread.call_stack.pcs.borrow_mut().push(ProgramCounter(0));
+        trace!("Pushing frame for: {}", class_and_method.format());
+        let frame = CallFrame{
+            class_and_method: class_and_method.as_ids(),
+            should_push_return,
+        };
+        self.thread.call_stack.frames.borrow_mut().push(frame);
     }
 }
 

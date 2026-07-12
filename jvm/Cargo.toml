@@ -29,5 +29,6 @@ libc = "1.0.0-alpha.3"
 
 [features]
 debug = ["dep:toml", "dep:serde"]
+validation = []
 il = []
 default = ["il"]

@@ -152,7 +152,7 @@ gen_delegate!(delegate_init_properties, |ctx, _obj_ref, args| {
         //FIXME could be bad to unwrap
         let arg1 = ctx.vm.try_new_string_object(key)?;
         let arg2 = ctx.vm.try_new_string_object(value.as_str())?;
-        ctx.thread.call_stack.create_and_push_call_frame(properties_set_method.clone(), Some(properties_ref), vec![Value::Reference(arg1.id), Value::Reference(arg2.id)], false)
+        ctx.create_and_push_call_frame(properties_set_method.clone(), Some(properties_ref), vec![Value::Reference(arg1.id), Value::Reference(arg2.id)], false)
     }
     let _res = JavaThread::invoke_frames_until(ctx, current_frame_index)?;
     //Ok(VMResultType::NeedsClassInit(frames, false))

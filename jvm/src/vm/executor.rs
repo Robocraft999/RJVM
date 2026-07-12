@@ -3,6 +3,7 @@ use crate::class_file::fields::field_type::{FieldType, PrimitiveType};
 use crate::class_file::methods::descriptor::MethodDescriptor;
 use crate::vm::class_manager::ClassLoadingState;
 use crate::vm::constants::{MEMBERNAME_clazz_INDEX, MEMBERNAME_name_INDEX, MEMBERNAME_type_INDEX, THROWABLE_detailsMessage_INDEX};
+use crate::vm::debug::validation::FieldTypeExt;
 use crate::vm::java_thread::JavaThread;
 use crate::vm::result::{VMPartialResult, VMResultType};
 use crate::vm::Context;
@@ -642,6 +643,10 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                     if !class_and_method.method.descriptor.return_type.clone().map(|rt| rt == value).unwrap_or(false) {
                         unreachable!("Trying to return {:?} but expecting: {:?}", value, class_and_method.method.descriptor.return_type)
                     }
+                    #[cfg(feature = "validation")]
+                    {
+                        wrap_error!(class_and_method.method.descriptor.return_type.clone().unwrap().validate(value, ctx));
+                    }
                     return Some(Ok(VMResultType::Successful(Some(value))))
                 }
                 Instruction::RETURN => {
@@ -664,6 +669,10 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                     let object = ctx.vm.get_static_class_object(class_id).unwrap();
                     ctx.thread.debug_helper.tracker.push_object_event(object.id, format!("Set static field: {}: {:?} to:\n    {}", info.name, info.field_type, value.print(ctx.vm)));
                     debug!("PUTSTATIC {} {} {} {:?}", caf.field.name, caf.field.field_type.to_descriptor(), field_index, info);
+                    #[cfg(feature = "validation")]
+                    {
+                        wrap_error!(info.field_type.validate(value, ctx));
+                    }
                     object.set_field(field_index, value);
                 }
                 Instruction::GETSTATIC(index) => {
@@ -675,17 +684,26 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                     let (field_index, info, class_id) = caf.class.find_field_static(caf.field.name.as_str()).unwrap();
                     let object = ctx.vm.get_static_class_object(class_id).unwrap();
                     debug!("GETSTATIC {} {} {} {:?}", caf.field.name, caf.field.field_type.to_descriptor(), field_index, info);
-
-                    ctx.thread.call_stack.push_operand_value(object.get_field(field_index));
+                    let value = object.get_field(field_index);
+                    #[cfg(feature = "validation")]
+                    {
+                        wrap_error!(info.field_type.validate(value, ctx));
+                    }
+                    ctx.thread.call_stack.push_operand_value(value);
                 }
                 Instruction::GETFIELD(index) => {
                     let caf = class_and_method.get_constant_field_ref(&ctx.vm, *index).unwrap();
                     debug!("GETFIELD {}.{} {}", caf.class.name, caf.field.name, caf.field.field_type.to_descriptor());
-                    let (field_index, _) = caf.class.find_field(caf.field.name.as_str()).unwrap();
+                    let (field_index, info) = caf.class.find_field(caf.field.name.as_str()).unwrap();
                     let object = ctx.thread.call_stack.pop_operand_value().unwrap();
                     if let Value::Reference(obj_id) = object && !object.is_null(){
                         let obj = wrap_error!(ctx.vm.resolve_object_by_id(obj_id));
-                        ctx.thread.call_stack.push_operand_value(obj.get_field(field_index));
+                        let value = obj.get_field(field_index);
+                        #[cfg(feature = "validation")]
+                        {
+                            wrap_error!(info.field_type.validate(value, ctx));
+                        }
+                        ctx.thread.call_stack.push_operand_value(value);
                     } else {
                         return Some(Err(VmError::ValidationError(format!("Cannot get field: {}.{}::{} because 'this' is {:?}", caf.class.name, caf.field.name, caf.field.field_type.to_descriptor(), object))));
                     }
@@ -699,6 +717,10 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                     if let Value::Reference(obj_id) = object && !object.is_null(){
                         let obj = wrap_error!(ctx.vm.resolve_object_by_id(obj_id));
                         ctx.thread.debug_helper.tracker.push_object_event(obj_id, format!("Set field: {}: {:?} to:\n    {}", info.name, info.field_type, value.print(ctx.vm)));
+                        #[cfg(feature = "validation")]
+                        {
+                            wrap_error!(info.field_type.validate(value, ctx));
+                        }
                         obj.set_field(field_index, value);
                         debug!("obj:{:?}", obj.print(ctx.vm));
                     } else {
@@ -1242,7 +1264,7 @@ fn execute_invoke<'a>(ctx: Context<'a, '_>, index: u16, kind: InvokeKind) -> VMP
             }
         }
     }
-    ctx.thread.call_stack.create_and_push_call_frame(class_and_method, receiver, args, true);
+    ctx.create_and_push_call_frame(class_and_method, receiver, args, true);
     Ok(VMResultType::Interrupted(1, false))
     //Ok(VMResultType::Ok(Some(Value::Null)))
     /*let res = vm.invoke(class_and_method, receiver, args)?.to_option();

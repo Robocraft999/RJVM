@@ -113,7 +113,7 @@ impl JavaThread {
 
     pub fn invoke_subroutine<'a>(ctx: Context<'a, '_>, class_and_method: ClassAndMethod<'a>, object: Option<Reference<'a>>, args: Vec<Value>) -> VMPartialResult<Option<Value>>{
         let current_index = ctx.thread.call_stack.len() as isize -1;
-        ctx.thread.call_stack.create_and_push_call_frame(class_and_method, object, args, false);
+        ctx.create_and_push_call_frame(class_and_method, object, args, false);
         Self::invoke_frames_until(ctx, current_index)
     }
 
@@ -121,7 +121,7 @@ impl JavaThread {
         let current_index = ctx.thread.call_stack.len() as isize -1;
         let class_and_method = ClassAndMethod::try_resolve(ctx.vm, &camid)?;
         let obj = ctx.vm.resolve_object_by_id(obj_id)?;
-        ctx.thread.call_stack.create_and_push_call_frame(class_and_method, Some(obj), args, false);
+        ctx.create_and_push_call_frame(class_and_method, Some(obj), args, false);
         let VMResultType::Successful(None) = Self::invoke_frames_until(ctx, current_index)? else { return Err(VmError::Unspecified("Thread exited unsuccessfully".to_string())) };
         Ok(())
     }
