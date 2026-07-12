@@ -1,5 +1,5 @@
 use std::ffi::CString;
-use crate::vm::constants::classes::{JAVA_IO_FILE_INPUT_STREAM, JAVA_IO_FILE_OUTPUT_STREAM, JAVA_IO_UNIX_FILE_SYSTEM, JAVA_IO_IOEXCEPTION, JAVA_LANG_STRING};
+use crate::vm::constants::classes::{JAVA_IO_FILE_INPUT_STREAM, JAVA_IO_FILE_OUTPUT_STREAM, JAVA_IO_UNIX_FILE_SYSTEM, JAVA_IO_IOEXCEPTION, JAVA_LANG_STRING, JAVA_IO_RANDOM_ACCESS_FILE};
 use crate::vm::constants::{FILEDESCRIPTOR_fd_INDEX, FILEINPUTSTREAM_fd_INDEX, FILEINPUTSTREAM_path_INDEX, FILE_path_INDEX};
 use crate::vm::java_thread::JavaThread;
 use crate::vm::native::{gen_delegate, invalidation, non_failing_none, non_failing_some, wrap_init, NativeMethodRegistry};
@@ -27,6 +27,8 @@ pub fn register_natives(registry: &mut NativeMethodRegistry) {
     registry.register(JAVA_IO_UNIX_FILE_SYSTEM, "getLastModifiedTime", "(Ljava/io/File;)J", delegate_last_modified_time);
     registry.register(JAVA_IO_UNIX_FILE_SYSTEM, "checkAccess", "(Ljava/io/File;I)Z", delegate_check_access);
     registry.register(JAVA_IO_UNIX_FILE_SYSTEM, "list", "(Ljava/io/File;)[Ljava/lang/String;", delegate_list);
+    registry.register(JAVA_IO_UNIX_FILE_SYSTEM, "createDirectory", "(Ljava/io/File;)Z", delegate_create_directory);
+    registry.register(JAVA_IO_RANDOM_ACCESS_FILE, "open0", "(Ljava/lang/String;I)V", delegate_raf_open0)
 }
 
 gen_delegate!(delegate_write_bytes, |ctx, _obj_ref, args| {
@@ -344,7 +346,24 @@ gen_delegate!(delegate_list, |ctx, _obj_ref, args| {
         let arr = ctx.vm.try_new_array(1, FieldType::Object(JAVA_LANG_STRING.to_owned()).to_array_field_type(1), RwLock::new(strings))?;
         non_failing_some(Value::Reference(arr.id))
     } else {
-        invalidation!("")
+        invalidation!("Expected File Parameter")
     }
+});
+
+gen_delegate!(delegate_create_directory, |ctx, _obj_ref, args| {
+    if let Some(Value::Reference(file_ref_id)) = args.get(0){
+        let file_ref = ctx.vm.resolve_object_by_id(*file_ref_id)?;
+        let string_val = file_ref.get_field(FILE_path_INDEX);
+        let path = ctx.vm.extract_string_from_value(string_val)?;
+        let path = Path::new(&path);
+
+        let worked = std::fs::create_dir(path).is_ok();
+        non_failing_some(Value::from(worked))
+    } else {
+        invalidation!("Expected File Parameter")
+    }
+});
+
+gen_delegate!(delegate_raf_open0, |ctx, _obj_ref, args| {
 
 });

@@ -28,6 +28,9 @@ use crate::{get_or_init, get_or_init_special};
 use class_manager::ClassManager;
 use class_path::ClassPath;
 use value::Value;
+use crate::vm::application::thread;
+use crate::vm::call_frame::CallFrame;
+use crate::vm::debug::validation::FieldTypeExt;
 
 pub mod class_path;
 pub mod class_path_entry;

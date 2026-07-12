@@ -938,10 +938,18 @@ impl JNINativeInterface_ {
         unimplemented!()
     }
     pub unsafe extern "system-unwind" fn GetStringUTFChars(env: *mut JNIEnv, str: jstring, isCopy: *mut jboolean) -> *const c_char{
-        unimplemented!()
+        let vm: &VM = unsafe{(*env).vm()};
+        let string = vm.extract_string_from_value(Value::Reference(RefId(str))).unwrap();
+        debug!(target: "native", "NATIVE: GetStringUTFChars: {}", string);
+        //FIXME potential dangling pointer
+        let boxed_string = Box::new(string.as_bytes().to_vec());
+        if !isCopy.is_null() {
+            (*isCopy) = JNI_TRUE;
+        }
+        Box::leak(boxed_string).as_ptr() as *const c_char
     }
     pub unsafe extern "system-unwind" fn ReleaseStringUTFChars(env: *mut JNIEnv, str: jstring, chars: *const c_char){
-        unimplemented!()
+        //nothing
     }
 
     pub unsafe extern "system-unwind" fn GetArrayLength(env: *mut JNIEnv, array: jarray) -> jsize{
