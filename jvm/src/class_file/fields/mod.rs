@@ -6,7 +6,7 @@ use crate::vm::class::ClassId;
 pub mod attributes;
 pub mod field_type;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FieldInfo{
     pub flags: u16,
     pub name: String,

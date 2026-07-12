@@ -21,7 +21,9 @@ pub fn register_natives(registry: &mut NativeMethodRegistry) {
     register("staticFieldOffset", "(Ljava/lang/reflect/Field;)J", delegate_static_field_offset);
     register("putObjectVolatile", "(Ljava/lang/Object;JLjava/lang/Object;)V", delegate_put_object_volatile);
     register("getObjectVolatile", "(Ljava/lang/Object;J)Ljava/lang/Object;", delegate_get_object_volatile);
+    register("putIntVolatile", "(Ljava/lang/Object;JI)V", delegate_put_int_volatile);
     register("getIntVolatile", "(Ljava/lang/Object;J)I", delegate_get_int_volatile);
+    register("putLongVolatile", "(Ljava/lang/Object;JJ)V", delegate_put_long_volatile);
     register("getLongVolatile", "(Ljava/lang/Object;J)J", delegate_get_long_volatile);
     register("staticFieldBase", "(Ljava/lang/reflect/Field;)Ljava/lang/Object;", delegate_static_field_base);
     register("compareAndSwapObject", "(Ljava/lang/Object;JLjava/lang/Object;Ljava/lang/Object;)Z", delegate_compare_and_swap_object);
@@ -37,6 +39,10 @@ pub fn register_natives(registry: &mut NativeMethodRegistry) {
     register("getByte", "(J)B", delegate_get_byte);
     register("putObject", "(Ljava/lang/Object;JLjava/lang/Object;)V", delegate_put_object_volatile);
     register("getObject", "(Ljava/lang/Object;J)Ljava/lang/Object;", delegate_get_object_volatile);
+    register("putInt", "(Ljava/lang/Object;JI)V", delegate_put_int_volatile);
+    register("getInt", "(Ljava/lang/Object;J)I", delegate_get_int_volatile);
+    register("putLong", "(Ljava/lang/Object;JJ)V", delegate_put_long_volatile);
+    register("getLong", "(Ljava/lang/Object;J)J", delegate_get_long_volatile);
     register("putOrderedObject", "(Ljava/lang/Object;JLjava/lang/Object;)V", delegate_put_ordered_object);
     register("defineClass", "(Ljava/lang/String;[BIILjava/lang/ClassLoader;Ljava/security/ProtectionDomain;)Ljava/lang/Class;", delegate_define_class);
     register("defineAnonymousClass", "(Ljava/lang/Class;[B[Ljava/lang/Object;)Ljava/lang/Class;", delegate_define_anon_class);
@@ -131,6 +137,22 @@ gen_delegate!(delegate_get_object_volatile, |ctx, _obj_ref, args| {
     }
 });
 
+gen_delegate!(delegate_put_int_volatile, |ctx, _obj_ref, args| {
+    debug!("put_int_volatile args: {:?}", args);
+    if let (Some(Value::Reference(o_id)), Some(Value::Long(index)), Some(Value::Integer(val))) = (args.get(0), args.get(1), args.get(3)){
+        let o = ctx.vm.resolve_object_by_id(*o_id)?;
+        // FIXME verify if null or correct field type
+        if o.is_array(){
+            o.set_element(*index as usize - ARRAY_BASE_OFFSET, Value::Integer(*val));
+        } else {
+            o.set_field(*index as usize, Value::Integer(*val));
+        }
+        non_failing_none()
+    } else {
+        invalidation!("Expected an Reference, Long and Int but got: {:?}", args)
+    }
+});
+
 gen_delegate!(delegate_get_int_volatile, |ctx, _obj_ref, args| {
     debug!("get_int_volatile args: {:?}", args);
     if let (Some(Value::Reference(o_id)), Some(Value::Long(index))) = (args.get(0), args.get(1)) {
@@ -148,6 +170,22 @@ gen_delegate!(delegate_get_int_volatile, |ctx, _obj_ref, args| {
         non_failing_some(field_value)
     } else {
         invalidation!("Expected an Reference or Array but got: {:?}", args)
+    }
+});
+
+gen_delegate!(delegate_put_long_volatile, |ctx, _obj_ref, args| {
+    debug!("put_int_volatile args: {:?}", args);
+    if let (Some(Value::Reference(o_id)), Some(Value::Long(index)), Some(Value::Long(val))) = (args.get(0), args.get(1), args.get(3)){
+        let o = ctx.vm.resolve_object_by_id(*o_id)?;
+        // FIXME verify if null or correct field type
+        if o.is_array(){
+            o.set_element(*index as usize - ARRAY_BASE_OFFSET, Value::Long(*val));
+        } else {
+            o.set_field(*index as usize, Value::Long(*val));
+        }
+        non_failing_none()
+    } else {
+        invalidation!("Expected an Reference, Long and Long but got: {:?}", args)
     }
 });
 

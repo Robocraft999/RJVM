@@ -143,6 +143,8 @@ impl<'a> ClassManager<'a>{
             methods: Vec::new(),
             transitive_field_count: 0,
             first_field_index: 0,
+            transitive_method_count: 0,
+            first_method_index: 0,
             attributes: ClassFileAttributes::default(),
             array_info,
         };
@@ -193,7 +195,7 @@ impl<'a> ClassManager<'a>{
                         name,
                         attributes: field_attributes,
                         field_type,
-                        slot: i + super_class_field_count,
+                        slot: i + super_class_field_count + 1,
                         holder_id: class.id,
                         flags: raw_field.access_flags,
                     })
@@ -205,6 +207,10 @@ impl<'a> ClassManager<'a>{
         class.transitive_field_count = super_class_field_count + class.fields.len();
         class.first_field_index = super_class_field_count;
 
+        let super_class_method_count = match &class.superclass {
+            Some(clazz) => clazz.methods.len(),
+            None => 0,
+        };
         class.methods = parsed_class.methods.iter()
             .enumerate()
             .map(|(i, raw_method)| (i, raw_method, class.get_or_resolve_constant(&vm, raw_method.name_index), class.get_or_resolve_constant(&vm, raw_method.descriptor_index)))
@@ -242,6 +248,8 @@ impl<'a> ClassManager<'a>{
             })
             .try_collect::<Vec<MethodInfo>>()
             .ok_or(VmError::ParseError(ClassParseError::ConstantPoolError(format!("Method of class '{}' could not be loaded.", class.name))))?;
+        class.transitive_method_count = super_class_method_count + class.methods.len();
+        class.first_method_index = super_class_method_count;
 
         let class_ref = unsafe {
             let class_ptr: *const Class<'a> = &class;

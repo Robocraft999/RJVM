@@ -28,7 +28,9 @@ pub struct Class<'a>{
     pub fields: Vec<FieldInfo>,
     pub methods: Vec<MethodInfo>,
     pub transitive_field_count: usize,
+    pub transitive_method_count: usize,
     pub first_field_index: usize,
+    pub first_method_index: usize,
     pub array_info: Option<ArrayInfo>,
     pub attributes: ClassFileAttributes,
 }
@@ -78,13 +80,58 @@ impl<'a> Class<'a>{
             }
         }
     }
-
-    pub fn find_method_index(&self, method_name: &str, descriptor: &str) -> Option<usize>{
-        self.methods.iter().enumerate().find(|(_, m)| m.name == method_name && m.descriptor.matches(descriptor)).map(|(i, _)| i)
+    pub fn find_method_slot(&self, method_name: &str, descriptor: &str) -> Option<usize> {
+        self.methods
+            .iter()
+            .find(|m| m.name == method_name && m.descriptor.matches(descriptor))
+            .map(|(i)| i.slot)
+            .or_else(|| {
+                if let Some(superclass) = &self.superclass {
+                    superclass.find_method_slot(method_name, descriptor)
+                } else {
+                    None
+                }
+            })
     }
 
     pub fn get_method_in_slot(&self, slot: usize) -> Option<&MethodInfo> {
-        self.methods.iter().find(|m| m.slot == slot)
+        self.methods
+            .iter()
+            .find(|m| m.slot == slot)
+            .or_else(|| {
+                if let Some(superclass) = &self.superclass {
+                    superclass.get_method_in_slot(slot)
+                } else {
+                    None
+                }
+            })
+    }
+
+    pub fn find_field_slot(&self, field_name: &str) -> Option<usize> {
+        self.fields
+            .iter()
+            .find(|f| f.name == field_name)
+            .map(|f| f.slot)
+            .or_else(|| {
+                if let Some(superclass) = &self.superclass{
+                    superclass.find_field_slot(field_name)
+                } else {
+                    None
+                }
+            })
+    }
+
+    pub fn get_field_in_slot(&self, slot: usize) -> Option<&FieldInfo> {
+        self.fields
+            .iter()
+            .find(|f| f.slot == slot)
+            .or_else(|| {
+                if let Some(superclass) = &self.superclass{
+                    superclass.get_field_in_slot(slot)
+                } else {
+                    None
+                }
+            })
     }
 
     pub fn find_field(&self, field_name: &str) -> Option<(usize, &FieldInfo)>{

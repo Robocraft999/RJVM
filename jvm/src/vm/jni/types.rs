@@ -181,7 +181,7 @@ unsafe fn resolve_static_class_and_method<'a>(env: *mut JNIEnv, clazz: jclass, m
 
     let class_ref = vm.resolve_class_object_by_jclass(clazz);
 
-    let method_info = class_ref.methods.get(method_id).unwrap();
+    let method_info = class_ref.get_method_in_slot(method_id).unwrap();
     ClassAndMethod{class: class_ref, method: method_info}
 }
 
@@ -191,7 +191,7 @@ unsafe fn resolve_class_and_method<'a>(env: *mut JNIEnv, obj: jobject, method_id
     let obj_ref = vm.resolve_object_by_jobject(obj).unwrap();
     let class_ref = vm.get_or_resolve_class(obj_ref.class_name.as_str()).unwrap();
 
-    let method_info = class_ref.methods.get(method_id).unwrap();
+    let method_info = class_ref.get_method_in_slot(method_id).unwrap();
     ClassAndMethod{class: class_ref, method: method_info}
 }
 
@@ -432,8 +432,7 @@ impl JNINativeInterface_ {
 
         let class_ref = vm.resolve_class_object_by_jclass(clazz);
         println!("NATIVE: GetMethodID: {}::{}{}", class_ref.name, method_name, signature);
-        //FIXME zero index results in NULL
-        class_ref.find_method_index(method_name, signature).ok_or(VmError::Native(format!("GetMethodID: {}::{}{} not found", class_ref.name, method_name, signature))).unwrap()
+        class_ref.find_method_slot(method_name, signature).ok_or(VmError::Native(format!("GetMethodID: {}::{}{} not found", class_ref.name, method_name, signature))).unwrap()
     }
 
     pub unsafe extern "C-unwind" fn CallObjectMethod(env: *mut JNIEnv, obj: jobject, methodID: jmethodID, mut params: ...) -> jobject{
@@ -564,7 +563,7 @@ impl JNINativeInterface_ {
         let class_ref = vm.resolve_class_object_by_jclass(clazz);
         println!("NATIVE: GetFieldID: {}::{}{}", class_ref.name, field_name, signature);
         // FIXME same as GetMethodID, there is a field at index 0 which is recognized as NULL
-        if let Some((index, _)) = class_ref.find_field(field_name){
+        if let Some(index) = class_ref.find_field_slot(field_name){
             index as jfieldID
         } else {
             let message = format!("GetMethodID: {}::{} not found", class_ref.name, field_name);
@@ -574,65 +573,55 @@ impl JNINativeInterface_ {
         }
     }
 
-    pub unsafe extern "system-unwind" fn GetObjectField(env: *mut JNIEnv, obj: jobject, fieldID: jfieldID) -> jobject{
+    pub unsafe fn GetField(env: *mut JNIEnv, obj: jobject, fieldID: jfieldID) -> Value {
         let vm = unsafe{(*env).vm()};
         let obj_ref = vm.resolve_object_by_jobject(obj).unwrap();
-        let Value::Reference(val) = obj_ref.get_field(fieldID as usize) else { unreachable!("") };
+        // FIXME this works, but it should be verified that the id is always the slot which is index+1
+        obj_ref.get_field(fieldID - 1)
+    }
+
+    pub unsafe extern "system-unwind" fn GetObjectField(env: *mut JNIEnv, obj: jobject, fieldID: jfieldID) -> jobject{
+        let Value::Reference(val) = (unsafe { Self::GetField(env, obj, fieldID) }) else { unreachable!("") };
         val.nid()
     }
     pub unsafe extern "system-unwind" fn GetBooleanField(env: *mut JNIEnv, obj: jobject, fieldID: jfieldID) -> jboolean{
-        let vm = unsafe{(*env).vm()};
-        let obj_ref = vm.resolve_object_by_jobject(obj).unwrap();
-        let Value::Integer(val) = obj_ref.get_field(fieldID as usize) else { unreachable!("") };
+        let Value::Integer(val) = (unsafe { Self::GetField(env, obj, fieldID) }) else { unreachable!("") };
         val as jboolean
     }
     pub unsafe extern "system-unwind" fn GetByteField(env: *mut JNIEnv, obj: jobject, fieldID: jfieldID) -> jbyte{
-        let vm = unsafe{(*env).vm()};
-        let obj_ref = vm.resolve_object_by_jobject(obj).unwrap();
-        let Value::Integer(val) = obj_ref.get_field(fieldID as usize) else { unreachable!("") };
+        let Value::Integer(val) = (unsafe { Self::GetField(env, obj, fieldID) }) else { unreachable!("") };
         val as jbyte
     }
     pub unsafe extern "system-unwind" fn GetCharField(env: *mut JNIEnv, obj: jobject, fieldID: jfieldID) -> jchar{
-        let vm = unsafe{(*env).vm()};
-        let obj_ref = vm.resolve_object_by_jobject(obj).unwrap();
-        let Value::Integer(val) = obj_ref.get_field(fieldID as usize) else { unreachable!("") };
+        let Value::Integer(val) = (unsafe { Self::GetField(env, obj, fieldID) }) else { unreachable!("") };
         val as jchar
     }
     pub unsafe extern "system-unwind" fn GetShortField(env: *mut JNIEnv, obj: jobject, fieldID: jfieldID) -> jshort{
-        let vm = unsafe{(*env).vm()};
-        let obj_ref = vm.resolve_object_by_jobject(obj).unwrap();
-        let Value::Integer(val) = obj_ref.get_field(fieldID as usize) else { unreachable!("") };
+        let Value::Integer(val) = (unsafe { Self::GetField(env, obj, fieldID) }) else { unreachable!("") };
         val as jshort
     }
     pub unsafe extern "system-unwind" fn GetIntField(env: *mut JNIEnv, obj: jobject, fieldID: jfieldID) -> jint{
-        let vm = unsafe{(*env).vm()};
-        let obj_ref = vm.resolve_object_by_jobject(obj).unwrap();
-        let Value::Integer(val) = obj_ref.get_field(fieldID as usize) else { unreachable!("") };
+        let Value::Integer(val) = (unsafe { Self::GetField(env, obj, fieldID) }) else { unreachable!("") };
         val as jint
     }
     pub unsafe extern "system-unwind" fn GetLongField(env: *mut JNIEnv, obj: jobject, fieldID: jfieldID) -> jlong{
-        let vm = unsafe{(*env).vm()};
-        let obj_ref = vm.resolve_object_by_jobject(obj).unwrap();
-        let Value::Long(val) = obj_ref.get_field(fieldID as usize) else { unreachable!("") };
+        let Value::Long(val) = (unsafe { Self::GetField(env, obj, fieldID) }) else { unreachable!("") };
         val as jlong
     }
     pub unsafe extern "system-unwind" fn GetFloatField(env: *mut JNIEnv, obj: jobject, fieldID: jfieldID) -> jfloat{
-        let vm = unsafe{(*env).vm()};
-        let obj_ref = vm.resolve_object_by_jobject(obj).unwrap();
-        let Value::Float(val) = obj_ref.get_field(fieldID as usize) else { unreachable!("") };
+        let Value::Float(val) = (unsafe { Self::GetField(env, obj, fieldID) }) else { unreachable!("") };
         val as jfloat
     }
     pub unsafe extern "system-unwind" fn GetDoubleField(env: *mut JNIEnv, obj: jobject, fieldID: jfieldID) -> jdouble{
-        let vm = unsafe{(*env).vm()};
-        let obj_ref = vm.resolve_object_by_jobject(obj).unwrap();
-        let Value::Double(val) = obj_ref.get_field(fieldID as usize) else { unreachable!("") };
+        let Value::Double(val) = (unsafe { Self::GetField(env, obj, fieldID) }) else { unreachable!("") };
         val as jdouble
     }
 
     unsafe fn SetField(env: *mut JNIEnv, obj: jobject, fieldID: jfieldID, val: Value) {
         let vm = unsafe{(*env).vm()};
         let obj_ref = vm.resolve_object_by_jobject(obj).unwrap();
-        obj_ref.set_field(fieldID as usize, val);
+        // See not on GetField
+        obj_ref.set_field(fieldID as usize - 1, val);
     }
     pub unsafe extern "system-unwind" fn SetObjectField(env: *mut JNIEnv, obj: jobject, fieldID: jfieldID, val: jobject) {
         let vm = unsafe{(*env).vm()};
@@ -677,8 +666,7 @@ impl JNINativeInterface_ {
         let class_ref = vm.resolve_class_object_by_jclass(clazz);
         native_init_wrap!(env, ctx.ensure_initialized(class_ref));
         println!("NATIVE: GetStaticMethodID: {}::{}{}", class_ref.name, method_name, signature);
-        //FIXME zero index results in NULL
-        class_ref.find_method_index(method_name, signature).ok_or(VmError::Native(format!("GetStaticMethodID: {}::{}{} not found", class_ref.name, method_name, signature))).unwrap()
+        class_ref.find_method_slot(method_name, signature).ok_or(VmError::Native(format!("GetStaticMethodID: {}::{}{} not found", class_ref.name, method_name, signature))).unwrap()
     }
 
     pub unsafe extern "C-unwind" fn CallStaticObjectMethod(env: *mut JNIEnv, clazz: jclass, methodID: jmethodID, params: ...) -> jobject {
@@ -809,10 +797,12 @@ impl JNINativeInterface_ {
         let vm = unsafe{(*env).vm()};
 
         let clazz = vm.resolve_class_object_by_jclass(clazz);
+        let ctx = Context { vm, thread: thread() };
+        native_init_wrap!(env, ctx.ensure_initialized(clazz));
 
-        let guard = vm.static_class_objects.read();
-        let class_ref = guard.get(&clazz.id).unwrap();
-        class_ref.get_field(fieldID as usize)
+        let class_ref = vm.get_static_class_object(clazz.id).unwrap();
+        // See note on GetField
+        class_ref.get_field(fieldID as usize - 1)
     }
 
     pub unsafe extern "system-unwind" fn GetStaticFieldID(env: *mut JNIEnv, clazz: jclass, name: *mut c_char, sig: *const c_char) -> jfieldID{
@@ -823,7 +813,7 @@ impl JNINativeInterface_ {
         let clazz = vm.resolve_class_object_by_jclass(clazz);
         println!("NATIVE: GetStaticFieldID: {}::{}{}", clazz.name, field_name, signature);
         // FIXME same as GetMethodID, there is a field at index 0 which is recognized as NULL
-        if let Some((index, _, _)) = clazz.find_field_static(field_name){
+        if let Some(index) = clazz.find_field_slot(field_name){
             index as jfieldID
         } else {
             let message = format!("GetStaticFieldID: {}::{} not found", clazz.name, field_name);

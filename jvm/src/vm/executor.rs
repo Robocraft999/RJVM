@@ -635,10 +635,10 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                     let value = ctx.thread.call_stack.pop_operand_value().unwrap();
                     if !class_and_method.method.is_static(){
                         if let Some(Value::Reference(this)) = ctx.thread.call_stack.load_local(0){
-                            ctx.thread.debug_helper.tracker.push_object_event(this, format!("Function {} returned:\n    {:?}", class_and_method.format(), value))
+                            ctx.thread.debug_helper.tracker.push_object_event(this, format!("Function {} returned:\n    {}", class_and_method.format(), value.print(ctx.vm)))
                         }
                     }
-                    ctx.thread.debug_helper.tracker.push_method_event(class_and_method.format(), format!("returning: {:?}", value));
+                    ctx.thread.debug_helper.tracker.push_method_event(class_and_method.format(), format!("returning: {:?}", value.print(ctx.vm)));
                     if !class_and_method.method.descriptor.return_type.clone().map(|rt| rt == value).unwrap_or(false) {
                         unreachable!("Trying to return {:?} but expecting: {:?}", value, class_and_method.method.descriptor.return_type)
                     }
@@ -662,7 +662,7 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
 
                     let (field_index, info, class_id) = caf.class.find_field_static(caf.field.name.as_str()).unwrap();
                     let object = ctx.vm.get_static_class_object(class_id).unwrap();
-                    ctx.thread.debug_helper.tracker.push_object_event(object.id, format!("Set static field: {}: {:?} to:\n    {:?}", info.name, info.field_type, value.print(ctx.vm)));
+                    ctx.thread.debug_helper.tracker.push_object_event(object.id, format!("Set static field: {}: {:?} to:\n    {}", info.name, info.field_type, value.print(ctx.vm)));
                     debug!("PUTSTATIC {} {} {} {:?}", caf.field.name, caf.field.field_type.to_descriptor(), field_index, info);
                     object.set_field(field_index, value);
                 }
@@ -698,7 +698,7 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                     let object = ctx.thread.call_stack.pop_operand_value().unwrap();
                     if let Value::Reference(obj_id) = object && !object.is_null(){
                         let obj = wrap_error!(ctx.vm.resolve_object_by_id(obj_id));
-                        ctx.thread.debug_helper.tracker.push_object_event(obj_id, format!("Set field: {}: {:?} to:\n    {:?}", info.name, info.field_type, value.print(ctx.vm)));
+                        ctx.thread.debug_helper.tracker.push_object_event(obj_id, format!("Set field: {}: {:?} to:\n    {}", info.name, info.field_type, value.print(ctx.vm)));
                         obj.set_field(field_index, value);
                         debug!("obj:{:?}", obj.print(ctx.vm));
                     } else {
@@ -1231,7 +1231,7 @@ fn execute_invoke<'a>(ctx: Context<'a, '_>, index: u16, kind: InvokeKind) -> VMP
     debug!("INVOKE{:?}: {}{} on {:?}", kind, cam.method.name, cam.method.descriptor.as_str(), receiver);
     if let Some(rec) = receiver{
         ctx.thread.debug_helper.tracker.push_object_event(rec.id, format!("Preparing call {} with args:{}", class_and_method.format(), args.iter().map(|v| format!("\n    {}", v.print(ctx.vm))).collect::<Vec<_>>().join("")));
-        ctx.thread.debug_helper.tracker.push_method_event(class_and_method.format(), format!("Calling on {:?} from {} with args: {}", rec, calling_class_and_method.format(), args.iter().map(|v| format!("\n    {}", v.print(ctx.vm))).collect::<Vec<_>>().join("") ));
+        ctx.thread.debug_helper.tracker.push_method_event(class_and_method.format(), format!("Calling on {} from {} with args: {}", rec.print(ctx.vm), calling_class_and_method.format(), args.iter().map(|v| format!("\n    {}", v.print(ctx.vm))).collect::<Vec<_>>().join("") ));
     } else {
         ctx.thread.debug_helper.tracker.push_method_event(class_and_method.format(), format!("Calling static from {} with args: {}", calling_class_and_method.format(), args.iter().map(|v| format!("\n    {}", v.print(ctx.vm))).collect::<Vec<_>>().join("") ));
     }
