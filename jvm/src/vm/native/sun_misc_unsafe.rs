@@ -22,12 +22,14 @@ pub fn register_natives(registry: &mut NativeMethodRegistry) {
     register("putObjectVolatile", "(Ljava/lang/Object;JLjava/lang/Object;)V", delegate_put_object_volatile);
     register("getObjectVolatile", "(Ljava/lang/Object;J)Ljava/lang/Object;", delegate_get_object_volatile);
     register("getIntVolatile", "(Ljava/lang/Object;J)I", delegate_get_int_volatile);
+    register("getLongVolatile", "(Ljava/lang/Object;J)J", delegate_get_long_volatile);
     register("staticFieldBase", "(Ljava/lang/reflect/Field;)Ljava/lang/Object;", delegate_static_field_base);
     register("compareAndSwapObject", "(Ljava/lang/Object;JLjava/lang/Object;Ljava/lang/Object;)Z", delegate_compare_and_swap_object);
     register("compareAndSwapInt", "(Ljava/lang/Object;JII)Z", delegate_compare_and_swap_int);
     register("compareAndSwapLong", "(Ljava/lang/Object;JJJ)Z", delegate_compare_and_swap_long);
     register("allocateMemory", "(J)J", delegate_allocate_memory);
     register("freeMemory", "(J)V", delegate_free_memory);
+    register("pageSize", "()I", delegate_page_size);
     register("putLong", "(JJ)V", delegate_put_long);
     register("getLong", "(J)J", delegate_get_long);
     register("putInt", "(JI)V", delegate_put_int);
@@ -118,7 +120,7 @@ gen_delegate!(delegate_get_object_volatile, |ctx, _obj_ref, args| {
         }
         let field_value = if o.class_name == JAVA_LANG_CLASS {
             let class_ref = ctx.vm.extract_class_from_class_object(o)?;
-            let static_object = ctx.vm.static_class_objects.read().get(&class_ref.id).unwrap().clone();
+            let static_object = ctx.vm.get_static_class_object(class_ref.id).unwrap();
             static_object.get_field(*index as usize)
         } else {
             o.get_field(*index as usize)
@@ -134,11 +136,31 @@ gen_delegate!(delegate_get_int_volatile, |ctx, _obj_ref, args| {
     if let (Some(Value::Reference(o_id)), Some(Value::Long(index))) = (args.get(0), args.get(1)) {
         let o = ctx.vm.resolve_object_by_id(*o_id)?;
         if o.is_array(){
-            return non_failing_some(o.get_element(*index as usize  - ARRAY_BASE_OFFSET));
+            return non_failing_some(o.get_element(*index as usize - ARRAY_BASE_OFFSET));
         }
         let field_value = if o.class_name == JAVA_LANG_CLASS {
             let class_ref = ctx.vm.extract_class_from_class_object(o)?;
-            let static_object = ctx.vm.static_class_objects.read().get(&class_ref.id).unwrap().clone();
+            let static_object = ctx.vm.get_static_class_object(class_ref.id).unwrap();
+            static_object.get_field(*index as usize)
+        } else {
+            o.get_field(*index as usize)
+        };
+        non_failing_some(field_value)
+    } else {
+        invalidation!("Expected an Reference or Array but got: {:?}", args)
+    }
+});
+
+gen_delegate!(delegate_get_long_volatile, |ctx, _obj_ref, args| {
+    debug!("get_long_volatile args: {:?}", args);
+    if let (Some(Value::Reference(o_id)), Some(Value::Long(index))) = (args.get(0), args.get(1)) {
+        let o = ctx.vm.resolve_object_by_id(*o_id)?;
+        if o.is_array(){
+            return non_failing_some(o.get_element(*index as usize - ARRAY_BASE_OFFSET));
+        }
+        let field_value = if o.class_name == JAVA_LANG_CLASS {
+            let class_ref = ctx.vm.extract_class_from_class_object(o)?;
+            let static_object = ctx.vm.get_static_class_object(class_ref.id).unwrap();
             static_object.get_field(*index as usize)
         } else {
             o.get_field(*index as usize)
@@ -227,6 +249,11 @@ gen_delegate!(delegate_free_memory, |ctx, _obj_ref, args| {
     } else {
         invalidation!("Expected a long")
     }
+});
+
+const PAGE_SIZE: i32 = 4096;
+gen_delegate!(delegate_page_size, |_ctx, _obj_ref, _args| {
+    non_failing_some(Value::Integer(PAGE_SIZE))
 });
 
 gen_delegate!(delegate_put_long, |ctx, _obj_ref, args| {

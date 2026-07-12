@@ -473,6 +473,15 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                         warn!("D2L Conversion failed, because {value:?} is not of type Double")
                     }
                 }
+                Instruction::D2F => {
+                    let value = ctx.thread.call_stack.pop_operand_value().unwrap();
+                    debug!("D2F");
+                    if let Value::Double(val) = value {
+                        ctx.thread.call_stack.push_operand_value(Value::Float(val as f32));
+                    } else {
+                        warn!("D2F Conversion failed, because {value:?} is not of type Double")
+                    }
+                }
                 Instruction::I2B => {
                     let value = ctx.thread.call_stack.pop_operand_value().unwrap();
                     debug!("I2B");
@@ -824,7 +833,13 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                     if let Some(Value::Reference(error_id)) = ctx.thread.call_stack.pop_operand_value(){
                         let error = wrap_error!(ctx.vm.resolve_object_by_id(error_id));
                         let string_value = error.get_field(THROWABLE_detailsMessage_INDEX);
-                        let string = if !string_value.is_null() {ctx.vm.extract_string_from_value(string_value).unwrap()} else {String::new()};
+                        let string = if !string_value.is_null() {
+                            match ctx.vm.extract_string_from_value(string_value) {
+                                Ok(s) => s,
+                                Err(VmError::CESU8Error(_)) => String::from("<CESU Decode Error>"),
+                                Err(e) => return Some(Err(e))
+                            }
+                        } else {String::new()};
                         let exception_name = ctx.vm.class_manager.find_class_by_id(error.class_id).unwrap().name.clone();
                         ctx.thread.debug_helper.exception_helper.push(format!("Throw   {}: {}\n└-- thrown by {} at {}", exception_name, string, class_and_method.format(), ctx.thread.call_stack.get_pc().0));
                         let prev = ctx.thread.caught_exception.replace(Some((string, class_and_method.format(), Value::Reference(error.id))));

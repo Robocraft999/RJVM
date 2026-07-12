@@ -12,6 +12,7 @@ use crate::class_file::fields::field_type::FieldType;
 use crate::vm::value::Value;
 use crate::vm::VM;
 use vm::application::Application;
+use crate::vm::constants::classes::JAVA_LANG_STRING;
 
 mod access_flags;
 mod vm;
@@ -109,7 +110,7 @@ pub fn run() {
     //run_and_catch_method(&mut vm, "Test", "main", "([Ljava/lang/String;)V");
 
     let args = env::args().skip(1).map(|s| Value::Reference(app.vm.try_new_string_object(&s).unwrap().id)).collect();
-    let args_array = app.vm.try_new_array(1, FieldType::Object("java/lang/String".to_string()).to_array_field_type(1), RwLock::new(args)).unwrap();
+    let args_array = app.vm.try_new_array(1, FieldType::Object(JAVA_LANG_STRING.to_owned()).to_array_field_type(1), RwLock::new(args)).unwrap();
     let p_args = vec![Value::Reference(args_array.id)];
     //run_and_catch_method(&mut vm, "de/klassenserver7b/k7bot/Main", "main", "([Ljava/lang/String;)V", p_args);
     //app.run_and_catch_method("Main", "main", "([Ljava/lang/String;)V", p_args);

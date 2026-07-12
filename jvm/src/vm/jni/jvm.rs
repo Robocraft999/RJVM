@@ -15,6 +15,7 @@ use std::fs::{File, OpenOptions};
 use std::os::fd::{AsFd, AsRawFd, FromRawFd, IntoRawFd, OwnedFd, RawFd};
 use std::path::Path;
 use std::str::FromStr;
+use libc::size_t;
 
 pub const JVM_INTERFACE_VERSION: jint = 4;
 
@@ -206,8 +207,9 @@ pub unsafe extern "system-unwind" fn JVM_UnloadLibrary(handle: *const c_void) ->
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "system-unwind" fn JVM_FindLibraryEntry(handle: *const c_void, name: *const c_char) -> *const c_void {
-    unimplemented!();
+pub unsafe extern "system-unwind" fn JVM_FindLibraryEntry(handle: *mut c_void, name: *const c_char) -> *const c_void {
+    // FIXME Windows support
+    unsafe { libc::dlsym(handle, name) }
 }
 
 #[unsafe(no_mangle)]
@@ -1016,12 +1018,12 @@ pub unsafe extern "system-unwind" fn JVM_Sync(fd: jint) -> jint {
 
 #[unsafe(no_mangle)]
 pub unsafe extern "system-unwind" fn JVM_InitializeSocketLibrary() -> jint {
-    unimplemented!();
+    0
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "system-unwind" fn JVM_Socket(domain: jint, typ: jint, protocol: jint) -> jint {
-    unimplemented!();
+    unsafe { libc::socket(domain, typ, protocol) as jint }
 }
 
 #[unsafe(no_mangle)]
@@ -1100,8 +1102,8 @@ pub unsafe extern "system-unwind" fn JVM_SetSockOpt(fd: jint, level: i32, optnam
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "system-unwind" fn JVM_GetHostName(name: *const c_char, namelen: i32) -> i32 {
-    unimplemented!();
+pub unsafe extern "system-unwind" fn JVM_GetHostName(name: *mut c_char, namelen: c_int) -> c_int {
+    unsafe { libc::gethostname(name, namelen as size_t) }
 }
 
 #[unsafe(no_mangle)]

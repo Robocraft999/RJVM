@@ -23,6 +23,9 @@ nom = "8.0.0"
 nom-derive = {path = "../../nom-derive"}
 toml = {  version = "0.9.8", optional = true, features = ["serde"]}
 parking_lot = "0.12.5"
+# consider making jni impls their own crate so libc, libloading and libffi are only a dependency there
+# this would mean spliting the vm again to have a lib that can be used by this crate and an implemenation which depends on both
+libc = "1.0.0-alpha.3"
 
 [features]
 debug = ["dep:toml", "dep:serde"]

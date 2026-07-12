@@ -681,7 +681,11 @@ impl JNINativeInterface_ {
         class_ref.find_method_index(method_name, signature).ok_or(VmError::Native(format!("GetStaticMethodID: {}::{}{} not found", class_ref.name, method_name, signature))).unwrap()
     }
 
-    pub unsafe extern "system-unwind" fn CallStaticObjectMethodV(env: *mut JNIEnv, clazz: jclass, methodID: jmethodID, mut args: VaList) -> jobject{
+    pub unsafe extern "C-unwind" fn CallStaticObjectMethod(env: *mut JNIEnv, clazz: jclass, methodID: jmethodID, params: ...) -> jobject {
+        unsafe { Self::CallStaticObjectMethodV(env, clazz, methodID, params) }
+    }
+
+    pub unsafe extern "system-unwind" fn CallStaticObjectMethodV(env: *mut JNIEnv, clazz: jclass, methodID: jmethodID, mut args: VaList) -> jobject {
         let vm = unsafe{(*env).vm()};
 
         let class_and_method = unsafe{ resolve_static_class_and_method(env, clazz, methodID)};
@@ -714,7 +718,11 @@ impl JNINativeInterface_ {
         unimplemented!()
     }
 
-    pub unsafe extern "system-unwind" fn CallStaticBooleanMethodV(env: *mut JNIEnv, clazz: jclass, methodID: jmethodID, args: VaList) -> jboolean{
+    pub unsafe extern "C-unwind" fn CallStaticBooleanMethod(env: *mut JNIEnv, clazz: jclass, methodID: jmethodID, params: ...) -> jboolean {
+        unsafe { Self::CallStaticBooleanMethodV(env, clazz, methodID, params) }
+    }
+
+    pub unsafe extern "system-unwind" fn CallStaticBooleanMethodV(env: *mut JNIEnv, clazz: jclass, methodID: jmethodID, args: VaList) -> jboolean {
         let vm = unsafe{(*env).vm()};
         let class_and_method = unsafe{ resolve_static_class_and_method(env, clazz, methodID)};
         let args = unsafe{resolve_function_args(env, &class_and_method, args)};

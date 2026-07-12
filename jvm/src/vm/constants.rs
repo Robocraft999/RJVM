@@ -2,7 +2,11 @@
 #![allow(unused)]
 // FIELD INDICES
 
+// java.io.FileDescriptor
+pub const FILEDESCRIPTOR_fd_INDEX: usize = 0;
+
 // java.io.FileInputStream
+pub const FILEINPUTSTREAM_fd_INDEX: usize = 1;
 pub const FILEINPUTSTREAM_path_INDEX: usize = 2;
 
 // java.io.File
@@ -89,6 +93,7 @@ pub const FIELD_modifiers_INDEX: usize = 8;
 pub mod classes {
     pub const JAVA_IO_FILE_INPUT_STREAM: &str = "java/io/FileInputStream";
     pub const JAVA_IO_FILE_OUTPUT_STREAM: &str = "java/io/FileOutputStream";
+    pub const JAVA_IO_IOEXCEPTION: &str = "java/io/IOException";
     pub const JAVA_IO_UNIX_FILE_SYSTEM: &str = "java/io/UnixFileSystem";
     pub const JAVA_LANG_CLASS: &str = "java/lang/Class";
     pub const JAVA_LANG_CLASSLOADER: &str = "java/lang/ClassLoader";
