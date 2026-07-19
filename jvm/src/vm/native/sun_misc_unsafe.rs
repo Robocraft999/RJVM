@@ -31,6 +31,8 @@ pub fn register_natives(registry: &mut NativeMethodRegistry) {
     register("compareAndSwapInt", "(Ljava/lang/Object;JII)Z", delegate_compare_and_swap_int);
     register("compareAndSwapLong", "(Ljava/lang/Object;JJJ)Z", delegate_compare_and_swap_long);
     register("allocateMemory", "(J)J", delegate_allocate_memory);
+    register("setMemory", "(Ljava/lang/Object;JJB)V", delegate_set_memory);
+    register("copyMemory", "(Ljava/lang/Object;JLjava/lang/Object;JJ)V", delegate_copy_memory);
     register("freeMemory", "(J)V", delegate_free_memory);
     register("pageSize", "()I", delegate_page_size);
     register("putLong", "(JJ)V", delegate_put_long);
@@ -297,6 +299,67 @@ gen_delegate!(delegate_allocate_memory, |ctx, _obj_ref, args| {
         non_failing_some(Value::Long(ptr))
     } else {
         invalidation!("Expected a long")
+    }
+});
+
+gen_delegate!(delegate_set_memory, |ctx, _obj_ref, args| {
+    if let (Some(Value::Reference(o_id)), Some(Value::Long(offset)), Some(Value::Long(bytes)), Some(Value::Integer(value))) = (args.get(0), args.get(1), args.get(3), args.get(5)){
+        if o_id.is_null() {
+            ctx.vm.unsafe_allocator.set_memory(*offset, *bytes as usize, *value as u8)?;
+            non_failing_none()
+        } else {
+            unimplemented!("Idk how to set mem on an object")
+        }
+    } else {
+        invalidation!("Expected reference, two longs and a byte")
+    }
+});
+
+gen_delegate!(delegate_copy_memory, |ctx, _obj_ref, args| {
+    if let (Some(Value::Reference(o_id1)), Some(Value::Long(offset1)), Some(Value::Reference(o_id2)), Some(Value::Long(offset2)), Some(Value::Long(length))) = (args.get(0), args.get(1), args.get(3), args.get(4), args.get(6)){
+        if o_id1.is_null() && o_id2.is_null() {
+            ctx.vm.unsafe_allocator.copy_memory(*offset1, *offset2, *length as usize)?;
+            non_failing_none()
+        } else {
+            let None = ctx.vm.resolve_object_by_id(*o_id1).ok() else { unimplemented!("copy memory does not support object src yet") };
+            let o_ref2 = ctx.vm.resolve_object_by_id(*o_id2).ok();
+            if let Some(o_ref2) = o_ref2 && o_ref2.is_array() {
+                /*let mode = if offset1 % 8 == 0 && offset2 % 8 == 0 && length % 8 == 0 {
+                    8
+                } else if offset1 % 4 == 0 && offset2 % 4 == 0 && length % 4 == 0 {
+                    4
+                } else {
+                    2
+                };
+                let bytes = ctx.vm.unsafe_allocator.get_bytes(*offset1, *length as usize)?;
+                let vals: Vec<Value> = match mode {
+                    8 => bytes.into_chunks::<8>().into_iter().map(|b| Value::Long(i64::from_le_bytes(b))).collect(),
+                    4 => bytes.into_chunks::<4>().into_iter().map(|b| Value::Integer(i32::from_le_bytes(b))).collect(),
+                    2 => bytes.into_chunks::<2>().into_iter().map(|b| Value::Integer(i16::from_le_bytes(b) as i32)).collect(),
+                    _ => unreachable!()
+                };
+                let start = *offset2 as usize - ARRAY_BASE_OFFSET;
+                let end = start + (*length as usize) / mode;
+                for i in start..end {
+                    o_ref2.set_element(i, vals[i])
+                }*/
+                if o_ref2.class_name == "[B" {
+                    let bytes = ctx.vm.unsafe_allocator.get_bytes(*offset1, *length as usize)?;
+                    let start = *offset2 as usize - ARRAY_BASE_OFFSET;
+                    let end = start + (*length as usize);
+                    for i in start..end {
+                        o_ref2.set_element(i, Value::Integer(bytes[i] as i32));
+                    }
+                    non_failing_none()
+                } else {
+                    unimplemented!("copying to other than byte array is unsupported for now")
+                }
+            } else {
+                invalidation!("dest has to be an array")
+            }
+        }
+    } else {
+        invalidation!("Expected reference, two longs and a byte")
     }
 });
 

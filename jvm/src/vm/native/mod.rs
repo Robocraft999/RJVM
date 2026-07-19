@@ -59,7 +59,16 @@ macro_rules! gen_delegate {
 }
 use gen_delegate;
 
-
+macro_rules! promote_exception {
+    ($x:expr) => {
+        match $x {
+            crate::vm::VMResultType::ExceptionThrown => return Ok(crate::vm::VMResultType::ExceptionThrown),
+            crate::vm::VMResultType::Successful(res) => res,
+            crate::vm::VMResultType::Interrupted(..) => unreachable!("[promote_error] This is not for interruptable only error throwing functions")
+        }
+    }
+}
+use promote_exception;
 
 pub struct NativeMethodRegistry<'a>{
     methods: Vec<NativeMethod<'a>>,

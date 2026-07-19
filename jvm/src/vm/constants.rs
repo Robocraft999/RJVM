@@ -12,6 +12,9 @@ pub const FILEINPUTSTREAM_path_INDEX: usize = 2;
 // java.io.File
 pub const FILE_path_INDEX: usize = 1;
 
+// java.io.RandomAccessFile
+pub const RANDOMACCESSFILE_fd_INDEX: usize = 0;
+
 // java.lang.Class
 pub const CLASS_name_INDEX: usize = 5;
 
@@ -92,6 +95,7 @@ pub const FIELD_modifiers_INDEX: usize = 8;
 // CLASS NAMES
 pub mod classes {
     pub const JAVA_IO_FILE_INPUT_STREAM: &str = "java/io/FileInputStream";
+    pub const JAVA_IO_FILE_NOT_FOUND_EXCEPTION: &str = "java/io/FileNotFoundException";
     pub const JAVA_IO_FILE_OUTPUT_STREAM: &str = "java/io/FileOutputStream";
     pub const JAVA_IO_IOEXCEPTION: &str = "java/io/IOException";
     pub const JAVA_IO_RANDOM_ACCESS_FILE: &str = "java/io/RandomAccessFile";

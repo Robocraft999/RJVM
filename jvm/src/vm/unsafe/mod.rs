@@ -20,6 +20,16 @@ impl Unsafe {
         guard.alloc(amount).map(|entry| entry.ptr as i64).unwrap_or(-1)
     }
 
+    pub fn set_memory(&self, ptr: i64, amount: usize, byte: u8) -> VMResult<()> {
+        let mut guard = self.memory.write();
+        guard.put(ptr as u64, amount, &vec![byte; amount])
+    }
+
+    pub fn copy_memory(&self, src: i64, dst: i64, amount: usize) -> VMResult<()> {
+        let guard = self.memory.write();
+        guard.copy(src as u64, dst as u64, amount)
+    }
+
     pub fn free_memory(&self, ptr: i64) {
         //TODO
     }

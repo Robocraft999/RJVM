@@ -151,6 +151,7 @@ impl JavaThread {
                 //[unchecked] class already loaded by method
                 if let Some(handler_pc) = class_and_method.resolve_exception_handler(ctx.vm, current_pc, thrown_class_name.as_str()){
                     ctx.thread.call_stack.set_pc(handler_pc);
+                    ctx.thread.call_stack.clear_operand_stack();
                     ctx.thread.call_stack.push_operand_value(Value::Reference(*throwable_ref_id));
                     ctx.thread.debug_helper.exception_helper.push(format!("Handled {} by {}\n└-- thrown by {} with message: {}", thrown_class_name, class_and_method.format(), origin, message));
                     debug!("Exception thrown handled by {}", class_and_method.format());

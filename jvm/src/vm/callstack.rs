@@ -1,13 +1,11 @@
 use super::call_frame::CallFrame;
 use crate::vm::class::ClassAndMethodId;
-use crate::vm::value::Reference;
 use crate::vm::ClassAndMethod;
 use crate::vm::ProgramCounter;
 use crate::Value;
 use crate::VM;
 use log::{trace, warn};
 use std::cell::RefCell;
-use crate::vm::debug::validation::FieldTypeExt;
 
 pub struct CallStack{
     pub frames: RefCell<Vec<CallFrame>>,
@@ -54,6 +52,10 @@ impl CallStack {
 
     pub fn pop_operand_value(&self) -> Option<Value>{
         self.operand_stacks.borrow_mut().last_mut().unwrap().pop() //TODO make it VMResult and add error type
+    }
+
+    pub fn clear_operand_stack(&self) {
+        self.operand_stacks.borrow_mut().last_mut().unwrap().clear();
     }
 
     pub fn store_local(&self, val: Value, index: usize){

@@ -1,5 +1,5 @@
 use cesu8::{from_java_cesu8, Cesu8DecodingError};
-use log::{error, info, trace};
+use log::{debug, error, info, trace};
 use parking_lot::{Mutex, RwLock};
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -132,7 +132,7 @@ impl<'a> VM<'a>{
     }
 
     pub fn new_object_from_class(&self, class: ClassRef<'a>) -> Reference<'a>{
-        info!("CC[{:?}] = {}", class.id, class.name);
+        debug!("CC[{:?}] = {}", class.id, class.name);
         let fields = class.get_fields(&self);
         #[cfg(feature = "validation")]
         {
@@ -527,7 +527,7 @@ impl<'a> Context<'a, '_> {
     }
 
     fn init_class(&self, class: ClassRef<'a>) -> Option<()>{
-        info!("IC[{}]", class.name);
+        debug!("IC[{}]", class.name);
         if !class.is_array(){
             let static_object = self.vm.new_object_from_class(class);
             self.vm.static_class_objects.write().insert(class.id, static_object);

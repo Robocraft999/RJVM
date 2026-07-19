@@ -43,7 +43,7 @@ impl MemoryChunk {
         }
 
         // We require all allocations to be aligned to 8 bytes!
-        let allocated_size = required_size + required_size % 8;
+        let allocated_size = required_size + (8 - required_size % 8);
         assert_eq!(allocated_size % 8, 0);
 
         let ptr = unsafe { self.memory.add(self.used) };
@@ -76,6 +76,19 @@ impl MemoryChunk {
         unsafe {
             Ok(std::slice::from_raw_parts(ptr as *const u8, bytes).to_vec())
         }
+    }
+
+    pub fn copy(&self, src: u64, dst: u64, bytes: usize) -> VMResult<()> {
+        if src < self.start || src + bytes as u64 > self.start + self.capacity as u64 {
+            warn!("unsafe reading: Safe bounds are [{:#0x}-{:#0x}], ptr is: {:#0x}, reading {} bytes", self.start, self.start + self.capacity as u64, src, bytes)
+        }
+        if dst < self.start || dst + bytes as u64 > self.start + self.capacity as u64 {
+            warn!("unsafe writing: Safe bounds are [{:#0x}-{:#0x}], ptr is: {:#0x}, writing {} bytes", self.start, self.start + self.capacity as u64, dst, bytes)
+        }
+        unsafe {
+            std::ptr::copy(src as *const u8, dst as *mut u8, bytes);
+        }
+        Ok(())
     }
 }
 

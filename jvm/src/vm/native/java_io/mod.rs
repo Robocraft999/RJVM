@@ -1,9 +1,9 @@
 use std::ffi::CString;
 use crate::vm::constants::classes::{JAVA_IO_FILE_INPUT_STREAM, JAVA_IO_FILE_OUTPUT_STREAM, JAVA_IO_UNIX_FILE_SYSTEM, JAVA_IO_IOEXCEPTION, JAVA_LANG_STRING, JAVA_IO_RANDOM_ACCESS_FILE};
-use crate::vm::constants::{FILEDESCRIPTOR_fd_INDEX, FILEINPUTSTREAM_fd_INDEX, FILEINPUTSTREAM_path_INDEX, FILE_path_INDEX};
+use crate::vm::constants::{FILEDESCRIPTOR_fd_INDEX, FILEINPUTSTREAM_fd_INDEX, FILEINPUTSTREAM_path_INDEX, FILE_path_INDEX, RANDOMACCESSFILE_fd_INDEX};
 use crate::vm::java_thread::JavaThread;
-use crate::vm::native::{gen_delegate, invalidation, non_failing_none, non_failing_some, wrap_init, NativeMethodRegistry};
-use crate::vm::result::{VMPartialResult, VMResult};
+use crate::vm::native::{gen_delegate, invalidation, non_failing_none, non_failing_some, promote_exception, wrap_init, NativeMethodRegistry};
+use crate::vm::result::{VMPartialResult, VMResult, VMResultType};
 use crate::vm::value::{Reference, ReferenceType, Value};
 use crate::vm::{Context, VmError};
 use log::{debug, error, warn};
@@ -15,6 +15,8 @@ use std::time::SystemTime;
 use libc::{c_int, stat64, FIONREAD};
 use parking_lot::RwLock;
 use crate::class_file::fields::field_type::FieldType;
+
+mod util;
 
 pub fn register_natives(registry: &mut NativeMethodRegistry) {
     registry.register(JAVA_IO_FILE_OUTPUT_STREAM, "writeBytes", "([BIIZ)V", delegate_write_bytes);
@@ -28,7 +30,8 @@ pub fn register_natives(registry: &mut NativeMethodRegistry) {
     registry.register(JAVA_IO_UNIX_FILE_SYSTEM, "checkAccess", "(Ljava/io/File;I)Z", delegate_check_access);
     registry.register(JAVA_IO_UNIX_FILE_SYSTEM, "list", "(Ljava/io/File;)[Ljava/lang/String;", delegate_list);
     registry.register(JAVA_IO_UNIX_FILE_SYSTEM, "createDirectory", "(Ljava/io/File;)Z", delegate_create_directory);
-    registry.register(JAVA_IO_RANDOM_ACCESS_FILE, "open0", "(Ljava/lang/String;I)V", delegate_raf_open0)
+    registry.register(JAVA_IO_RANDOM_ACCESS_FILE, "open0", "(Ljava/lang/String;I)V", delegate_raf_open0);
+    registry.register(JAVA_IO_RANDOM_ACCESS_FILE, "close0", "()V", delegate_raf_close0);
 }
 
 gen_delegate!(delegate_write_bytes, |ctx, _obj_ref, args| {
@@ -123,25 +126,6 @@ gen_delegate!(delegate_read_bytes, |ctx, obj_ref, args| {
     }
 });
 
-unsafe fn handle_open(path: CString, oflags: i32, mode: i32) -> i32 {
-    let fd = libc::open64(path.as_ptr(), oflags, mode);
-    if fd != -1 {
-        let mut buf64: stat64 = std::mem::zeroed();
-        let result = libc::fstat64(fd, &mut buf64);
-        if result != -1 {
-            if buf64.st_mode & libc::S_IFDIR > 0 {
-                error!("Cannot open a dir");
-                libc::close(fd);
-                return -1;
-            }
-        } else {
-            libc::close(fd);
-            return -1;
-        }
-    }
-    fd as i32
-}
-
 //obsolete because libjava.so is loaded
 gen_delegate!(delegate_open0, |ctx, obj_ref, args| {
     let Some(fis_ref) = obj_ref else {
@@ -155,11 +139,8 @@ gen_delegate!(delegate_open0, |ctx, obj_ref, args| {
                 ctx.vm.currently_open_files.write().insert(path.clone(), (file_content, 0));
             }
         }
-        let fd = unsafe { handle_open(CString::from_str(path.as_str()).unwrap(), libc::O_RDONLY, 0o666) };
-        let fd_val = fis_ref.get_ref_field(FILEINPUTSTREAM_fd_INDEX)?;
-        let fd_ref = ctx.vm.resolve_object_by_id(fd_val)?;
-        fd_ref.set_field(FILEDESCRIPTOR_fd_INDEX, Value::Integer(fd));
 
+        promote_exception!(util::file_open(ctx, fis_ref, *path_val, FILEINPUTSTREAM_fd_INDEX, libc::O_RDONLY)?);
         non_failing_none()
     } else {
         invalidation!("Expected a string for the path but got: {:?}", args.get(0))
@@ -175,44 +156,10 @@ gen_delegate!(delegate_close0, |ctx, obj_ref, _args| {
     if ctx.vm.currently_open_files.write().remove(&path).is_none() {
         warn!("Closing non existent file: '{}'", path)
     }
+    promote_exception!(unsafe { util::file_close(ctx, fis_ref, FILEINPUTSTREAM_fd_INDEX)? });
     non_failing_none()
 });
 
-unsafe fn handle_available(fd: i32) -> (bool, i64) {
-    let mut size: i64 = 0;
-    let mut current: i64 = 0;
-
-    let mut buf64: stat64 = std::mem::zeroed();
-    let result = libc::fstat64(fd, &mut buf64);
-    if result != -1 {
-        let mode = buf64.st_mode;
-        if mode & libc::S_IFCHR > 0 || mode & libc::S_IFIFO > 0 || mode & libc::S_IFSOCK > 0 {
-            let mut n: c_int = 0;
-            let res = libc::ioctl(fd, FIONREAD, &mut n);
-            if res >= 0 {
-                return (true, n as i64);
-            }
-        } else if mode & libc::S_IFREG > 0 {
-            size = buf64.st_size as i64;
-        }
-    }
-
-    current = libc::lseek64(fd, 0, libc::SEEK_CUR);
-    if current == -1 {
-        return (false, 0)
-    }
-
-    if size < current {
-        size = libc::lseek64(fd, 0, libc::SEEK_END);
-        if size == -1 {
-            return (false, 0)
-        } else if libc::lseek64(fd, current, libc::SEEK_SET) == -1 {
-            return (false, 0)
-        }
-    }
-
-    (true, size - current)
-}
 
 gen_delegate!(delegate_available0, |ctx, obj_ref, _args| {
     let Some(fis_ref) = obj_ref else {
@@ -232,7 +179,7 @@ gen_delegate!(delegate_available0, |ctx, obj_ref, _args| {
         );
     }
 
-    let (res, amt) = unsafe { handle_available(fd) };
+    let (res, amt) = unsafe { util::handle_available(fd) };
     if res {
         let ret = if amt > i32::MAX as i64 {
             i32::MAX
@@ -364,6 +311,39 @@ gen_delegate!(delegate_create_directory, |ctx, _obj_ref, args| {
     }
 });
 
-gen_delegate!(delegate_raf_open0, |ctx, _obj_ref, args| {
+const RAF_O_RDONLY: i32 = 1;
+const RAF_O_RDWR: i32 = 2;
+const RAF_O_SYNC: i32 = 4;
+const RAF_O_DSYNC: i32 = 4;
 
+gen_delegate!(delegate_raf_open0, |ctx, obj_ref, args| {
+    let Some(fis_ref) = obj_ref else {
+        return invalidation!("Expected this")
+    };
+    if let (Some(path_val), Some(Value::Integer(mode))) = (args.get(0), args.get(1)) && !path_val.is_null(){
+        let mut flags = 0;
+        if mode & RAF_O_RDONLY > 0 {
+            flags = libc::O_RDONLY;
+        } else if mode & RAF_O_RDWR > 0 {
+            flags = libc::O_RDWR | libc::O_CREAT;
+            if mode & RAF_O_SYNC > 0 {
+                flags |= libc::O_SYNC;
+            } else if mode & RAF_O_DSYNC > 0 {
+                flags |= libc::O_DSYNC;
+            }
+        }
+        promote_exception!(util::file_open(ctx, fis_ref, *path_val, RANDOMACCESSFILE_fd_INDEX, flags)?);
+
+        non_failing_none()
+    } else {
+        invalidation!("Expected a string for the path but got: {:?}", args.get(0))
+    }
+});
+
+gen_delegate!(delegate_raf_close0, |ctx, obj_ref, _args| {
+    let Some(fis_ref) = obj_ref else {
+        return invalidation!("Expected this")
+    };
+    promote_exception!(unsafe { util::file_close(ctx, fis_ref, RANDOMACCESSFILE_fd_INDEX)? });
+    non_failing_none()
 });

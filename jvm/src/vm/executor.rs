@@ -61,9 +61,7 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
     match block{
         InstructionBlock::Single(instruction) => {
             match instruction{
-                Instruction::ACONST_NULL => {
-                    ctx.thread.call_stack.push_operand_value(ctx.vm.null());
-                }
+                Instruction::ACONST_NULL => x_const(ctx.thread, ctx.vm.null()),
                 Instruction::ICONSTM1 => x_const(ctx.thread, Value::Integer(-1)),
                 Instruction::ICONST0 => x_const(ctx.thread, Value::Integer(0)),
                 Instruction::ICONST1 => x_const(ctx.thread, Value::Integer(1)),
@@ -89,14 +87,17 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
 
                 Instruction::LDC(index) => {
                     let value = get_or_init_option!(get_constant_as_value(ctx, (*index) as u16));
+                    debug!("LDC: {}", value.print(ctx.vm));
                     ctx.thread.call_stack.push_operand_value(value);
                 }
                 Instruction::LDCW(index) => {
                     let value = get_or_init_option!(get_constant_as_value(ctx, *index));
+                    debug!("LDCW: {}", value.print(ctx.vm));
                     ctx.thread.call_stack.push_operand_value(value);
                 }
                 Instruction::LDC2W(index) => {
                     let value = get_or_init_option!(get_constant_as_value(ctx, *index));
+                    debug!("LDC2W: {}", value.print(ctx.vm));
                     ctx.thread.call_stack.push_operand_value(value);
                 }
 
@@ -205,6 +206,7 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                     }
                 }
                 Instruction::DUP => {
+                    debug!("DUP");
                     let top = ctx.thread.call_stack.pop_operand_value().unwrap();
                     ctx.thread.call_stack.push_operand_value(top.clone());
                     ctx.thread.call_stack.push_operand_value(top);
@@ -634,6 +636,7 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                 Instruction::IRETURN | Instruction::LRETURN | Instruction::FRETURN | Instruction::DRETURN | Instruction::ARETURN => {
                     //TODO seperate for validation
                     let value = ctx.thread.call_stack.pop_operand_value().unwrap();
+                    debug!("XRETURN: {}", value.print(ctx.vm));
                     if !class_and_method.method.is_static(){
                         if let Some(Value::Reference(this)) = ctx.thread.call_stack.load_local(0){
                             ctx.thread.debug_helper.tracker.push_object_event(this, format!("Function {} returned:\n    {}", class_and_method.format(), value.print(ctx.vm)))
@@ -650,6 +653,7 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                     return Some(Ok(VMResultType::Successful(Some(value))))
                 }
                 Instruction::RETURN => {
+                    debug!("RETURN");
                     ctx.thread.debug_helper.tracker.push_method_event(class_and_method.format(), "returning".to_string());
                     if class_and_method.method.name == "<clinit>"{
                         ctx.vm.class_manager.update_class_state(class_and_method.class, ClassLoadingState::INITIALIZED);
@@ -733,6 +737,7 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                 Instruction::INVOKESTATIC(index) => { return Some(execute_invoke(ctx, *index, InvokeKind::STATIC)) }
                 Instruction::INVOKEINTERFACE(index, _, _) => { return Some(execute_invoke(ctx, *index, InvokeKind::INTERFACE)) }
                 Instruction::INVOKEDYNAMIC(index, _, _) => {
+                    debug!("INVOKEDYNAMIC");
                     let Some(ConstantPoolEntry::InvokeDynamic(bm, name, typ)) = class_and_method.class.get_or_resolve_constant(ctx.vm, *index) else { unreachable!("Do Errors") };
                     let caller_obj = Value::Reference(get_or_init_option!(ctx.vm.new_class_object_by_class(class_and_method.class)).id);
 
@@ -810,7 +815,7 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                     }
                     let new_object = ctx.vm.new_object_from_class(clazz);
 
-                    debug!("NEW: {} {} {:?}", index, clazz.name, &new_object);
+                    debug!("NEW: {} {} {:?}", index, clazz.name, &new_object.print(ctx.vm));
                     ctx.thread.call_stack.push_operand_value(Value::Reference(new_object.id));
                 }
                 Instruction::NEWARRAY(atype) => {
@@ -988,6 +993,7 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
 }
 
 fn x_const<'a>(thread: &JavaThread, value: Value){
+    debug!("XCONST: {:?}", value);
     thread.call_stack.push_operand_value(value);
 }
 
