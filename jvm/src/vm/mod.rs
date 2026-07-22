@@ -67,7 +67,8 @@ pub struct VM<'a>{
     pub currently_open_files: RwLock<HashMap<String, (Vec<u8>, usize)>>,
     pub next_thread_id: Mutex<TID>,
     pub monitor_handler: MonitorHandler,
-    pub thread_lookup: RwLock<HashMap<RefId, Arc<ThreadMeta>>>
+    pub thread_lookup: RwLock<HashMap<RefId, Arc<ThreadMeta>>>,
+    pub system_class_loader: RwLock<Option<RefId>>,
 }
 
 impl<'a> VM<'a>{
@@ -90,6 +91,7 @@ impl<'a> VM<'a>{
             next_thread_id: Mutex::new(1),
             monitor_handler: MonitorHandler::new(),
             thread_lookup: RwLock::new(HashMap::new()),
+            system_class_loader: RwLock::new(None),
         }
     }
 

@@ -1,6 +1,6 @@
 use crate::vm::class::ClassId;
 use crate::vm::class_path::ClassPath;
-use crate::vm::constants::classes::{JAVA_LANG_CLASS, JAVA_LANG_INVOKE_METHOD_HANDLE, JAVA_LANG_INVOKE_METHOD_TYPE, JAVA_LANG_INVOKE_MHN, JAVA_LANG_REFLECT_METHOD, JAVA_LANG_STRING, JAVA_LANG_SYSTEM, JAVA_LANG_THREAD, JAVA_LANG_THREAD_GROUP};
+use crate::vm::constants::classes::{JAVA_LANG_CLASS, JAVA_LANG_CLASSLOADER, JAVA_LANG_INVOKE_METHOD_HANDLE, JAVA_LANG_INVOKE_METHOD_TYPE, JAVA_LANG_INVOKE_MHN, JAVA_LANG_REFLECT_METHOD, JAVA_LANG_STRING, JAVA_LANG_SYSTEM, JAVA_LANG_THREAD, JAVA_LANG_THREAD_GROUP};
 use crate::vm::constants::{THREAD_eetop_INDEX, THREAD_priority_INDEX, THREAD_threadStatus_INDEX};
 use crate::vm::java_thread::{JavaThread, NORM_PRIORITY, RUNNABLE};
 use crate::vm::jni::types::{JNIEnv, JavaVM};
@@ -131,6 +131,17 @@ impl <'a> Application<'a> {
         thread
     }
 
+    fn compute_system_class_loader(&self) {
+        self.init_class(JAVA_LANG_CLASSLOADER);
+        let method = self.vm.resolve_class_method(JAVA_LANG_CLASSLOADER, "getSystemClassLoader", "()Ljava/lang/ClassLoader;").unwrap();
+        let Some(Value::Reference(scl)) = self.handle_partial(JavaThread::invoke_subroutine(self.context(), method, None, Vec::new())) else {
+            thread().debug_helper.print();
+            panic!("Could not create system class loader");
+        };
+        let none = self.vm.system_class_loader.write().replace(scl);
+        assert_eq!(None, none);
+    }
+
     pub fn startup(&mut self){
         self.init_class(JAVA_LANG_STRING);
         self.init_class(JAVA_LANG_SYSTEM);
@@ -155,6 +166,8 @@ impl <'a> Application<'a> {
                 panic!();
             }
         }
+        self.compute_system_class_loader();
+
         self.init_class(JAVA_LANG_INVOKE_METHOD_TYPE);
         self.init_class(JAVA_LANG_INVOKE_METHOD_HANDLE);
         self.init_class(JAVA_LANG_INVOKE_MHN);
