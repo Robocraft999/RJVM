@@ -16,7 +16,7 @@ thread_local! {
 }
 
 pub fn thread() -> &'static mut JavaThread {
-    JAVA_THREAD.with(|cell| unsafe { &mut*(&mut *cell.borrow_mut() as *mut JavaThread) })
+    JAVA_THREAD.with(|cell| unsafe { &mut *cell.as_ptr() })
 }
 
 pub fn with_thread<R>(f: impl FnOnce(&mut JavaThread) -> R) -> R {
