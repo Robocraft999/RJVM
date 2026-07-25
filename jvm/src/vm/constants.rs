@@ -15,6 +15,15 @@ pub const FILE_path_INDEX: usize = 1;
 // java.io.RandomAccessFile
 pub const RANDOMACCESSFILE_fd_INDEX: usize = 0;
 
+// java.lang.Boolean
+pub const BOOLEAN_value_INDEX: usize = 3;
+
+// java.lang.Byte
+pub const BYTE_value_INDEX: usize = 4;
+
+// java.lang.Character
+pub const CHARACTER_value_INDEX: usize = 65;
+
 // java.lang.Class
 pub const CLASS_name_INDEX: usize = 5;
 
@@ -23,8 +32,20 @@ pub const CLASSLOADER_NATIVELIBRARY_handle_INDEX: usize = 0;
 pub const CLASSLOADER_NATIVELIBRARY_name_INDEX: usize = 3;
 pub const CLASSLOADER_NATIVELIBRARY_loaded_INDEX: usize = 5;
 
+// java.lang.Double
+pub const DOUBLE_value_INDEX: usize = 12;
+
+// java.lang.Float
+pub const FLOAT_value_INDEX: usize = 12;
+
+// java.lang.Integer
+pub const INTEGER_value_INDEX: usize = 8;
+
 // java.lang.Long
 pub const LONG_value_INDEX: usize = 4;
+
+// java.lang.Short
+pub const SHORT_value_INDEX: usize = 4;
 
 // java.lang.String
 pub const STRING_value_INDEX: usize = 0;

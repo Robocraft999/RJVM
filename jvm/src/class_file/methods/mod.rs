@@ -9,7 +9,7 @@ use crate::vm::ProgramCounter;
 use crate::vm::VmError;
 use std::collections::BTreeMap;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MethodInfo{
     pub flags: u16,
     pub name: String,

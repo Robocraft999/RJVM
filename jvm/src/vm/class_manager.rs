@@ -271,8 +271,38 @@ impl<'a> ClassManager<'a>{
             self.primitive_class_ids.write()?.insert(name.to_owned(), ClassId(id));
 
             let wrapper = self.get_or_resolve_class(&vm, primitive_to_wrapper_name(name).as_str()).unwrap();
-            self.classes_by_id.write()?.insert(ClassId(id), wrapper);
-            self.classes_by_name.write()?.insert(name.to_owned(), wrapper);
+
+            let class = Class{
+                id: ClassId(id),
+                name: name.to_owned(),
+                constants: RwLock::new(wrapper.constants.read()?.clone()),
+                flags: wrapper.flags,
+                superclass: wrapper.superclass,
+                this_index: wrapper.this_index,
+                interfaces: wrapper.interfaces.clone(),
+                fields: wrapper.fields.clone(),
+                methods: wrapper.methods.clone(),
+                transitive_field_count: wrapper.transitive_field_count,
+                first_field_index: wrapper.first_field_index,
+                transitive_method_count: wrapper.transitive_method_count,
+                first_method_index: wrapper.first_method_index,
+                attributes: wrapper.attributes.clone(),
+                array_info: wrapper.array_info.clone(),
+            };
+
+            let class_ref = match self.classes.lock() {
+                Ok(class_lock) => {
+                    let class_ref = class_lock.alloc(class);
+                    unsafe {
+                        let class_ptr: *const Class<'a> = class_ref;
+                        &*class_ptr
+                    }
+                }
+                Err(e) => return Err(VmError::from(e))
+            };
+
+            self.classes_by_id.write()?.insert(class_ref.id, class_ref);
+            self.classes_by_name.write()?.insert(name.to_owned(), class_ref);
         }
         Ok(self.primitive_class_ids.read()?.get(name).cloned().unwrap())
     }

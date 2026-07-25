@@ -86,7 +86,7 @@ gen_delegate!(delegate_link_to_static, |ctx, _obj_ref, args| {
         }
 
         let method = clazz.find_method(name.as_str(), desc.as_str()).unwrap();
-        let cam = ClassAndMethod { class: clazz, method: method.clone() };
+        let cam = ClassAndMethod { class: clazz, method };
 
         let args_only = args[..args.len() - 1].iter().cloned().collect::<Vec<_>>();
         let result = JavaThread::invoke_subroutine(ctx, cam, None, args_only);

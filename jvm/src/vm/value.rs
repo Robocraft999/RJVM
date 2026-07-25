@@ -178,6 +178,8 @@ impl ReferenceValue{
     gen_typed_get_field!(get_ref_field, Reference, RefId);
     gen_typed_get_field!(get_int_field, Integer, i32);
     gen_typed_get_field!(get_long_field, Long, i64);
+    gen_typed_get_field!(get_float_field, Float, f32);
+    gen_typed_get_field!(get_double_field, Double, f64);
 
     pub fn set_element(&self, index: usize, value: Value) {
         match &self.reference_type {

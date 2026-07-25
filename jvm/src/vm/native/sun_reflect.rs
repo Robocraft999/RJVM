@@ -5,10 +5,11 @@ use crate::vm::constants::{CONSTRUCTOR_clazz_INDEX, CONSTRUCTOR_parameterTypes_I
 use crate::vm::java_error::JavaError;
 use crate::vm::java_thread::JavaThread;
 use crate::vm::native::{gen_delegate, invalidation, non_failing_some, wrap_init, NativeMethodRegistry};
-use crate::vm::result::{VMPartialResult, VMResultType};
+use crate::vm::result::{VMPartialResult, VMResult, VMResultType};
 use crate::vm::value::{Reference, ReferenceType, Value};
-use crate::vm::VmError;
+use crate::vm::{Context, VmError};
 use log::debug;
+use crate::class_file::fields::field_type::{FieldType, PrimitiveType};
 
 pub fn register_natives(registry: &mut NativeMethodRegistry) {
     registry.register(SUN_REFLECT_REFLECTION, "getCallerClass", "()Ljava/lang/Class;", delegate_get_caller_class);
@@ -36,6 +37,23 @@ gen_delegate!(delegate_get_class_access_flags, |ctx, _obj_ref, args| {
         invalidation!("Expected Class object")
     }
 });
+
+fn unbox_param_if_needed(ctx: Context, ft: &FieldType, val: Value) -> VMResult<Vec<Value>> {
+    if !matches!(val, Value::Reference(..)) {
+        return Ok(vec![val])
+    }
+    Ok(match ft {
+        FieldType::Object(..) | FieldType::Array(..) => vec![val],
+        FieldType::Primitive(PrimitiveType::Boolean) => vec![ctx.vm.extract_boolean(val)?],
+        FieldType::Primitive(PrimitiveType::Byte) => vec![ctx.vm.extract_byte(val)?],
+        FieldType::Primitive(PrimitiveType::Char) => vec![ctx.vm.extract_char(val)?],
+        FieldType::Primitive(PrimitiveType::Short) => vec![ctx.vm.extract_short(val)?],
+        FieldType::Primitive(PrimitiveType::Integer) => vec![ctx.vm.extract_int(val)?],
+        FieldType::Primitive(PrimitiveType::Long) => vec![ctx.vm.extract_long(val)?, Value::Dummy],
+        FieldType::Primitive(PrimitiveType::Float) => vec![ctx.vm.extract_float(val)?],
+        FieldType::Primitive(PrimitiveType::Double) => vec![ctx.vm.extract_double(val)?, Value::Dummy],
+    })
+}
 
 gen_delegate!(delegate_new_instance0, |ctx, _obj_ref, args| {
     debug!("newInstance0");
@@ -68,7 +86,11 @@ gen_delegate!(delegate_new_instance0, |ctx, _obj_ref, args| {
                     let constructor_args = if let Some(Value::Reference(argument_arr_id)) = args.get(1) && !argument_arr_id.is_null() {
                         let argument_arr_ref = ctx.vm.resolve_object_by_id(*argument_arr_id)?;
                         if let ReferenceType::Array(_, _, args_content) = &argument_arr_ref.reference_type{
-                            args_content.read().clone()
+                            let mut args = Vec::new();
+                            for (i, provided_arg) in args_content.read().iter().filter(|a| !matches!(a, Value::Dummy)).enumerate(){
+                                args.extend(unbox_param_if_needed(ctx, &class_and_method.method.descriptor.args[i], provided_arg.clone())?);
+                            }
+                            args
                         } else {
                             Vec::new()
                         }
@@ -82,17 +104,22 @@ gen_delegate!(delegate_new_instance0, |ctx, _obj_ref, args| {
                     let res = JavaThread::invoke_subroutine(ctx, class_and_method, Some(object_ref), constructor_args);
                     // invoke_frames_until returns occurred exceptions as Err(VmError::JavaException(JavaError::JavaExceptionThrown))
                     // because it doesn't know whether it is a subroutine or not
-                    return match res {
+                    match res {
                         Ok(VMResultType::Successful(None)) => { non_failing_some(Value::Reference(object_ref.id)) }
                         Ok(VMResultType::Successful(Some(value))) => { invalidation!("Constructor should not return anything: {:?}", value) }
                         Ok(typ) => unreachable!("{:?} can't escape invoke_frames_until", typ),
                         Err(VmError::JavaException(JavaError::JavaExceptionThrown(..))) => Ok(VMResultType::ExceptionThrown),
                         Err(e) => Err(e),
                     }
+                } else {
+                    invalidation!("no <init>{} function found in {}", descriptor, class.name)
                 }
+            } else {
+                invalidation!("parameter_arr is in fact not an array but: {}", parameter_arr_ref.print(ctx.vm))
             }
+        } else {
+            invalidation!("clazz or parameter_arr is not a reference but: {}, {}", clazz.print(ctx.vm), parameter_types.print(ctx.vm))
         }
-        unreachable!()
     } else {
         invalidation!("Expected a constructor object and a array reference")
     }
@@ -137,7 +164,11 @@ gen_delegate!(delegate_invoke0, |ctx, _obj_ref, args| {
                     let class_and_method = ClassAndMethod {class: clazz, method};
                     let args_arr_ref = ctx.vm.resolve_object_by_id(*args_arr_ref_id)?;
                     let method_args = if let ReferenceType::Array(_, _, args_content) = &args_arr_ref.reference_type {
-                        args_content.read().clone()
+                        let mut args = Vec::new();
+                        for (i, provided_arg) in args_content.read().iter().filter(|a| !matches!(a, Value::Dummy)).enumerate(){
+                            args.extend(unbox_param_if_needed(ctx, &class_and_method.method.descriptor.args[i], provided_arg.clone())?);
+                        }
+                        args
                     } else {
                         Vec::new()
                     };

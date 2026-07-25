@@ -344,7 +344,7 @@ pub type ClassRef<'a> = &'a Class<'a>;
 #[derive(Debug, PartialEq, Clone, Copy, Eq, Hash)]
 pub struct ClassId(pub u32);
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ArrayInfo{
     pub(crate) dims: usize,
     pub(crate) component_type: FieldType

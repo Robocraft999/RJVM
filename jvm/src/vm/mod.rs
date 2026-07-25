@@ -14,7 +14,7 @@ use crate::error::ClassParseError;
 use crate::vm::class::{ClassAndMethod, ClassId, ClassRef};
 use crate::vm::class_manager::ClassLoadingState;
 use crate::vm::constants::classes::{JAVA_LANG_CLASS, JAVA_LANG_INVOKE_MHN, JAVA_LANG_LONG, JAVA_LANG_STRING};
-use crate::vm::constants::{CLASS_name_INDEX, LONG_value_INDEX, METHODTYPE_ptypes_INDEX, METHODTYPE_rtype_INDEX, STRING_hash_INDEX, STRING_value_INDEX};
+use crate::vm::constants::{BOOLEAN_value_INDEX, BYTE_value_INDEX, CHARACTER_value_INDEX, CLASS_name_INDEX, DOUBLE_value_INDEX, FLOAT_value_INDEX, INTEGER_value_INDEX, LONG_value_INDEX, METHODTYPE_ptypes_INDEX, METHODTYPE_rtype_INDEX, SHORT_value_INDEX, STRING_hash_INDEX, STRING_value_INDEX};
 use crate::vm::gc::ObjectAllocator;
 use crate::vm::java_error::JavaError;
 use crate::vm::java_thread::{JavaThread, ThreadMeta, TID};
@@ -299,6 +299,56 @@ impl<'a> VM<'a>{
         }
     }
 
+    pub fn extract_boolean(&self, value: Value) -> VMResult<Value> {
+        if let Value::Reference(id) = value {
+            let val_ref = self.resolve_object_by_id(id)?;
+            let value = val_ref.get_int_field(BOOLEAN_value_INDEX)?;
+            Ok(Value::Integer(value))
+        } else {
+            Err(VmError::ValidationError("expected a boolean reference".to_string()))
+        }
+    }
+
+    pub fn extract_byte(&self, value: Value) -> VMResult<Value> {
+        if let Value::Reference(id) = value {
+            let val_ref = self.resolve_object_by_id(id)?;
+            let value = val_ref.get_int_field(BYTE_value_INDEX)?;
+            Ok(Value::Integer(value))
+        } else {
+            Err(VmError::ValidationError("expected a byte reference".to_string()))
+        }
+    }
+
+    pub fn extract_char(&self, value: Value) -> VMResult<Value> {
+        if let Value::Reference(id) = value {
+            let val_ref = self.resolve_object_by_id(id)?;
+            let value = val_ref.get_int_field(CHARACTER_value_INDEX)?;
+            Ok(Value::Integer(value))
+        } else {
+            Err(VmError::ValidationError("expected a character reference".to_string()))
+        }
+    }
+
+    pub fn extract_short(&self, value: Value) -> VMResult<Value> {
+        if let Value::Reference(id) = value {
+            let val_ref = self.resolve_object_by_id(id)?;
+            let value = val_ref.get_int_field(SHORT_value_INDEX)?;
+            Ok(Value::Integer(value))
+        } else {
+            Err(VmError::ValidationError("expected a short reference".to_string()))
+        }
+    }
+
+    pub fn extract_int(&self, value: Value) -> VMResult<Value> {
+        if let Value::Reference(id) = value {
+            let val_ref = self.resolve_object_by_id(id)?;
+            let value = val_ref.get_int_field(INTEGER_value_INDEX)?;
+            Ok(Value::Integer(value))
+        } else {
+            Err(VmError::ValidationError("expected a integer reference".to_string()))
+        }
+    }
+
     pub fn new_java_lang_long(&self, value: Value) -> VMResult<Value> {
         let long_clazz = self.get_or_resolve_class(JAVA_LANG_LONG)?;
         let long = self.new_object_from_class(long_clazz);
@@ -314,6 +364,26 @@ impl<'a> VM<'a>{
             Ok(Value::Long(value))
         } else {
             Err(VmError::ValidationError("expected a long reference".to_string()))
+        }
+    }
+
+    pub fn extract_float(&self, value: Value) -> VMResult<Value> {
+        if let Value::Reference(id) = value {
+            let val_ref = self.resolve_object_by_id(id)?;
+            let value = val_ref.get_float_field(FLOAT_value_INDEX)?;
+            Ok(Value::Float(value))
+        } else {
+            Err(VmError::ValidationError("expected a float reference".to_string()))
+        }
+    }
+
+    pub fn extract_double(&self, value: Value) -> VMResult<Value> {
+        if let Value::Reference(id) = value {
+            let val_ref = self.resolve_object_by_id(id)?;
+            let value = val_ref.get_double_field(DOUBLE_value_INDEX)?;
+            Ok(Value::Double(value))
+        } else {
+            Err(VmError::ValidationError("expected a double reference".to_string()))
         }
     }
 
@@ -532,7 +602,10 @@ impl<'a> Context<'a, '_> {
         debug!("IC[{}]", class.name);
         if !class.is_array(){
             let static_object = self.vm.new_object_from_class(class);
-            self.vm.static_class_objects.write().insert(class.id, static_object);
+            let prev = self.vm.static_class_objects.write().insert(class.id, static_object);
+            if prev.is_some() {
+                println!("Oh Oh")
+            }
             if let Some(clinit_method) = class.find_method("<clinit>", "()V"){
                 let class_and_method = ClassAndMethod{
                     class,
