@@ -1067,11 +1067,35 @@ impl JNINativeInterface_ {
     }
 
     pub unsafe extern "system-unwind" fn GetStringRegion(env: *mut JNIEnv, str: jstring, start: jsize, length: jsize, buf: *mut jchar) {
-        unimplemented!()
+        let vm: &VM = unsafe{(*env).vm()};
+
+        let string = vm.extract_string_from_value(Value::Reference(RefId(str))).unwrap();
+
+        let chars = string
+            .encode_utf16()
+            .skip(start as usize)
+            .take(length as usize)
+            .map(|c| c as jchar)
+            .collect::<Vec<_>>();
+        unsafe {
+            buf.copy_from_nonoverlapping(chars.as_ptr(), length as usize)
+        }
     }
 
     pub unsafe extern "system-unwind" fn GetStringUTFRegion(env: *mut JNIEnv, str: jstring, start: jsize, length: jsize, buf: *mut c_char) {
-        unimplemented!()
+        let vm: &VM = unsafe{(*env).vm()};
+
+        let string = vm.extract_string_from_value(Value::Reference(RefId(str))).unwrap();
+
+        let chars = string
+            .bytes()
+            .skip(start as usize)
+            .take(length as usize)
+            .map(|c| c as c_char)
+            .collect::<Vec<_>>();
+        unsafe {
+            buf.copy_from_nonoverlapping(chars.as_ptr(), length as usize)
+        }
     }
 
     pub unsafe extern "system-unwind" fn GetPrimitiveArrayCritical(env: *mut JNIEnv, array: jarray, isCopy: *mut jboolean) -> *const u8 {
