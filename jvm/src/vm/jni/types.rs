@@ -321,7 +321,7 @@ unsafe fn resolve_class_and_method<'a>(env: *mut JNIEnv, obj: jobject, method_id
     ClassAndMethod{class: class_ref, method: method_info}
 }
 
-unsafe fn resolve_function_args<'a>(env: *mut JNIEnv, class_and_method: &ClassAndMethod, mut raw: VaList) -> Vec<Value>{
+unsafe fn resolve_function_args_v<'a>(env: *mut JNIEnv, class_and_method: &ClassAndMethod, mut raw: VaList) -> Vec<Value>{
     let vm = unsafe{(*env).vm()};
     class_and_method.method.descriptor.args.iter().flat_map(|ft| match ft{
         FieldType::Object(..) | FieldType::Array(..) => {
@@ -353,7 +353,55 @@ unsafe fn resolve_function_args<'a>(env: *mut JNIEnv, class_and_method: &ClassAn
     }).collect()
 }
 
-impl JNINativeInterface_ {
+unsafe fn resolve_function_args_a<'a>(env: *mut JNIEnv, class_and_method: &ClassAndMethod, args: *const jvalue) -> Vec<Value> {
+    let vm = unsafe{(*env).vm()};
+    class_and_method.method.descriptor.args.iter().enumerate().flat_map(|(i, ft)| match ft{
+        FieldType::Object(..) | FieldType::Array(..) => {
+            let ref_id: u32 = unsafe{args.add(i).read().l};
+            {
+                let reference = Value::Reference(RefId(ref_id));
+                println!("NATIVE: arg for {}: {:?}", class_and_method.format(), reference.print(vm));
+                vec![reference]
+            }
+        }
+        FieldType::Primitive(pt) => match pt{
+            PrimitiveType::Boolean => {
+                let i = unsafe{args.add(i).read().z};
+                vec![Value::Integer(i as i32)]
+            }
+            PrimitiveType::Byte => {
+                let i = unsafe{args.add(i).read().b};
+                vec![Value::Integer(i as i32)]
+            }
+            PrimitiveType::Char => {
+                let i = unsafe{args.add(i).read().c};
+                vec![Value::Integer(i as i32)]
+            }
+            PrimitiveType::Short => {
+                let i = unsafe{args.add(i).read().s};
+                vec![Value::Integer(i as i32)]
+            }
+            PrimitiveType::Integer => {
+                let i = unsafe{args.add(i).read().i};
+                vec![Value::Integer(i)]
+            }
+            PrimitiveType::Float => {
+                let f = unsafe{args.add(i).read().f};
+                vec![Value::Float(f as f32)]
+            }
+            PrimitiveType::Double => {
+                let d = unsafe{args.add(i).read().d};
+                vec![Value::Double(d), Value::Dummy]
+            }
+            PrimitiveType::Long => {
+                let l = unsafe{args.add(i).read().j};
+                vec![Value::Long(l), Value::Dummy]
+            }
+        }
+    }).collect()
+}
+
+                                      impl JNINativeInterface_ {
     pub fn GetVersion(env: *mut JNIEnv) -> jint{
         unimplemented!()
     }
@@ -496,20 +544,16 @@ impl JNINativeInterface_ {
     pub fn AllocObject(env: *mut JNIEnv, clazz: jclass) -> jobject{
         unimplemented!()
     }
-    pub unsafe extern "C-unwind" fn NewObject(env: *mut JNIEnv, clazz: jclass, methodID: jmethodID, params: ...) -> jobject{
-        unsafe{Self::NewObjectV(env, clazz, methodID, params)}
-    }
-    pub unsafe extern "system-unwind" fn NewObjectV(env: *mut JNIEnv, clazz: jclass, methodID: jmethodID, args: VaList) -> jobject{
+
+    fn delegateNewObject(env: *mut JNIEnv, cam: ClassAndMethod, args: Vec<Value>) -> jobject {
         let vm = unsafe{(*env).vm()};
-        let class_and_method = unsafe{ resolve_static_class_and_method(env, clazz, methodID)};
-        let args = unsafe{resolve_function_args(env, &class_and_method, args)};
 
         let ctx = Context { vm, thread: thread() };
 
-        let _ = native_init_wrap!(env, ctx.ensure_initialized(class_and_method.class));
-        let obj_ref = vm.new_object_from_class(class_and_method.class);
-        debug!("NewObjectV: {} ({:?})", class_and_method.format(), args);
-        let res = match JavaThread::invoke_subroutine(ctx, class_and_method, Some(obj_ref), args) {
+        let _ = native_init_wrap!(env, ctx.ensure_initialized(cam.class));
+        let obj_ref = vm.new_object_from_class(cam.class);
+        debug!("NewObjectV: {} ({:?})", cam.format(), args);
+        let res = match JavaThread::invoke_subroutine(ctx, cam, Some(obj_ref), args) {
             Ok(result) => result,
             Err(e) => {
                 error!(target: "native", "Java error: {:?}", e);
@@ -523,8 +567,21 @@ impl JNINativeInterface_ {
             unimplemented!("NewObjectV: expected no return value but got: {:?}", res)
         }
     }
+
+    pub unsafe extern "C-unwind" fn NewObject(env: *mut JNIEnv, clazz: jclass, methodID: jmethodID, params: ...) -> jobject{
+        unsafe{Self::NewObjectV(env, clazz, methodID, params)}
+    }
+    pub unsafe extern "system-unwind" fn NewObjectV(env: *mut JNIEnv, clazz: jclass, methodID: jmethodID, args: VaList) -> jobject{
+        let class_and_method = unsafe{ resolve_static_class_and_method(env, clazz, methodID)};
+        let args = unsafe{ resolve_function_args_v(env, &class_and_method, args)};
+
+        Self::delegateNewObject(env, class_and_method, args)
+    }
     pub unsafe extern "system-unwind" fn NewObjectA(env: *mut JNIEnv, clazz: jclass, methodID: jmethodID, args: *const jvalue) -> jobject{
-        unimplemented!()
+        let class_and_method = unsafe{ resolve_static_class_and_method(env, clazz, methodID)};
+        let args = unsafe{ resolve_function_args_a(env, &class_and_method, args)};
+
+        Self::delegateNewObject(env, class_and_method, args)
     }
 
     pub unsafe extern "system-unwind" fn GetObjectClass(env: *mut JNIEnv, obj: jobject) -> jclass{
@@ -564,7 +621,7 @@ impl JNINativeInterface_ {
     unsafe fn delegateCallTypeMethodV(env: *mut JNIEnv, obj: jobject, methodID: jmethodID, args: VaList) -> Option<Option<Value>> {
         let vm = unsafe{(*env).vm()};
         let class_and_method = unsafe{ resolve_class_and_method(env, obj, methodID)};
-        let args = unsafe{resolve_function_args(env, &class_and_method, args)};
+        let args = unsafe{ resolve_function_args_v(env, &class_and_method, args)};
 
         let ctx = Context { vm, thread: thread()};
 
@@ -773,7 +830,7 @@ impl JNINativeInterface_ {
         let vm = unsafe{(*env).vm()};
 
         let class_and_method = unsafe{ resolve_static_class_and_method(env, clazz, methodID)};
-        let args = unsafe{resolve_function_args(env, &class_and_method, args)};
+        let args = unsafe{ resolve_function_args_v(env, &class_and_method, args)};
 
         let ctx = Context { vm, thread: thread() };
 
