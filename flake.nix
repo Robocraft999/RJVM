@@ -17,13 +17,12 @@
         };
 
         rustToolchain =
-          pkgs.rust-bin.selectLatestNightlyWith (toolchain:
-            toolchain.default.override {
+          pkgs.rust-bin.nightly."2026-05-24".default.override {
               extensions = [
                 "rust-src"
                 "rust-analyzer"
               ];
-            });
+            };
       in {
         devShells.default = pkgs.mkShell {
           packages = with pkgs; [
