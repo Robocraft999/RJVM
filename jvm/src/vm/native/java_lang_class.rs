@@ -15,7 +15,6 @@ pub fn register_natives(registry: &mut NativeMethodRegistry) {
     let mut register = |method_name, sig, delegate|registry.register(JAVA_LANG_CLASS, method_name, sig, delegate);
     register("getPrimitiveClass", "(Ljava/lang/String;)Ljava/lang/Class;", delegate_get_primitive_class);
     register("getComponentType", "()Ljava/lang/Class;", delegate_get_component_type);
-    register("getClassLoader0", "()Ljava/lang/ClassLoader;", delegate_get_classloader0);
     register("getProtectionDomain0", "()Ljava/security/ProtectionDomain;", delegate_get_protection_domain0);
     register("desiredAssertionStatus0", "(Ljava/lang/Class;)Z", delegate_desired_assertion_status0);
     register("getDeclaredFields0", "(Z)[Ljava/lang/reflect/Field;", delegate_get_declared_fields0);
@@ -64,12 +63,6 @@ gen_delegate!(delegate_get_component_type, |ctx, class_ref, args| {
     } else {
         invalidation!("Expected Array object but found '{:?}'", class_ref)
     }
-});
-
-gen_delegate!(delegate_get_classloader0, |ctx, _class_object, _args| {
-    //TODO check
-    debug!("getClassLoader0");
-    non_failing_some(ctx.vm.null())
 });
 
 gen_delegate!(delegate_get_protection_domain0, |ctx, _class_object, _args| {
@@ -333,9 +326,11 @@ gen_delegate!(delegate_for_name0, |ctx, _class_object, args| {
     };
 
     if let Some(name) = args.get(0) && !name.is_null(){
+        let Some(Value::Reference(class_loader_ref_id)) = args.get(2) else { return invalidation!("expected a classloader ref or null"); };
         let name = ctx.vm.extract_string_from_value(*name)?;
         let name = name.replace(".", "/");
-        match ctx.get_or_resolve_class(&name){
+        ctx.thread.call_stack.class_loaders.borrow_mut().push(Some(*class_loader_ref_id));
+        let res = match ctx.get_or_resolve_class(&name){
             Ok(..) => {
                 non_failing_some(Value::Reference(wrap_init!(ctx, ctx.new_class_object_by_name(&name)?).id))
             },
@@ -343,7 +338,9 @@ gen_delegate!(delegate_for_name0, |ctx, _class_object, args| {
                 exception(name.as_str())
             }
             Err(err) => Err(err)
-        }
+        };
+        ctx.thread.call_stack.class_loaders.borrow_mut().pop();
+        res
     } else {
         exception("")
     }

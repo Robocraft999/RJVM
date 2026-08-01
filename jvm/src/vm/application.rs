@@ -87,13 +87,6 @@ impl <'a> Application<'a> {
         }
     }
 
-    pub fn run_and_catch_method(&self, class_name: &str, method_name: &str, method_descriptor: &str, args: Vec<Value>) {
-        self.init_class(class_name);
-        let context = self.context();
-        let main_method = context.resolve_class_method(class_name, method_name, method_descriptor).unwrap();
-        let _result = self.handle_partial(JavaThread::invoke_subroutine(context, main_method, None, args));
-    }
-
     fn init_class(&self, class_name: &str) {
         if let VMResultType::Interrupted(..) = self.context().get_or_initialize_class(class_name).unwrap().clone(){
             JavaThread::invoke_frames_until(self.context(), -1).unwrap();
@@ -148,6 +141,7 @@ impl <'a> Application<'a> {
     }
 
     pub fn startup(&mut self){
+        thread().call_stack.class_loaders.borrow_mut().push(None);
         self.init_class(JAVA_LANG_STRING);
         self.init_class(JAVA_LANG_SYSTEM);
         self.init_class(JAVA_LANG_THREAD_GROUP);
@@ -187,9 +181,15 @@ impl <'a> Application<'a> {
         let ctx = self.context();
         let args = env::args().skip(1).map(|s| Value::Reference(ctx.try_new_string_object(&s).unwrap().id)).collect();
         let args_array = ctx.try_new_array(1, FieldType::Object(JAVA_LANG_STRING.to_owned()).to_array_field_type(1), RwLock::new(args)).unwrap();
-        let p_args = vec![Value::Reference(args_array.id)];
+        let args = vec![Value::Reference(args_array.id)];
         //run_and_catch_method(&mut vm, "de/klassenserver7b/k7bot/Main", "main", "([Ljava/lang/String;)V", p_args);
         //app.run_and_catch_method("Main", "main", "([Ljava/lang/String;)V", p_args);
-        self.run_and_catch_method("logicsim/App", "main", "([Ljava/lang/String;)V", p_args);
+
+        ctx.thread.call_stack.class_loaders.borrow_mut().push(*ctx.vm.system_class_loader.read());
+        let clazz = ctx.get_or_resolve_class("logicsim/App").unwrap();
+        self.init_class("logicsim/App");
+
+        let main_method = clazz.resolve_method_virtual("main", "([Ljava/lang/String;)V").unwrap();
+        let _result = self.handle_partial(JavaThread::invoke_subroutine(ctx, main_method, None, args));
     }
 }

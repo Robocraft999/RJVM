@@ -26,6 +26,7 @@ pub const CHARACTER_value_INDEX: usize = 65;
 
 // java.lang.Class
 pub const CLASS_name_INDEX: usize = 5;
+pub const CLASS_classloader_INDEX: usize = 6;
 
 // java.lang.ClassLoader$NativeLibrary
 pub const CLASSLOADER_NATIVELIBRARY_handle_INDEX: usize = 0;

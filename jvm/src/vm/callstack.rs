@@ -79,6 +79,10 @@ impl CallStack {
         *self.pcs.borrow().last().unwrap()
     }
 
+    pub fn get_context_class_loader(&self) -> Option<RefId> {
+        self.class_loaders.borrow().last().unwrap().clone()
+    }
+
     pub fn get_class_and_method_id_cloned(&self) -> ClassAndMethodId {
         self.frames.borrow().last().unwrap().class_and_method.clone()
     }

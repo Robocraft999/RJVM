@@ -145,7 +145,7 @@ impl<'a> ClassManager<'a>{
             first_field_index: 0,
             transitive_method_count: 0,
             first_method_index: 0,
-            class_loader: None,
+            class_loader: ctx.thread.call_stack.get_context_class_loader(),
             attributes: ClassFileAttributes::default(),
             array_info,
         };

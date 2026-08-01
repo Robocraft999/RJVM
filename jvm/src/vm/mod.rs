@@ -14,7 +14,7 @@ use crate::error::ClassParseError;
 use crate::vm::class::{ClassAndMethod, ClassId, ClassRef};
 use crate::vm::class_manager::ClassLoadingState;
 use crate::vm::constants::classes::{JAVA_LANG_CLASS, JAVA_LANG_INVOKE_MHN, JAVA_LANG_LONG, JAVA_LANG_STRING};
-use crate::vm::constants::{BOOLEAN_value_INDEX, BYTE_value_INDEX, CHARACTER_value_INDEX, CLASS_name_INDEX, DOUBLE_value_INDEX, FLOAT_value_INDEX, INTEGER_value_INDEX, LONG_value_INDEX, METHODTYPE_ptypes_INDEX, METHODTYPE_rtype_INDEX, SHORT_value_INDEX, STRING_hash_INDEX, STRING_value_INDEX};
+use crate::vm::constants::{BOOLEAN_value_INDEX, BYTE_value_INDEX, CHARACTER_value_INDEX, CLASS_classloader_INDEX, CLASS_name_INDEX, DOUBLE_value_INDEX, FLOAT_value_INDEX, INTEGER_value_INDEX, LONG_value_INDEX, METHODTYPE_ptypes_INDEX, METHODTYPE_rtype_INDEX, SHORT_value_INDEX, STRING_hash_INDEX, STRING_value_INDEX};
 use crate::vm::gc::ObjectAllocator;
 use crate::vm::java_error::JavaError;
 use crate::vm::java_thread::{JavaThread, ThreadMeta, TID};
@@ -530,6 +530,14 @@ impl<'a> Context<'a, '_> {
 
             //name
             class_object.set_field(CLASS_name_INDEX, Value::Reference(string_object.id));
+
+            //classloader
+            let clazz = self.vm.find_class_by_id(class_id).unwrap();
+            let class_loader_val = match &clazz.class_loader {
+                Some(id) => Value::Reference(*id),
+                None => self.vm.null()
+            };
+            class_object.set_field(CLASS_classloader_INDEX, class_loader_val);
 
             self.vm.class_objects.write().insert(class_id, class_object);
             Ok(VMResultType::Successful(class_object))
