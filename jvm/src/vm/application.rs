@@ -7,7 +7,7 @@ use crate::vm::jni::types::{JNIEnv, JavaVM};
 use crate::vm::result::{VMPartialResult, VMResultType};
 use crate::vm::value::{Reference, Value};
 use crate::vm::{jni, Context, VmError, VM};
-use log::error;
+use log::{error, trace};
 use std::cell::RefCell;
 use std::pin::Pin;
 
@@ -53,7 +53,7 @@ impl <'a> Application<'a> {
 
     fn init_system(&self) -> Result<(), VmError>{
         for (k,v) in self.vm.class_manager.class_loading_states.read()?.iter() {
-            println!("Class: {:?}, state: {:?}", self.vm.find_class_by_id(ClassId(k.0)).unwrap().name, v);
+            trace!(target: "debug", "Class: {:?}, state: {:?}", self.vm.find_class_by_id(ClassId(k.0)).unwrap().name, v);
         }
         let init = self.vm.resolve_class_method(JAVA_LANG_SYSTEM, "initializeSystemClass", "()V")?;
         JavaThread::invoke_subroutine(self.context(), init, None, vec![])?;
@@ -63,7 +63,7 @@ impl <'a> Application<'a> {
     fn handle_partial(&self, result: VMPartialResult<Option<Value>>) -> Option<Value> {
         match result {
             Ok(VMResultType::Successful(res)) => {
-                println!("result: {res:?}");
+                trace!(target: "debug", "result: {res:?}");
                 res
             }
             Ok(VMResultType::Interrupted(_, _)) => {

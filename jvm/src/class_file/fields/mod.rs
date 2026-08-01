@@ -34,19 +34,19 @@ pub fn primitive_to_wrapper_name(prim_name: &str) -> String{
         "double" => "java/lang/Double",
         "void" => "java/lang/Void",
         _ => unreachable!("Type is not primitive")
-    }.to_string()
+    }.to_owned()
 }
 
 pub fn primitive_type_to_class_name(primitive_type: &PrimitiveType) -> String {
     match primitive_type {
-        PrimitiveType::Integer => "int".to_string(),
-        PrimitiveType::Long    => "long".to_string(),
-        PrimitiveType::Short   => "short".to_string(),
-        PrimitiveType::Char    => "char".to_string(),
-        PrimitiveType::Byte    => "byte".to_string(),
-        PrimitiveType::Float   => "float".to_string(),
-        PrimitiveType::Double  => "double".to_string(),
-        PrimitiveType::Boolean => "boolean".to_string(),
+        PrimitiveType::Integer => "int".to_owned(),
+        PrimitiveType::Long    => "long".to_owned(),
+        PrimitiveType::Short   => "short".to_owned(),
+        PrimitiveType::Char    => "char".to_owned(),
+        PrimitiveType::Byte    => "byte".to_owned(),
+        PrimitiveType::Float   => "float".to_owned(),
+        PrimitiveType::Double  => "double".to_owned(),
+        PrimitiveType::Boolean => "boolean".to_owned(),
     }
 }
 
@@ -69,19 +69,19 @@ pub fn primitive_type_to_descriptor(primitive_type: &PrimitiveType) -> String {
 pub fn get_class_descriptor(class_name: &str) -> String{
     match class_name {
         // primitive classes
-        "boolean" => "Z".to_string(),
-        "byte" => "B".to_string(),
-        "char" => "C".to_string(),
-        "short" => "S".to_string(),
-        "int" => "I".to_string(),
-        "long" => "J".to_string(),
-        "float" => "F".to_string(),
-        "double" => "D".to_string(),
-        "void" => "V".to_string(),
+        "boolean" => "Z".to_owned(),
+        "byte" => "B".to_owned(),
+        "char" => "C".to_owned(),
+        "short" => "S".to_owned(),
+        "int" => "I".to_owned(),
+        "long" => "J".to_owned(),
+        "float" => "F".to_owned(),
+        "double" => "D".to_owned(),
+        "void" => "V".to_owned(),
         // already class / array
         _ => {
             if class_name.starts_with("[") {
-                class_name.to_string()
+                class_name.to_owned()
             } else {
                 "L".to_string() + class_name + ";"
             }

@@ -70,7 +70,7 @@ impl<'a> ClassManager<'a>{
 
     fn resolve_class(&self, vm: &VM<'a>, class_name: &str) -> Result<ClassRef<'a>, VmError>{
         let (class_to_load_name, array_info) = self.try_create_array_class(class_name)?;
-        let bytes = self.class_path.resolve(class_to_load_name.as_str())?.ok_or(ClassParseError::ClassResolveError(class_name.to_string()))?;
+        let bytes = self.class_path.resolve(class_to_load_name.as_str())?.ok_or(ClassParseError::ClassResolveError(class_name.to_owned()))?;
         self.parse_and_load_class(&vm, class_name, class_to_load_name.as_str(), array_info, bytes)
     }
 
@@ -98,7 +98,7 @@ impl<'a> ClassManager<'a>{
             &*class_ptr
         };
 
-        self.classes_by_name.write()?.insert(class_name.to_string(), class_ref);
+        self.classes_by_name.write()?.insert(class_name.to_owned(), class_ref);
         self.classes_by_id.write()?.insert(class_ref.id, class_ref);
         self.class_loading_states.write()?.insert(class_ref.id, ClassLoadingState::LOADED);
 
@@ -118,10 +118,10 @@ impl<'a> ClassManager<'a>{
                     if let Some(ConstantPoolEntry::Utf8(name)) = constants.get(*name_index as usize - 1){
                         Ok(name.clone())
                     } else {
-                        Err(VmError::ParseError(ClassParseError::ConstantPoolError("Expected a utf entry".to_string())))
+                        Err(VmError::ParseError(ClassParseError::ConstantPoolError("Expected a utf entry".to_owned())))
                     }
                 } else {
-                    Err(VmError::ParseError(ClassParseError::ConstantPoolError("Expected a raw class entry".to_string())))
+                    Err(VmError::ParseError(ClassParseError::ConstantPoolError("Expected a raw class entry".to_owned())))
                 }
             }
         }?;
@@ -163,7 +163,7 @@ impl<'a> ClassManager<'a>{
                 .map(|e| if let ConstantPoolEntry::Class(clazz) = e {Some(clazz)} else {None}))
             .flatten()
             .try_collect::<Vec<ClassRef>>()
-            .ok_or(VmError::ParseError(ClassParseError::ConstantPoolError(format!("Interface of {} could not be loaded.", class.name))))?;
+            .ok_or_else(|| VmError::ParseError(ClassParseError::ConstantPoolError(format!("Interface of {} could not be loaded.", class.name))))?;
 
         // build class attributes
         for ra in parsed_class.attributes.into_iter(){
@@ -203,7 +203,7 @@ impl<'a> ClassManager<'a>{
                 _ => None,
             })
             .try_collect::<Vec<FieldInfo>>()
-            .ok_or(VmError::ParseError(ClassParseError::ConstantPoolError(format!("Field of class '{}' could not be loaded.", class.name))))?;
+            .ok_or_else(|| VmError::ParseError(ClassParseError::ConstantPoolError(format!("Field of class '{}' could not be loaded.", class.name))))?;
         class.transitive_field_count = super_class_field_count + class.fields.len();
         class.first_field_index = super_class_field_count;
 
@@ -247,7 +247,7 @@ impl<'a> ClassManager<'a>{
                 _ => None,
             })
             .try_collect::<Vec<MethodInfo>>()
-            .ok_or(VmError::ParseError(ClassParseError::ConstantPoolError(format!("Method of class '{}' could not be loaded.", class.name))))?;
+            .ok_or_else(|| VmError::ParseError(ClassParseError::ConstantPoolError(format!("Method of class '{}' could not be loaded.", class.name))))?;
         class.transitive_method_count = super_class_method_count + class.methods.len();
         class.first_method_index = super_class_method_count;
 
@@ -358,7 +358,7 @@ impl<'a> ClassManager<'a>{
             };
             Ok((new_class_name, Some(array_info)))
         } else {
-            Ok((class_name.to_string(), None))
+            Ok((class_name.to_owned(), None))
         }
     }
 

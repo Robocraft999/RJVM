@@ -22,7 +22,7 @@ pub fn extract_component_type_from_array_class(array_class_descriptor: &str) -> 
     if let FieldType::Array(_, component_type) = array_type {
         Ok((*component_type, array.unwrap_or("").len()))
     } else {
-        Err(VmError::ValidationError("Can't extract component type from non-array type".to_string()))
+        Err(VmError::ValidationError("Can't extract component type from non-array type".to_owned()))
     }
 }
 
@@ -122,10 +122,10 @@ impl FieldType {
             if let Some(prim) = primitive{
                 name.push_str(prim);
             }
-            let component_type = field_type.ok_or(VmError::ValidationError(format!("{} is neither object nor primitive field type", name)))?;
+            let component_type = field_type.ok_or_else(|| VmError::ValidationError(format!("{} is neither object nor primitive field type", name)))?;
             Ok(FieldType::Array(name, Box::from(component_type)))
         } else {
-            field_type.ok_or(VmError::ValidationError("Field type is neither object nor primitive".to_string()))
+            field_type.ok_or(VmError::ValidationError("Field type is neither object nor primitive".to_owned()))
         }
     }
     

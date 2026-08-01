@@ -122,7 +122,7 @@ impl JavaThread {
         let class_and_method = ClassAndMethod::try_resolve(ctx.vm, &camid)?;
         let obj = ctx.vm.resolve_object_by_id(obj_id)?;
         ctx.create_and_push_call_frame(class_and_method, Some(obj), args, false);
-        let VMResultType::Successful(None) = Self::invoke_frames_until(ctx, current_index)? else { return Err(VmError::Unspecified("Thread exited unsuccessfully".to_string())) };
+        let VMResultType::Successful(None) = Self::invoke_frames_until(ctx, current_index)? else { return Err(VmError::Unspecified("Thread exited unsuccessfully".to_owned())) };
         Ok(())
     }
 
@@ -226,7 +226,7 @@ impl JavaThread {
                     Some(local_ref)
                 },
                 None => None,
-                _ => return Err(VmError::ValidationError("Expected a reference".to_string()))
+                _ => return Err(VmError::ValidationError("Expected a reference".to_owned()))
             }
         };
         let args = ctx.thread.call_stack.locals_stack.borrow().last().unwrap()

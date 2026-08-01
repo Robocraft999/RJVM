@@ -189,7 +189,7 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                 Instruction::POP => {
                     debug!("POP");
                     if ctx.thread.call_stack.pop_operand_value().is_none(){
-                        return Some(Err(VmError::ValidationError("Expected a value to pop but Stack was empty".to_string())));
+                        return Some(Err(VmError::ValidationError("Expected a value to pop but Stack was empty".to_owned())));
                     }
                 }
                 Instruction::POP2 => {
@@ -198,11 +198,11 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                     if let Some(val) = popped1{
                         if val.get_computational_type() == 1{
                             if ctx.thread.call_stack.pop_operand_value().is_none(){
-                                return Some(Err(VmError::ValidationError("Expected a second value to pop but Stack was empty".to_string())));
+                                return Some(Err(VmError::ValidationError("Expected a second value to pop but Stack was empty".to_owned())));
                             }
                         }
                     } else {
-                        return Some(Err(VmError::ValidationError("Expected a value to pop but Stack was empty".to_string())));
+                        return Some(Err(VmError::ValidationError("Expected a value to pop but Stack was empty".to_owned())));
                     }
                 }
                 Instruction::DUP => {
@@ -310,7 +310,7 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                         ctx.thread.call_stack.push_operand_value(value1);
                         ctx.thread.call_stack.push_operand_value(value2);
                     } else {
-                        return Some(Err(VmError::ValidationError("SWAP can only be applied to computational type 1 values".to_string())));
+                        return Some(Err(VmError::ValidationError("SWAP can only be applied to computational type 1 values".to_owned())));
                     }
                 }
 
@@ -654,7 +654,7 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                 }
                 Instruction::RETURN => {
                     debug!("RETURN");
-                    ctx.thread.debug_helper.tracker.push_method_event(class_and_method.format(), "returning".to_string());
+                    ctx.thread.debug_helper.tracker.push_method_event(class_and_method.format(), "returning".to_owned());
                     if class_and_method.method.name == "<clinit>"{
                         ctx.vm.class_manager.update_class_state(class_and_method.class, ClassLoadingState::INITIALIZED);
                     }
@@ -755,14 +755,14 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                             Some(ConstantPoolEntry::MethodType(desc)) => get_or_init_option!(ctx.new_method_type(&desc)),
                             Some(ConstantPoolEntry::MethodHandleMethod(arg_kind, arg_cam)) => {
                                 let Some(Value::Reference(arg_method_type_id)) = get_or_init_option!(ctx.new_method_type(&arg_cam.method.descriptor)) else {
-                                    return Some(Err(VmError::ValidationError("Could not create MethodType for static callsite arg".to_string())));
+                                    return Some(Err(VmError::ValidationError("Could not create MethodType for static callsite arg".to_owned())));
                                 };
                                 let arg_method_type = wrap_error!(ctx.vm.resolve_object_by_id(arg_method_type_id));
                                 get_or_init_option!(ctx.new_method_handle(class_and_method.class, arg_kind, arg_cam, arg_method_type))
                             }
                             _ => unimplemented!()
                         }) else {
-                            return Some(Err(VmError::ValidationError("Could not load static arg for invokedynamic".to_string())));
+                            return Some(Err(VmError::ValidationError("Could not load static arg for invokedynamic".to_owned())));
                         };
                         static_args.push(val);
                     }

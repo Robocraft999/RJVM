@@ -107,7 +107,7 @@ impl<'a> VM<'a>{
     }
 
     pub fn try_get_class(&self, class_name: &str) -> VMResult<ClassRef<'a>>{
-        self.find_class_by_name(class_name).ok_or(VmError::ClassNotLoadedError(format!("[try_get_class]: Class not loaded: {}", class_name)))
+        self.find_class_by_name(class_name).ok_or_else(|| VmError::ClassNotLoadedError(format!("[try_get_class]: Class not loaded: {}", class_name)))
     }
 
     pub fn define_class(&self, class_name: &str, bytes: Vec<u8>) -> VMPartialResult<Reference<'a>>{
@@ -187,11 +187,11 @@ impl<'a> VM<'a>{
     }
     
     pub fn new_class_array_1(&self, content: Vec<Value>) -> VMPartialResult<Reference<'a>>{
-        self.new_array(1, FieldType::Object("java/lang/Class".to_string()).to_array_field_type(1), RwLock::new(content))
+        self.new_array(1, FieldType::Object("java/lang/Class".to_owned()).to_array_field_type(1), RwLock::new(content))
     }
 
     pub fn new_object_array_1(&self, content: Vec<Value>) -> VMPartialResult<Reference<'a>>{
-        self.new_array(1, FieldType::Object("java/lang/Object".to_string()).to_array_field_type(1), RwLock::new(content))
+        self.new_array(1, FieldType::Object("java/lang/Object".to_owned()).to_array_field_type(1), RwLock::new(content))
     }
 
     pub fn try_new_string_object(&self, string: &str) -> VMResult<Reference<'a>>{
@@ -446,7 +446,7 @@ impl<'a> VM<'a>{
 
     // object access
     pub fn resolve_object_by_id(&self, id: RefId) -> VMResult<Reference<'a>> {
-        self.objects_by_id.read().get(&id).copied().ok_or(VmError::ValidationError(format!("Object not found: {:?}", id)))
+        self.objects_by_id.read().get(&id).copied().ok_or_else(|| VmError::ValidationError(format!("Object not found: {:?}", id)))
     }
 
     pub fn resolve_clazz_by_class_ref_id(&self, ref_id: RefId) -> VMResult<ClassRef<'a>> {

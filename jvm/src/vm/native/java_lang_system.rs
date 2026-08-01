@@ -116,34 +116,34 @@ gen_delegate!(delegate_init_properties, |ctx, _obj_ref, args| {
     let Some(Value::Reference(properties_obj_id)) = args.get(0) else { return invalidation!("this properties is not a reference") };
     let properties_ref = ctx.vm.resolve_object_by_id(*properties_obj_id)?;
     let mut props = vec![
-        ("file.encoding", "UTF-8".to_string()),
-        ("line.separator", "\n".to_string()),
-        ("file.separator", "/".to_string()),
-        ("path.separator", ":".to_string()),
-        ("java.lang.Integer.IntegerCache.high", "127".to_string()),
+        ("file.encoding", "UTF-8".to_owned()),
+        ("line.separator", "\n".to_owned()),
+        ("file.separator", "/".to_owned()),
+        ("path.separator", ":".to_owned()),
+        ("java.lang.Integer.IntegerCache.high", "127".to_owned()),
         //("sun.boot.library.path", "/home/admin/.jdks/temurin-22.0.1/lib".to_string()),
         ("java.home", format!("{}/jre/", env!("JAVA_HOME"))),
         ("sun.boot.library.path", format!("{}/jre/lib/amd64/", env!("JAVA_HOME"))),
-        ("sun.boot.class.path", "resources/rt.jar:resources/resources.jar".to_string()),
-        ("sun.arch.data.model", "64".to_string()),
+        ("sun.boot.class.path", "resources/rt.jar:resources/resources.jar".to_owned()),
+        ("sun.arch.data.model", "64".to_owned()),
         ("user.dir", env::current_dir().unwrap().to_string_lossy().to_string()),
         ("user.home", env::home_dir().unwrap().to_string_lossy().to_string()),
-        ("os.name", "Linux".to_string()),
-        ("os.arch", "x86_64".to_string()),
+        ("os.name", "Linux".to_owned()),
+        ("os.arch", "x86_64".to_owned()),
         ("java.awt.graphicsenv", "sun.awt.X11GraphicsEnvironment".to_owned()),
         ("awt.toolkit", "sun.awt.X11.XToolkit".to_owned())
     ];
     if env::consts::OS == "windows"{
         props = vec![
-            ("file.encoding", "UTF-8".to_string()),
-            ("line.separator", "\r\n".to_string()),
-            ("file.separator", "\\\\".to_string()),
-            ("path.separator", ";".to_string()),
-            ("java.lang.Integer.IntegerCache.high", "127".to_string()),
-            ("sun.boot.library.path", "C:\\Users\\Admin\\.jdks\\azul-22.0.1\\bin".to_string()),
+            ("file.encoding", "UTF-8".to_owned()),
+            ("line.separator", "\r\n".to_owned()),
+            ("file.separator", "\\\\".to_owned()),
+            ("path.separator", ";".to_owned()),
+            ("java.lang.Integer.IntegerCache.high", "127".to_owned()),
+            ("sun.boot.library.path", "C:\\Users\\Admin\\.jdks\\azul-22.0.1\\bin".to_owned()),
             ("user.dir", env::current_dir().unwrap().to_string_lossy().to_string()),
             ("user.home", env::home_dir().unwrap().to_string_lossy().to_string()),
-            ("os.name", "Windows".to_string()),
+            ("os.name", "Windows".to_owned()),
         ];
     }
     let properties_set_method = ctx.vm.resolve_class_method("java/util/Properties", "setProperty", "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/Object;")?;

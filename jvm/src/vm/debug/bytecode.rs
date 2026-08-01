@@ -1,5 +1,6 @@
 use crate::vm::class::ClassRef;
 use log::warn;
+#[cfg(feature = "debug")]
 use serde::Deserialize;
 use std::cell::RefCell;
 use std::fs::File;

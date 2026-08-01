@@ -103,7 +103,7 @@ impl MonitorHandler {
         let monitor = {
             let state = self.state.lock();
 
-            state.get(&associate).ok_or(VmError::ValidationError(format!("Monitor for {:?} does not exist", associate))).cloned()
+            state.get(&associate).ok_or_else(|| VmError::ValidationError(format!("Monitor for {:?} does not exist", associate))).cloned()
         }?;
 
         let mut state_guard = monitor.state.lock();

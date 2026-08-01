@@ -33,7 +33,7 @@ impl<'a> ObjectAllocator<'a>{
         let object = ReferenceValue{
             id: RefId(*current_id),
             class_id: class.id,
-            class_name: class.name.to_string(),
+            class_name: class.name.to_owned(),
             reference_type: ReferenceType::Object(RwLock::new(fields))
         };
 
@@ -52,7 +52,7 @@ impl<'a> ObjectAllocator<'a>{
         let array = ReferenceValue{
             id: RefId(*current_id),
             class_id: class.id,
-            class_name: class.name.to_string(),
+            class_name: class.name.to_owned(),
             reference_type: ReferenceType::Array(dims, component_type, content),
         };
 
