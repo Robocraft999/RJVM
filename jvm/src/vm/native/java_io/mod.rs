@@ -226,7 +226,7 @@ gen_delegate!(delegate_canonicalize0, |ctx, _obj_ref, args| {
         let path = ctx.vm.extract_string_from_value(*string_val)?;
         let path = Path::new(&path);
         let path = path.canonicalize().unwrap().into_os_string().into_string().unwrap();
-        let new_path = wrap_init!(ctx, ctx.vm.new_string_object(path.as_str())?);
+        let new_path = wrap_init!(ctx, ctx.new_string_object(path.as_str())?);
         non_failing_some(Value::Reference(new_path.id))
     } else {
         invalidation!("Can't canonicalize 0 arguments")
@@ -287,10 +287,10 @@ gen_delegate!(delegate_list, |ctx, _obj_ref, args| {
             .read_dir()
             .unwrap()
             .filter_map(|e| e.map(|de| de.file_name().into_string().ok()).ok().flatten())
-            .map(|s| ctx.vm.try_new_string_object(&s).map(|r| Value::Reference(r.id)))
+            .map(|s| ctx.try_new_string_object(&s).map(|r| Value::Reference(r.id)))
             .try_collect::<Vec<_>>()?;
 
-        let arr = ctx.vm.try_new_array(1, FieldType::Object(JAVA_LANG_STRING.to_owned()).to_array_field_type(1), RwLock::new(strings))?;
+        let arr = ctx.try_new_array(1, FieldType::Object(JAVA_LANG_STRING.to_owned()).to_array_field_type(1), RwLock::new(strings))?;
         non_failing_some(Value::Reference(arr.id))
     } else {
         invalidation!("Expected File Parameter")

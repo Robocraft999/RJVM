@@ -85,7 +85,7 @@ gen_delegate!(delegate_object_field_offset, |ctx, _obj_ref, args| {
     if let Some(Value::Reference(field_id)) = args.get(0){
         let field_ref = ctx.vm.resolve_object_by_id(*field_id)?;
         let Value::Reference(class_ref_id) = field_ref.get_field(FIELD_clazz_INDEX) else { return invalidation!("Expected a reference") };
-        let clazz = ctx.vm.resolve_clazz_by_class_ref_id(class_ref_id)?;
+        let clazz = ctx.resolve_clazz_by_class_ref_id(class_ref_id)?;
         let name_val = field_ref.get_field(FIELD_name_INDEX);
         let name = ctx.vm.extract_string_from_value(name_val)?;
         if let Some((index, _)) = clazz.find_field(name.as_str()){
@@ -133,7 +133,7 @@ gen_delegate!(delegate_get_object_volatile, |ctx, _obj_ref, args| {
             return non_failing_some(o.get_element(*index as usize - ARRAY_BASE_OFFSET));
         }
         let field_value = if o.class_name == JAVA_LANG_CLASS {
-            let class_ref = ctx.vm.extract_class_from_class_object(o)?;
+            let class_ref = ctx.extract_class_from_class_object(o)?;
             let static_object = ctx.vm.get_static_class_object(class_ref.id).unwrap();
             static_object.get_field(*index as usize)
         } else {
@@ -142,7 +142,7 @@ gen_delegate!(delegate_get_object_volatile, |ctx, _obj_ref, args| {
         #[cfg(feature = "validation")]
         {
             let clazz = if o.class_name == JAVA_LANG_CLASS {
-                ctx.vm.extract_class_from_class_object(o)?
+                ctx.extract_class_from_class_object(o)?
             } else {
                 ctx.vm.find_class_by_id(o.class_id).unwrap()
             };
@@ -178,7 +178,7 @@ gen_delegate!(delegate_get_int_volatile, |ctx, _obj_ref, args| {
             return non_failing_some(o.get_element(*index as usize - ARRAY_BASE_OFFSET));
         }
         let field_value = if o.class_name == JAVA_LANG_CLASS {
-            let class_ref = ctx.vm.extract_class_from_class_object(o)?;
+            let class_ref = ctx.extract_class_from_class_object(o)?;
             let static_object = ctx.vm.get_static_class_object(class_ref.id).unwrap();
             static_object.get_field(*index as usize)
         } else {
@@ -214,7 +214,7 @@ gen_delegate!(delegate_get_long_volatile, |ctx, _obj_ref, args| {
             return non_failing_some(o.get_element(*index as usize - ARRAY_BASE_OFFSET));
         }
         let field_value = if o.class_name == JAVA_LANG_CLASS {
-            let class_ref = ctx.vm.extract_class_from_class_object(o)?;
+            let class_ref = ctx.extract_class_from_class_object(o)?;
             let static_object = ctx.vm.get_static_class_object(class_ref.id).unwrap();
             static_object.get_field(*index as usize)
         } else {
@@ -433,7 +433,7 @@ gen_delegate!(delegate_put_ordered_object, |ctx, _obj_ref, args| {
             return non_failing_none();
         }
         if o.class_name == JAVA_LANG_CLASS {
-            let class_ref = ctx.vm.extract_class_from_class_object(o)?;
+            let class_ref = ctx.extract_class_from_class_object(o)?;
             let _ = wrap_init!(ctx, ctx.ensure_initialized(class_ref)?);
             let static_object = ctx.vm.static_class_objects.read().get(&class_ref.id).unwrap().clone();
             #[cfg(feature = "validation")]
@@ -465,7 +465,7 @@ gen_delegate!(delegate_define_class, |ctx, _obj_ref, args| {
             Vec::new()
         };
         let bytes = bytes.into_iter().skip(*start as usize).take((*end - *start) as usize).collect::<Vec<_>>();
-        let class_object = wrap_init!(ctx, ctx.vm.define_class(class_name.as_str(), bytes.clone())?);
+        let class_object = wrap_init!(ctx, ctx.define_class(class_name.as_str(), bytes.clone())?);
         non_failing_some(Value::Reference(class_object.id))
     } else {
         invalidation!("define_class: expected string_object, byte array, start and end ints but got: {:?}, {:?}, {:?}, {:?}", args.get(0), args.get(1), args.get(2), args.get(3))
@@ -478,7 +478,7 @@ gen_delegate!(delegate_define_anon_class, |ctx, _obj_ref, args| {
         let byte_arr_ref = ctx.vm.resolve_object_by_id(*byte_arr_ref_id)?;
         if let ReferenceType::Array(_, _, bytes ) = &byte_arr_ref.reference_type{
             let bytes = bytes.read().iter().map(|val| if let Value::Integer(byte) = val {*byte as u8} else {0}).collect::<Vec<_>>();
-            let class = ctx.vm.class_manager.define_class(ctx.vm, None, None, bytes)?;
+            let class = ctx.vm.class_manager.define_class(&ctx, None, None, bytes)?;
             
             let class_ref = match ctx.vm.class_manager.classes.lock() {
                 Ok(class_lock) => {
@@ -497,7 +497,7 @@ gen_delegate!(delegate_define_anon_class, |ctx, _obj_ref, args| {
             ctx.vm.class_manager.classes_by_id.write()?.insert(class_ref.id, class_ref);
             //vm.class_manager.classes_by_name.borrow_mut().insert(class_ref.name.clone(), class_ref);
             ctx.vm.class_manager.class_loading_states.write()?.insert(class_ref.id, ClassLoadingState::LOADED);
-            let class_obj = wrap_init!(ctx, ctx.vm.new_class_object_by_class(class_ref)?);
+            let class_obj = wrap_init!(ctx, ctx.new_class_object_by_class(class_ref)?);
             ctx.vm.class_manager.anonymous_classes.write()?.insert(class_obj.id, AnonClassInfo { clazz: class_ref, host: host_class_ref });
             non_failing_some(Value::Reference(class_obj.id))
         } else {
@@ -510,9 +510,9 @@ gen_delegate!(delegate_define_anon_class, |ctx, _obj_ref, args| {
 
 gen_delegate!(delegate_allocate_instance, |ctx, _obj_ref, args| {
     if let Some(Value::Reference(class_ref_id)) = args.get(0){
-        let clazz = ctx.vm.resolve_clazz_by_class_ref_id(*class_ref_id)?;
+        let clazz = ctx.resolve_clazz_by_class_ref_id(*class_ref_id)?;
         wrap_init!(ctx, ctx.ensure_initialized(clazz)?);
-        let object = ctx.vm.new_object_from_class(clazz);
+        let object = ctx.new_object_from_class(clazz);
         non_failing_some(Value::Reference(object.id))
     } else {
         invalidation!("Expected a class reference to allocate but got: {:?}", args)
@@ -521,7 +521,7 @@ gen_delegate!(delegate_allocate_instance, |ctx, _obj_ref, args| {
 
 gen_delegate!(delegate_should_be_initialized, |ctx, _obj_ref, args| {
     if let Some(Value::Reference(class_ref_id)) = args.get(0){
-        let clazz = ctx.vm.resolve_clazz_by_class_ref_id(*class_ref_id)?;
+        let clazz = ctx.resolve_clazz_by_class_ref_id(*class_ref_id)?;
         let initialized = ctx.vm.class_manager.expect_class_state(clazz.id, ClassLoadingState::INITIALIZED);
         non_failing_some(Value::from(!initialized))
     } else {
@@ -531,7 +531,7 @@ gen_delegate!(delegate_should_be_initialized, |ctx, _obj_ref, args| {
 
 gen_delegate!(delegate_ensure_initialized, |ctx, _obj_ref, args| {
     if let Some(Value::Reference(class_ref_id)) = args.get(0){
-        let clazz = ctx.vm.resolve_clazz_by_class_ref_id(*class_ref_id)?;
+        let clazz = ctx.resolve_clazz_by_class_ref_id(*class_ref_id)?;
         let _clazz = wrap_init!(ctx, ctx.ensure_initialized(clazz)?);
         non_failing_none()
     } else {

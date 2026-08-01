@@ -39,13 +39,13 @@ gen_delegate!(delegate_invoke, |ctx, obj_ref, args| {
         if let (Some(Value::Reference(vmtarget_ref_id)), Some(Value::Reference(mname_ref_id))) = (blub.get(0), blub.get(1)) {
             let vmtarget = ctx.vm.extract_long(Value::Reference(*vmtarget_ref_id))?.expect_long()?;
             let mname_ref = ctx.vm.resolve_object_by_id(*mname_ref_id)?;
-            let clazz = ctx.vm.resolve_clazz_by_class_ref_id(mname_ref.get_ref_field(MEMBERNAME_clazz_INDEX)?)?;
+            let clazz = ctx.resolve_clazz_by_class_ref_id(mname_ref.get_ref_field(MEMBERNAME_clazz_INDEX)?)?;
             let name = ctx.vm.extract_string_from_value(mname_ref.get_field(MEMBERNAME_name_INDEX))?;
 
             if vmtarget as isize == NONVIRTUAL_VTABLE_INDEX {
                 let typ_ref = ctx.vm.resolve_object_by_id(mname_ref.get_ref_field(MEMBERNAME_type_INDEX)?)?;
 
-                let desc = ctx.vm.extract_descriptor_from_method_type(typ_ref)?;
+                let desc = ctx.extract_descriptor_from_method_type(typ_ref)?;
 
                 let method = clazz.find_method(name.as_str(), desc.as_str()).unwrap();
                 let cam = ClassAndMethod { class: clazz, method };
@@ -75,11 +75,11 @@ gen_delegate!(delegate_link_to_static, |ctx, _obj_ref, args| {
     if let Some(Value::Reference(mname_ref_id)) = args.get(args.len() - 1) {
         let mname_ref = ctx.vm.resolve_object_by_id(*mname_ref_id)?;
         let typ_ref = ctx.vm.resolve_object_by_id(mname_ref.get_ref_field(MEMBERNAME_type_INDEX)?)?;
-        let clazz = ctx.vm.resolve_clazz_by_class_ref_id(mname_ref.get_ref_field(MEMBERNAME_clazz_INDEX)?)? ;
+        let clazz = ctx.resolve_clazz_by_class_ref_id(mname_ref.get_ref_field(MEMBERNAME_clazz_INDEX)?)? ;
         let name = ctx.vm.extract_string_from_value(mname_ref.get_field(MEMBERNAME_name_INDEX))?;
         println!("LTS: {}", name);
 
-        let desc = ctx.vm.extract_descriptor_from_method_type(typ_ref)?;
+        let desc = ctx.extract_descriptor_from_method_type(typ_ref)?;
         let desc = MethodDescriptor::new(desc);
         if desc.args.len() != args.len() - 1 {
             unreachable!("Args count does not match: expected: {}, got: {:?}", desc.as_str(), args)
@@ -155,13 +155,13 @@ gen_delegate!(delegate_get_members, |ctx, _obj_ref, args| {
         if class_ref_id.is_null() || results_ref_id.is_null() {
             return non_failing_some(Value::Integer(-1))
         }
-        let _clazz = ctx.vm.resolve_clazz_by_class_ref_id(*class_ref_id)?;
+        let _clazz = ctx.resolve_clazz_by_class_ref_id(*class_ref_id)?;
         if name_ref_id.is_null() || sig_ref_id.is_null() {
             return non_failing_some(Value::Integer(0));
         }
         let _name = ctx.vm.extract_string_from_value(Value::Reference(*name_ref_id))?;
         let _sig = ctx.vm.extract_string_from_value(Value::Reference(*sig_ref_id))?;
-        let _caller = ctx.vm.resolve_clazz_by_class_ref_id(*caller_ref_id)?;
+        let _caller = ctx.resolve_clazz_by_class_ref_id(*caller_ref_id)?;
         todo!()
     }
 
@@ -171,7 +171,7 @@ gen_delegate!(delegate_get_members, |ctx, _obj_ref, args| {
 gen_delegate!(delegate_get_member_vminfo, |ctx, _obj_ref, args| {
     if let Some(Value::Reference(self_id)) = args.get(0){
         if let Some(vals) = ctx.vm.object_payloads.read().get(&self_id){
-            let array = wrap_init!(ctx, ctx.vm.new_object_array_1(vals.clone())?);
+            let array = wrap_init!(ctx, ctx.new_object_array_1(vals.clone())?);
             non_failing_some(Value::Reference(array.id))
         } else {
             invalidation!("No vminfo payload found")
@@ -211,7 +211,7 @@ gen_delegate!(delegate_init, |ctx, _obj_ref, args| {
                 // slot
                 let slot = target_ref.get_int_field(METHOD_slot_INDEX)?;
 
-                let class_ref = ctx.vm.resolve_clazz_by_class_ref_id(class_ref_id)?;
+                let class_ref = ctx.resolve_clazz_by_class_ref_id(class_ref_id)?;
                 let method_info = class_ref.get_method_in_slot(slot as usize).unwrap();
                 let info = CallInfo::new(&method_info, &class_ref);
 
@@ -267,7 +267,7 @@ fn member_name_init_method<'a>(ctx: Context<'a, '_>, mname: Reference<'a>, info:
     mname.set_field(MEMBERNAME_flags_INDEX, Value::Integer(flags));
     // vmindex
     // vmtarget
-    let vmindex = ctx.vm.new_java_lang_long(Value::Long(vmindex as i64))?;
+    let vmindex = ctx.new_java_lang_long(Value::Long(vmindex as i64))?;
     let _old = ctx.vm.object_payloads.write().insert(mname.id, vec![vmindex, Value::Reference(mname.id)]);
     Ok(())
 }
@@ -278,9 +278,9 @@ fn member_name_init_field<'a>(ctx: Context<'a, '_>, mname: Reference<'a>, field_
     //TODO add support for setters
 
     let clazz = ctx.vm.find_class_by_id(field_info.holder_id).unwrap();
-    let vmtarget = wrap_init!(ctx, ctx.vm.new_class_object_by_class(clazz)?);
+    let vmtarget = wrap_init!(ctx, ctx.new_class_object_by_class(clazz)?);
     let slot = field_info.slot as i32;
-    let vmindex = ctx.vm.new_java_lang_long(Value::Long(slot as i64))?;
+    let vmindex = ctx.new_java_lang_long(Value::Long(slot as i64))?;
     let _old = ctx.vm.object_payloads.write().insert(mname.id, vec![vmindex, Value::Reference(vmtarget.id)]);
 
     // flags
@@ -327,7 +327,7 @@ fn resolve_signature<'a>(ctx: Context<'a, '_>, sig: Reference<'a>) -> VMResult<S
 gen_delegate!(delegate_resolve, |ctx, _obj_ref, args| {
     if let (Some(Value::Reference(self_ref_id)), Some(Value::Reference(_caller_id))) = (args.get(0), args.get(1)){
         let self_ref = ctx.vm.resolve_object_by_id(*self_ref_id)?;
-        let clazz = ctx.vm.resolve_clazz_by_class_ref_id(self_ref.get_ref_field(MEMBERNAME_clazz_INDEX)?)?;
+        let clazz = ctx.resolve_clazz_by_class_ref_id(self_ref.get_ref_field(MEMBERNAME_clazz_INDEX)?)?;
         //let caller_clazz = vm.extract_class_from_class_object(caller)?; can be null apparently
         let name = ctx.vm.extract_string_from_value(self_ref.get_field(MEMBERNAME_name_INDEX))?;
         let typ = ctx.vm.resolve_object_by_id(self_ref.get_ref_field(MEMBERNAME_type_INDEX)?)?;

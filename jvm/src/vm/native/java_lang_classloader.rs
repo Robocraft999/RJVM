@@ -21,7 +21,7 @@ gen_delegate!(delegate_find_loaded_class0, |ctx, _obj_ref, args| {
         let class_name = ctx.vm.extract_string_from_value(*str_object)?;
         let class_name = class_name.replace(".", "/");
         if ctx.vm.class_manager.find_class_by_name(class_name.as_str()).is_some() {
-            non_failing_some(Value::Reference(wrap_init!(ctx, ctx.vm.new_class_object_by_name(class_name.as_str())?).id))
+            non_failing_some(Value::Reference(wrap_init!(ctx, ctx.new_class_object_by_name(class_name.as_str())?).id))
         } else {
             non_failing_some(ctx.vm.null())
         }
@@ -36,8 +36,8 @@ gen_delegate!(delegate_find_bootstrap_class, |ctx, _obj_ref, args| {
         let class_name = ctx.vm.extract_string_from_value(*str_object)?;
         let class_name = class_name.replace(".", "/");
 
-        match ctx.vm.get_or_resolve_class(class_name.as_str()) {
-            Ok(clazz) => non_failing_some(Value::Reference(wrap_init!(ctx, ctx.vm.new_class_object_by_class(clazz)?).id)),
+        match ctx.get_or_resolve_class(class_name.as_str()) {
+            Ok(clazz) => non_failing_some(Value::Reference(wrap_init!(ctx, ctx.new_class_object_by_class(clazz)?).id)),
             Err(_) => non_failing_some(ctx.vm.null())
         }
     } else {

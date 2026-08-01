@@ -8,8 +8,8 @@ use crate::class_file::methods::descriptor::MethodDescriptor;
 use crate::class_file::methods::{MethodInfo, ITABLE_INDEX_MAX, NONVIRTUAL_VTABLE_INDEX, PENDING_ITABLE_INDEX};
 use crate::error::ClassParseError;
 use crate::vm::result::VMResult;
-use crate::vm::value::Value;
-use crate::vm::VM;
+use crate::vm::value::{RefId, Value};
+use crate::vm::{Context, VM};
 use crate::vm::{ProgramCounter, VmError};
 use std::fmt::{Debug, Formatter};
 use std::hash::Hash;
@@ -31,6 +31,7 @@ pub struct Class<'a>{
     pub transitive_method_count: usize,
     pub first_field_index: usize,
     pub first_method_index: usize,
+    pub class_loader: Option<RefId>,
     pub array_info: Option<ArrayInfo>,
     pub attributes: ClassFileAttributes,
 }
@@ -169,15 +170,15 @@ impl<'a> Class<'a>{
         self.array_info.is_some()
     }
 
-    pub fn get_constant_as_value(&'a self, vm: &VM<'a>, index: u16) -> Value{
-        let optional_constant = self.get_or_resolve_constant(&vm, index);
+    pub fn get_constant_as_value(&'a self, ctx: &Context<'a, '_>, index: u16) -> Value{
+        let optional_constant = self.get_or_resolve_constant(&ctx, index);
         if let Some(constant) = optional_constant{
             match constant {
                 ConstantPoolEntry::Integer(value) => Value::Integer(value),
                 ConstantPoolEntry::Long(value) => Value::Long(value),
                 ConstantPoolEntry::Float(value) => Value::Float(value),
                 ConstantPoolEntry::Double(value) => Value::Double(value),
-                ConstantPoolEntry::String(_index) => vm.null(), //FIXME resolve string and allocate
+                ConstantPoolEntry::String(_index) => ctx.vm.null(), //FIXME resolve string and allocate
                 _ => {panic!("Constant of type {constant:?} not supported")}
             }
         } else {
@@ -185,18 +186,18 @@ impl<'a> Class<'a>{
         }
     }
 
-    pub fn get_fields(&'a self, vm: &VM<'a>) -> Vec<Value>{
+    pub fn get_fields(&'a self, ctx: &Context<'a, '_>) -> Vec<Value>{
         let local_values = (self.first_field_index..self.transitive_field_count)
             .map(|index| {
                 let field = self.field_at_index(index).unwrap();
                 if let Some(constant_value) = field.attributes.constant_value.clone(){
-                    self.get_constant_as_value(&vm, constant_value.constantvalue_index)
+                    self.get_constant_as_value(&ctx, constant_value.constantvalue_index)
                 } else {
-                    field.field_type.get_default_value(vm.null())
+                    field.field_type.get_default_value(ctx.vm.null())
                 }
             });
         let mut superclass_values = match self.superclass {
-            Some(super_class) => super_class.get_fields(&vm),
+            Some(super_class) => super_class.get_fields(&ctx),
             None => Vec::new()
         };
 
@@ -351,7 +352,7 @@ pub struct ArrayInfo{
 }
 
 impl <'a> Class<'a>{
-    pub fn get_or_resolve_constant(&self, vm: &VM<'a>, index: u16) -> Option<ConstantPoolEntry<'a>>{
+    pub fn get_or_resolve_constant(&self, ctx: &Context<'a, '_>, index: u16) -> Option<ConstantPoolEntry<'a>>{
         let fast = self.constants.read().ok()?.get(index as usize - 1)?.clone();
         match fast{
             ConstantPoolEntry::Class(..) |
@@ -381,16 +382,16 @@ impl <'a> Class<'a>{
             }
             ConstantPoolEntry::RawClass(name_index) => {
                 let name = resolve_utf(self.constants.read().ok()?.deref(), name_index)?;
-                let class = vm.get_or_resolve_class(name.as_str()).ok()?;
+                let class = ctx.get_or_resolve_class(name.as_str()).ok()?;
                 self.constants.write().ok()?[index as usize - 1] = ConstantPoolEntry::Class(class);
             }
             ConstantPoolEntry::RawFieldRef(class_index, name_and_type_index) => {
-                let caf = resolve_class_and_field(&vm, self.constants.read().ok()?.deref(), class_index, name_and_type_index)?;
+                let caf = resolve_class_and_field(&ctx, self.constants.read().ok()?.deref(), class_index, name_and_type_index)?;
                 self.constants.write().ok()?[index as usize - 1] = ConstantPoolEntry::FieldRef(caf);
             }
             ConstantPoolEntry::RawMethodRef(class_index, name_and_type_index) => {
                 //let cam = resolve_class_and_method(&vm, &self.constants.borrow(), class_index, name_and_type_index, false)?;
-                let (clazz, method_name, method_descriptor) = resolve_class_and_name_and_type(vm, self.constants.read().ok()?.deref(), class_index, name_and_type_index)?;
+                let (clazz, method_name, method_descriptor) = resolve_class_and_name_and_type(ctx, self.constants.read().ok()?.deref(), class_index, name_and_type_index)?;
                 let cam = clazz.resolve_method_virtual(method_name.as_str(), method_descriptor.as_str()).unwrap();
                 if cam.class.has_method_polymorphic_signature(cam.method) {
                     self.constants.write().ok()?[index as usize - 1] = ConstantPoolEntry::MethodRefSigPoly(cam, MethodDescriptor::new(method_descriptor));
@@ -399,7 +400,7 @@ impl <'a> Class<'a>{
                 }
             }
             ConstantPoolEntry::RawInterfaceMethodRef(class_index, name_and_type_index) => {
-                let cam = resolve_class_and_method(&vm, self.constants.read().ok()?.deref(), class_index, name_and_type_index, true)?;
+                let cam = resolve_class_and_method(&ctx, self.constants.read().ok()?.deref(), class_index, name_and_type_index, true)?;
                 self.constants.write().ok()?[index as usize - 1] = ConstantPoolEntry::InterfaceMethodRef(cam);
             }
             ConstantPoolEntry::RawMethodHandle(kind, ref_index) => {
@@ -411,7 +412,7 @@ impl <'a> Class<'a>{
                     BytecodeBehavior::REFPutStatic => {
                         let reference = self.constants.read().ok()?.deref()[ref_index as usize - 1].clone();
                         let caf = match reference {
-                            ConstantPoolEntry::RawFieldRef(class_index, name_and_type_index) => resolve_class_and_field(&vm, self.constants.read().ok()?.deref(), class_index, name_and_type_index)?,
+                            ConstantPoolEntry::RawFieldRef(class_index, name_and_type_index) => resolve_class_and_field(&ctx, self.constants.read().ok()?.deref(), class_index, name_and_type_index)?,
                             ConstantPoolEntry::FieldRef(caf) => caf,
                             _ => return None,
                         };
@@ -420,8 +421,8 @@ impl <'a> Class<'a>{
                     _ => {
                         let reference = self.constants.read().ok()?.deref()[ref_index as usize - 1].clone();
                         let cam = match reference {
-                            ConstantPoolEntry::RawMethodRef(class_index, name_and_type_index) => resolve_class_and_method(&vm, self.constants.read().ok()?.deref(), class_index, name_and_type_index, false)?,
-                            ConstantPoolEntry::RawInterfaceMethodRef(class_index, name_and_type_index) => resolve_class_and_method(&vm, self.constants.read().ok()?.deref(), class_index, name_and_type_index, true)?,
+                            ConstantPoolEntry::RawMethodRef(class_index, name_and_type_index) => resolve_class_and_method(&ctx, self.constants.read().ok()?.deref(), class_index, name_and_type_index, false)?,
+                            ConstantPoolEntry::RawInterfaceMethodRef(class_index, name_and_type_index) => resolve_class_and_method(&ctx, self.constants.read().ok()?.deref(), class_index, name_and_type_index, true)?,
                             ConstantPoolEntry::MethodRef(cam) | ConstantPoolEntry::InterfaceMethodRef(cam) => cam,
                             _ => return None,
                         };
@@ -475,9 +476,9 @@ fn resolve_name_and_type(constant_pool: &ConstantPool, name_index: u16, type_ind
     }
 }
 
-fn resolve_class_and_name_and_type<'a>(vm: &VM<'a>, constant_pool: &ConstantPool<'a>, class_index: u16, name_and_type_index: u16) -> Option<(ClassRef<'a>, String, String)>{
+fn resolve_class_and_name_and_type<'a>(ctx: &Context<'a, '_>, constant_pool: &ConstantPool<'a>, class_index: u16, name_and_type_index: u16) -> Option<(ClassRef<'a>, String, String)>{
     let class = match constant_pool.get(class_index as usize - 1){
-        Some(ConstantPoolEntry::RawClass(name_index)) => resolve_utf(constant_pool, *name_index).map(|class_name| vm.get_or_resolve_class(&class_name).ok()).flatten()?,
+        Some(ConstantPoolEntry::RawClass(name_index)) => resolve_utf(constant_pool, *name_index).map(|class_name| ctx.get_or_resolve_class(&class_name).ok()).flatten()?,
         Some(ConstantPoolEntry::Class(class)) => *class,
         _ => return None,
     };
@@ -489,8 +490,8 @@ fn resolve_class_and_name_and_type<'a>(vm: &VM<'a>, constant_pool: &ConstantPool
     Some((class, name, typ))
 }
 
-fn resolve_class_and_field<'a>(vm: &VM<'a>, constant_pool: &ConstantPool<'a>, class_index: u16, name_and_type_index: u16) -> Option<ClassAndField<'a>>{
-    let (clazz, field_name, field_type) = resolve_class_and_name_and_type(vm, constant_pool, class_index, name_and_type_index)?;
+fn resolve_class_and_field<'a>(ctx: &Context<'a, '_>, constant_pool: &ConstantPool<'a>, class_index: u16, name_and_type_index: u16) -> Option<ClassAndField<'a>>{
+    let (clazz, field_name, field_type) = resolve_class_and_name_and_type(ctx, constant_pool, class_index, name_and_type_index)?;
     Some(ClassAndField{
             class: clazz,
             field: clazz.find_field(&field_name).map(|(_, info)| info).unwrap()
@@ -498,8 +499,8 @@ fn resolve_class_and_field<'a>(vm: &VM<'a>, constant_pool: &ConstantPool<'a>, cl
     )
 }
 
-fn resolve_class_and_method<'a>(vm: &VM<'a>, constant_pool: &ConstantPool<'a>, class_index: u16, name_and_type_index: u16, is_interface_method: bool) -> Option<ClassAndMethod<'a>>{
-    let (clazz, method_name, method_descriptor) = resolve_class_and_name_and_type(vm, constant_pool, class_index, name_and_type_index)?;
+fn resolve_class_and_method<'a>(ctx: &Context<'a, '_>, constant_pool: &ConstantPool<'a>, class_index: u16, name_and_type_index: u16, is_interface_method: bool) -> Option<ClassAndMethod<'a>>{
+    let (clazz, method_name, method_descriptor) = resolve_class_and_name_and_type(ctx, constant_pool, class_index, name_and_type_index)?;
     Some(if is_interface_method{
         clazz.resolve_interface_method_virtual(method_name.as_str(), method_descriptor.as_str()).unwrap()
     } else {
@@ -523,23 +524,23 @@ impl Hash for ClassAndMethod<'_>{
 
 impl<'a> ClassAndMethod<'a>{
 
-    pub fn get_constant_method_ref_fast(&self, vm: &VM<'a>, index: u16) -> Option<ClassAndMethod<'a>>{
-        match self.class.get_or_resolve_constant(vm, index){
+    pub fn get_constant_method_ref_fast(&self, ctx: &Context<'a, '_>, index: u16) -> Option<ClassAndMethod<'a>>{
+        match self.class.get_or_resolve_constant(ctx, index){
             Some(ConstantPoolEntry::MethodRef(cam)) |
             Some(ConstantPoolEntry::InterfaceMethodRef(cam)) => Some(cam),
             _ => None
         }
     }
 
-    pub fn get_constant_field_ref(&self, vm: &VM<'a>, index: u16) -> Option<ClassAndField<'a>>{
-        match self.class.get_or_resolve_constant(vm, index){
+    pub fn get_constant_field_ref(&self, ctx: &Context<'a, '_>, index: u16) -> Option<ClassAndField<'a>>{
+        match self.class.get_or_resolve_constant(ctx, index){
             Some(ConstantPoolEntry::FieldRef(caf)) => Some(caf),
             _ => None
         }
     }
 
-    pub fn get_constant_class_ref(&self, vm: &VM<'a>, index: u16) -> Option<ClassRef<'a>>{
-        match self.class.get_or_resolve_constant(vm, index) {
+    pub fn get_constant_class_ref(&self, ctx: &Context<'a, '_>, index: u16) -> Option<ClassRef<'a>>{
+        match self.class.get_or_resolve_constant(ctx, index) {
             Some(ConstantPoolEntry::Class(class)) => Some(class),
             _ => None
         }
@@ -561,14 +562,14 @@ impl<'a> ClassAndMethod<'a>{
         }
     }
 
-    pub fn resolve_exception_handler(&self, vm: &VM<'a>, current_pc: &ProgramCounter, thrown_class_name: &str) -> Option<u16> {
+    pub fn resolve_exception_handler(&self, ctx: &Context<'a, '_>, current_pc: &ProgramCounter, thrown_class_name: &str) -> Option<u16> {
         if let Some(code) = &self.method.attributes.code {
             for handler in code.exception_table.iter() {
                 let can_handle = match handler.catch_type {
                     0 => true,
                     index => {
-                        let class = self.get_constant_class_ref(vm, index)?;
-                        vm.unchecked_check_if_subclass_of(class.name.as_str(), thrown_class_name).ok()?
+                        let class = self.get_constant_class_ref(ctx, index)?;
+                        ctx.vm.unchecked_check_if_subclass_of(class.name.as_str(), thrown_class_name).ok()?
                     }
                 };
                 if can_handle{

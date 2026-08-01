@@ -6,12 +6,14 @@ use crate::Value;
 use crate::VM;
 use log::{trace, warn};
 use std::cell::RefCell;
+use crate::vm::value::RefId;
 
 pub struct CallStack{
     pub frames: RefCell<Vec<CallFrame>>,
     pub operand_stacks: RefCell<Vec<Vec<Value>>>,
     pub locals_stack: RefCell<Vec<Vec<Value>>>,
     pub pcs: RefCell<Vec<ProgramCounter>>,
+    pub class_loaders: RefCell<Vec<Option<RefId>>>,
 }
 
 impl CallStack {
@@ -21,6 +23,7 @@ impl CallStack {
             operand_stacks: RefCell::new(Vec::new()),
             locals_stack: RefCell::new(Vec::new()),
             pcs: RefCell::new(Vec::new()),
+            class_loaders: RefCell::new(Vec::new())
         }
     }
 
@@ -28,6 +31,7 @@ impl CallStack {
         self.locals_stack.borrow_mut().pop();
         self.operand_stacks.borrow_mut().pop();
         self.pcs.borrow_mut().pop();
+        self.class_loaders.borrow_mut().pop();
         trace!("Popping frame for: {:?}", self.frames.borrow().last().unwrap().class_and_method);
         self.frames.borrow_mut().pop().unwrap()
     }
@@ -39,6 +43,7 @@ impl CallStack {
             self.locals_stack.borrow_mut().remove(index);
             self.operand_stacks.borrow_mut().remove(index);
             self.pcs.borrow_mut().remove(index);
+            self.class_loaders.borrow_mut().remove(index);
             self.frames.borrow_mut().remove(index)
         }
     }

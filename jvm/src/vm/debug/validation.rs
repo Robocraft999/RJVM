@@ -19,7 +19,7 @@ impl FieldTypeExt for FieldType {
                     } else {
                         let val_ref = ctx.vm.resolve_object_by_id(val_id)?;
                         let val_clazz = ctx.vm.find_class_by_id(val_ref.class_id);
-                        let target_clazz = ctx.vm.get_or_resolve_class(class_name);
+                        let target_clazz = ctx.get_or_resolve_class(class_name);
                         if let ((Some(val_clazz)), Ok(target_clazz)) = (val_clazz, &target_clazz) {
                             if target_clazz.name == JAVA_LANG_OBJECT && val_clazz.is_array() {
                                 true

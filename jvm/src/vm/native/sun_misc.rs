@@ -64,7 +64,7 @@ gen_delegate!(delegate_lookup_cache_urls, |ctx, _obj_ref, _args| {
 gen_delegate!(delegate_create_long, |ctx, _obj_ref, _args| {
     let class_name = "java/nio/DirectByteBuffer";
     let byte_buffer_ref = wrap_init!(ctx, ctx.new_object(class_name)?);
-    let constructor = ctx.vm.resolve_class_method(class_name, "<init>", "(JI)V")?;
+    let constructor = ctx.resolve_class_method(class_name, "<init>", "(JI)V")?;
     let addr = ctx.vm.unsafe_allocator.allocate_memory(8);
     let res = JavaThread::invoke_subroutine(ctx, constructor, Some(byte_buffer_ref), vec![Value::Long(addr), Value::Dummy, Value::Integer(8)])?;
     if let VMResultType::Successful(None) = res{
@@ -82,6 +82,6 @@ gen_delegate!(delegate_und_getcwd, |ctx, _obj_ref, _args| {
     let current_working_dir = env::current_dir().unwrap();
     debug!("getcwd -> '{}'", current_working_dir.display());
     let bytes = current_working_dir.into_os_string().as_encoded_bytes().iter().map(|b| Value::Integer(*b as i32)).collect::<Vec<_>>();
-    let path_ref = wrap_init!(ctx, ctx.vm.new_array(1, FieldType::Primitive(PrimitiveType::Byte).to_array_field_type(1), RwLock::new(bytes.clone()))?);
+    let path_ref = wrap_init!(ctx, ctx.new_array(1, FieldType::Primitive(PrimitiveType::Byte).to_array_field_type(1), RwLock::new(bytes.clone()))?);
     non_failing_some(Value::Reference(path_ref.id))
 });

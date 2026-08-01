@@ -5,7 +5,6 @@
 #![allow(unused_variables)]
 
 use crate::class_file::fields::field_type::{FieldType, PrimitiveType};
-use crate::native_init_wrap;
 use crate::vm::application::thread;
 use crate::vm::class::{ClassAndMethod, ClassId};
 use crate::vm::constants::THROWABLE_detailsMessage_INDEX;
@@ -20,6 +19,7 @@ use std::ffi::{c_char, c_double, c_float, c_int, c_long, c_schar, c_short, c_uch
 use std::fmt::Debug;
 use std::os::unix::ffi::OsStrExt;
 use std::{ptr, slice};
+use crate::vm::jni::{ctx, native_init_wrap};
 
 //Platform dependent
 pub type jint = c_int;
@@ -246,9 +246,9 @@ macro_rules! gen_call_static_type_methods {
 macro_rules! gen_prim_array_methods {
     ($name_new:ident, $name_get_elems:ident, $name_rel_elems:ident, $name_get_region:ident, $name_set_region:ident, $prim_type:path, $native_arr_type:ty, $native_type:ty, $typ:path, $init_val:expr, $simple_typ:ty) => {
         pub unsafe extern "system-unwind" fn $name_new(env: *mut JNIEnv, length: jsize) -> $native_arr_type {
-            let vm: &VM = unsafe{(*env).vm()};
+            let ctx = ctx!(env);
             let content = vec![$typ($init_val); length as usize];
-            let array_ref = native_init_wrap!(env, vm.new_array(
+            let array_ref = native_init_wrap!(env, ctx.new_array(
                 1,
                 FieldType::Primitive($prim_type).to_array_field_type(1),
                 RwLock::new(content.clone())
@@ -303,19 +303,19 @@ macro_rules! gen_prim_array_methods {
 }
 
 unsafe fn resolve_static_class_and_method<'a>(env: *mut JNIEnv, clazz: jclass, method_id: jmethodID) -> ClassAndMethod<'a>{
-    let vm = unsafe{(*env).vm()};
+    let ctx = ctx!(env);
 
-    let class_ref = vm.resolve_class_object_by_jclass(clazz);
+    let class_ref = ctx.resolve_class_object_by_jclass(clazz);
 
     let method_info = class_ref.get_method_in_slot(method_id).unwrap();
     ClassAndMethod{class: class_ref, method: method_info}
 }
 
 unsafe fn resolve_class_and_method<'a>(env: *mut JNIEnv, obj: jobject, method_id: jmethodID) -> ClassAndMethod<'a>{
-    let vm = unsafe{(*env).vm()};
+    let ctx = ctx!(env);
 
-    let obj_ref = vm.resolve_object_by_jobject(obj).unwrap();
-    let class_ref = vm.get_or_resolve_class(obj_ref.class_name.as_str()).unwrap();
+    let obj_ref = ctx.vm.resolve_object_by_jobject(obj).unwrap();
+    let class_ref = ctx.get_or_resolve_class(obj_ref.class_name.as_str()).unwrap();
 
     let method_info = class_ref.get_method_in_slot(method_id).unwrap();
     ClassAndMethod{class: class_ref, method: method_info}
@@ -416,13 +416,13 @@ unsafe fn resolve_function_args_a<'a>(env: *mut JNIEnv, class_and_method: &Class
         if name == ""{
             0 as jclass
         } else {
-            let vm = unsafe{(*env).vm()};
-            let class = if let Some(class) = vm.find_class_by_name(name.as_str()){
+            let ctx = ctx!(env);
+            let class = if let Some(class) = ctx.vm.find_class_by_name(name.as_str()){
                 class
             } else {
-                vm.get_or_resolve_class(name.as_str()).unwrap()
+                ctx.get_or_resolve_class(name.as_str()).unwrap()
             };
-            let class_obj = native_init_wrap!(env, vm.new_class_object_by_class(class));
+            let class_obj = native_init_wrap!(env, ctx.new_class_object_by_class(class));
             class_obj.id.nid()
         }
     }
@@ -458,7 +458,7 @@ unsafe fn resolve_function_args_a<'a>(env: *mut JNIEnv, class_and_method: &Class
         0 as jint
     }
     pub unsafe extern "system-unwind" fn ThrowNew(env: *mut JNIEnv, clazz: jclass, msg: *const c_char) -> jint{
-        let vm: &VM = unsafe{(*env).vm()};
+        let ctx = ctx!(env);
         debug!(target: "native", "NATIVE: ThrowNew");
 
         let msg = if !msg.is_null() {
@@ -467,13 +467,11 @@ unsafe fn resolve_function_args_a<'a>(env: *mut JNIEnv, class_and_method: &Class
             String::new()
         };
 
-        let ctx = Context { thread: thread(), vm };
-
-        let clazz = vm.resolve_class_object_by_jclass(clazz);
+        let clazz = ctx.resolve_class_object_by_jclass(clazz);
         native_init_wrap!(env, ctx.ensure_initialized(clazz));
-        let exception_object = ctx.vm.new_object_from_class(clazz);
+        let exception_object = ctx.new_object_from_class(clazz);
 
-        let details = ctx.vm.try_new_string_object(msg.as_str()).unwrap();
+        let details = ctx.try_new_string_object(msg.as_str()).unwrap();
         //detailsMessage
         exception_object.set_field(THROWABLE_detailsMessage_INDEX, Value::Reference(details.id));
 
@@ -546,18 +544,16 @@ unsafe fn resolve_function_args_a<'a>(env: *mut JNIEnv, class_and_method: &Class
     }
 
     fn delegateNewObject(env: *mut JNIEnv, cam: ClassAndMethod, args: Vec<Value>) -> jobject {
-        let vm = unsafe{(*env).vm()};
-
-        let ctx = Context { vm, thread: thread() };
+        let ctx = ctx!(env);
 
         let _ = native_init_wrap!(env, ctx.ensure_initialized(cam.class));
-        let obj_ref = vm.new_object_from_class(cam.class);
+        let obj_ref = ctx.new_object_from_class(cam.class);
         debug!("NewObjectV: {} ({:?})", cam.format(), args);
         let res = match JavaThread::invoke_subroutine(ctx, cam, Some(obj_ref), args) {
             Ok(result) => result,
             Err(e) => {
                 error!(target: "native", "Java error: {:?}", e);
-                vm.native_method_registry.mark_exception();
+                ctx.vm.native_method_registry.mark_exception();
                 return 0;
             }
         };
@@ -585,9 +581,9 @@ unsafe fn resolve_function_args_a<'a>(env: *mut JNIEnv, class_and_method: &Class
     }
 
     pub unsafe extern "system-unwind" fn GetObjectClass(env: *mut JNIEnv, obj: jobject) -> jclass{
-        let vm: &VM = unsafe{(*env).vm()};
-        if let Some(object) = vm.resolve_object_by_jobject(obj){
-            let class_obj = native_init_wrap!(env, vm.new_class_object(object.class_name.as_str(), object.class_id));
+        let ctx = ctx!(env);
+        if let Some(object) = ctx.vm.resolve_object_by_jobject(obj){
+            let class_obj = native_init_wrap!(env, ctx.new_class_object(object.class_name.as_str(), object.class_id));
             class_obj.id.nid() as jclass
         } else {
             0 as jclass
@@ -595,25 +591,25 @@ unsafe fn resolve_function_args_a<'a>(env: *mut JNIEnv, class_and_method: &Class
 
     }
     pub unsafe extern "system-unwind" fn IsInstanceOf(env: *mut JNIEnv, obj: jobject, clazz: jclass) -> jboolean{
-        let vm = unsafe{(*env).vm()};
+        let ctx = ctx!(env);
         if obj == 0{
             // FIXME this is opposite of what is stated here: https://docs.oracle.com/en/java/javase/23/docs/specs/jni/functions.html#isinstanceof
             // but allowing true breaks stuff
             return JNI_FALSE;
         }
-        let obj_ref = vm.resolve_object_by_jobject(obj).unwrap();
-        let obj_class = vm.find_class_by_id(obj_ref.class_id).unwrap();
-        let class_ref = vm.resolve_class_object_by_jclass(clazz);
-        let instance_of = vm.is_instance_of(obj_class, class_ref);
+        let obj_ref = ctx.vm.resolve_object_by_jobject(obj).unwrap();
+        let obj_class = ctx.vm.find_class_by_id(obj_ref.class_id).unwrap();
+        let class_ref = ctx.resolve_class_object_by_jclass(clazz);
+        let instance_of = ctx.vm.is_instance_of(obj_class, class_ref);
         if instance_of {JNI_TRUE} else {JNI_FALSE}
     }
 
     pub unsafe extern "system-unwind" fn GetMethodID(env: *mut JNIEnv, clazz: jclass, name: *const c_char, sig: *const c_char) -> jmethodID{
         let method_name = unsafe{CStr::from_ptr(name)}.to_str().map_err(|e| VmError::Native(e.to_string())).unwrap();
         let signature = unsafe{CStr::from_ptr(sig)}.to_str().map_err(|e| VmError::Native(e.to_string())).unwrap();
-        let vm = unsafe{(*env).vm()};
+        let ctx = ctx!(env);
 
-        let class_ref = vm.resolve_class_object_by_jclass(clazz);
+        let class_ref = ctx.resolve_class_object_by_jclass(clazz);
         println!("NATIVE: GetMethodID: {}::{}{}", class_ref.name, method_name, signature);
         class_ref.find_method_slot(method_name, signature).ok_or(VmError::Native(format!("GetMethodID: {}::{}{} not found", class_ref.name, method_name, signature))).unwrap()
     }
@@ -709,9 +705,9 @@ unsafe fn resolve_function_args_a<'a>(env: *mut JNIEnv, class_and_method: &Class
     pub unsafe extern "system-unwind" fn GetFieldID(env: *mut JNIEnv, clazz: jclass, name: *const c_char, sig: *const c_char) -> jfieldID{
         let field_name = unsafe{CStr::from_ptr(name)}.to_str().map_err(|e| VmError::Native(e.to_string())).unwrap();
         let signature = unsafe{CStr::from_ptr(sig)}.to_str().map_err(|e| VmError::Native(e.to_string())).unwrap();
-        let vm = unsafe{(*env).vm()};
+        let ctx = ctx!(env);
 
-        let class_ref = vm.resolve_class_object_by_jclass(clazz);
+        let class_ref = ctx.resolve_class_object_by_jclass(clazz);
         println!("NATIVE: GetFieldID: {}::{}{}", class_ref.name, field_name, signature);
         // FIXME same as GetMethodID, there is a field at index 0 which is recognized as NULL
         if let Some(index) = class_ref.find_field_slot(field_name){
@@ -719,7 +715,7 @@ unsafe fn resolve_function_args_a<'a>(env: *mut JNIEnv, class_and_method: &Class
         } else {
             let message = format!("GetMethodID: {}::{} not found", class_ref.name, field_name);
             // NoSuchFieldError
-            let prev = thread().caught_exception.replace(Some((message, "JNI_GetFieldID".to_string(), vm.null())));
+            let prev = thread().caught_exception.replace(Some((message, "JNI_GetFieldID".to_string(), ctx.vm.null())));
             0 as jfieldID
         }
     }
@@ -817,10 +813,9 @@ unsafe fn resolve_function_args_a<'a>(env: *mut JNIEnv, class_and_method: &Class
     pub unsafe extern "system-unwind" fn GetStaticMethodID(env: *mut JNIEnv, clazz: jclass, name: *const c_char, sig: *const c_char) -> jmethodID{
         let method_name = unsafe{CStr::from_ptr(name)}.to_str().map_err(|e| VmError::Native(e.to_string())).unwrap();
         let signature = unsafe{CStr::from_ptr(sig)}.to_str().map_err(|e| VmError::Native(e.to_string())).unwrap();
-        let vm = unsafe{(*env).vm()};
-        let ctx = Context { vm, thread: thread() };
+        let ctx = ctx!(env);
 
-        let class_ref = vm.resolve_class_object_by_jclass(clazz);
+        let class_ref = ctx.resolve_class_object_by_jclass(clazz);
         native_init_wrap!(env, ctx.ensure_initialized(class_ref));
         println!("NATIVE: GetStaticMethodID: {}::{}{}", class_ref.name, method_name, signature);
         class_ref.find_method_slot(method_name, signature).ok_or(VmError::Native(format!("GetStaticMethodID: {}::{}{} not found", class_ref.name, method_name, signature))).unwrap()
@@ -888,9 +883,9 @@ unsafe fn resolve_function_args_a<'a>(env: *mut JNIEnv, class_and_method: &Class
     pub unsafe extern "system-unwind" fn GetStaticFieldID(env: *mut JNIEnv, clazz: jclass, name: *mut c_char, sig: *const c_char) -> jfieldID{
         let field_name = unsafe{CStr::from_ptr(name)}.to_str().map_err(|e| VmError::Native(e.to_string())).unwrap();
         let signature = unsafe{CStr::from_ptr(sig)}.to_str().map_err(|e| VmError::Native(e.to_string())).unwrap();
-        let vm = unsafe{(*env).vm()};
+        let ctx = ctx!(env);
 
-        let clazz = vm.resolve_class_object_by_jclass(clazz);
+        let clazz = ctx.resolve_class_object_by_jclass(clazz);
         println!("NATIVE: GetStaticFieldID: {}::{}{}", clazz.name, field_name, signature);
         // FIXME same as GetMethodID, there is a field at index 0 which is recognized as NULL
         if let Some(index) = clazz.find_field_slot(field_name){
@@ -898,19 +893,18 @@ unsafe fn resolve_function_args_a<'a>(env: *mut JNIEnv, class_and_method: &Class
         } else {
             let message = format!("GetStaticFieldID: {}::{} not found", clazz.name, field_name);
             // NoSuchFieldError
-            let prev = thread().caught_exception.replace(Some((message, "JNI_GetStaticFieldID".to_string(), vm.null())));
+            let prev = thread().caught_exception.replace(Some((message, "JNI_GetStaticFieldID".to_string(), ctx.vm.null())));
             0 as jfieldID
         }
     }
 
     unsafe fn GetStaticField(env: *mut JNIEnv, clazz: jclass, fieldID: jfieldID) -> Value{
-        let vm = unsafe{(*env).vm()};
+        let ctx = ctx!(env);
 
-        let clazz = vm.resolve_class_object_by_jclass(clazz);
-        let ctx = Context { vm, thread: thread() };
+        let clazz = ctx.resolve_class_object_by_jclass(clazz);
         native_init_wrap!(env, ctx.ensure_initialized(clazz));
 
-        let class_ref = vm.get_static_class_object(clazz.id).unwrap();
+        let class_ref = ctx.vm.get_static_class_object(clazz.id).unwrap();
         // See note on GetField
         class_ref.get_field(fieldID as usize - 1)
     }
@@ -985,8 +979,8 @@ unsafe fn resolve_function_args_a<'a>(env: *mut JNIEnv, class_and_method: &Class
         let unicode_str = String::from_utf16_lossy(raw_slice);
 
         println!("NATIVE: NewString: '{}' , {:?}", unicode_str, raw_slice);
-        let vm = unsafe{(*env).vm()};
-        let str = vm.try_new_string_object(unicode_str.as_str()).map_err(|e| VmError::Native(e.to_string())).unwrap();
+        let ctx = ctx!(env);
+        let str = ctx.try_new_string_object(unicode_str.as_str()).map_err(|e| VmError::Native(e.to_string())).unwrap();
         str.id.nid()
     }
     pub unsafe extern "system-unwind" fn GetStringLength(env: *mut JNIEnv, str: jstring) -> jsize{
@@ -1014,8 +1008,8 @@ unsafe fn resolve_function_args_a<'a>(env: *mut JNIEnv, class_and_method: &Class
         }
         unsafe {
             let utf_r = CStr::from_ptr(utf).to_owned().into_string().map_err(|e| VmError::Native(e.to_string())).unwrap();
-            let vm = (*env).vm();
-            let str = vm.try_new_string_object(utf_r.as_str()).map_err(|e| VmError::Native(e.to_string())).unwrap();
+            let ctx = ctx!(env);
+            let str = ctx.try_new_string_object(utf_r.as_str()).map_err(|e| VmError::Native(e.to_string())).unwrap();
             str.id.nid()
         }
     }
@@ -1044,16 +1038,16 @@ unsafe fn resolve_function_args_a<'a>(env: *mut JNIEnv, class_and_method: &Class
     }
 
     pub unsafe extern "system-unwind" fn NewObjectArray(env: *mut JNIEnv, length: jsize, clazz: jclass, init: jobject) -> jobjectArray{
-        let vm: &VM = unsafe{(*env).vm()};
-        let clazz = vm.resolve_class_object_by_jclass(clazz);
+        let ctx = ctx!(env);
+        let clazz = ctx.resolve_class_object_by_jclass(clazz);
         let init_val = if init != 0 {
             Value::Reference(RefId(init))
         } else {
-            vm.null()
+            ctx.vm.null()
         };
 
         let content = vec![init_val; length as usize];
-        let array_ref = native_init_wrap!(env, vm.new_array(
+        let array_ref = native_init_wrap!(env, ctx.new_array(
             1,
             FieldType::Object(clazz.name.clone()).to_array_field_type(1),
             RwLock::new(content.clone())

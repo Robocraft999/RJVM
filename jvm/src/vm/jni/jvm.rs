@@ -4,7 +4,6 @@
 #![allow(private_interfaces)]
 
 use crate::class_file::fields::field_type::FieldType;
-use crate::native_init_wrap;
 use crate::vm::jni::types::*;
 use crate::vm::value::ReferenceType;
 use crate::vm::{VMResultType, VM};
@@ -16,6 +15,7 @@ use std::os::fd::{AsFd, AsRawFd, FromRawFd, IntoRawFd, OwnedFd, RawFd};
 use std::path::Path;
 use std::str::FromStr;
 use libc::size_t;
+use crate::vm::jni::{ctx, native_init_wrap};
 
 pub const JVM_INTERFACE_VERSION: jint = 4;
 
@@ -442,13 +442,13 @@ pub unsafe extern "system-unwind" fn JVM_SetPrimitiveArrayElement(env: *mut JNIE
 
 #[unsafe(no_mangle)]
 pub unsafe extern "system-unwind" fn JVM_NewArray(env: *mut JNIEnv, eltClass: jclass, length: jint) -> jobject {
-    let vm = unsafe{(*env).vm()};
-    let clazz = vm.resolve_class_object_by_jclass(eltClass);
+    let ctx = ctx!(env);
+    let clazz = ctx.resolve_class_object_by_jclass(eltClass);
     // FIXME check if we only have objects or primitives too (and if its always 1 dimensional)
     // one could use FieldType::from_str to fix, but then the prefilled values are wrong
     // maybe there is function somewhere which creates null values per fieldtype idk anymore
-    let content = vec![vm.null(); length as usize];
-    let arr = native_init_wrap!(env, vm.new_array(
+    let content = vec![ctx.vm.null(); length as usize];
+    let arr = native_init_wrap!(env, ctx.new_array(
         1,
         FieldType::Object(clazz.name.clone()).to_array_field_type(1),
         RwLock::new(content.clone())

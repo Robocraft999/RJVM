@@ -149,7 +149,7 @@ impl JavaThread {
                 }
                 let current_pc = &ctx.thread.call_stack.get_pc();
                 //[unchecked] class already loaded by method
-                if let Some(handler_pc) = class_and_method.resolve_exception_handler(ctx.vm, current_pc, thrown_class_name.as_str()){
+                if let Some(handler_pc) = class_and_method.resolve_exception_handler(&ctx, current_pc, thrown_class_name.as_str()){
                     ctx.thread.call_stack.set_pc(handler_pc);
                     ctx.thread.call_stack.clear_operand_stack();
                     ctx.thread.call_stack.push_operand_value(Value::Reference(*throwable_ref_id));
@@ -256,9 +256,9 @@ impl JavaThread {
     ///
     pub fn throw<'a, T>(ctx: Context<'a, '_>, throwable_class: ClassRef<'a>, message: String, origin: String) -> VMPartialResult<T> {
         //let exception_class = self.get_or_initialize_class(&throwable_class_name)?;
-        let exception_object = ctx.vm.new_object_from_class(throwable_class);
+        let exception_object = ctx.new_object_from_class(throwable_class);
 
-        let details = ctx.vm.try_new_string_object(message.as_str())?;
+        let details = ctx.try_new_string_object(message.as_str())?;
         //detailsMessage
         exception_object.set_field(THROWABLE_detailsMessage_INDEX, Value::Reference(details.id));
 

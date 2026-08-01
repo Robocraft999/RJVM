@@ -13,7 +13,7 @@ use crate::vm::class::{ArrayInfo, Class, ClassId, ClassRef};
 use crate::vm::class_path::ClassPath;
 use crate::vm::result::VMResult;
 use crate::vm::value::{RefId, Reference};
-use crate::vm::{bytecode, VmError, VM};
+use crate::vm::{bytecode, Context, VmError, VM};
 use log::{info, warn};
 use std::cmp::PartialEq;
 use std::collections::HashMap;
@@ -60,25 +60,25 @@ impl<'a> ClassManager<'a>{
         }
     }
 
-    pub fn get_or_resolve_class(&self, vm: &VM<'a>, class_name: &str) -> Result<ClassRef<'a>, VmError>{
+    pub fn get_or_resolve_class(&self, ctx: &Context<'a, '_>, class_name: &str) -> Result<ClassRef<'a>, VmError>{
         if let Some(loaded_class) = self.find_class_by_name(class_name){
             Ok(loaded_class)
         } else {
-            self.resolve_class(&vm, class_name)
+            self.resolve_class(ctx, class_name)
         }
     }
 
-    fn resolve_class(&self, vm: &VM<'a>, class_name: &str) -> Result<ClassRef<'a>, VmError>{
+    fn resolve_class(&self, ctx: &Context<'a, '_>, class_name: &str) -> Result<ClassRef<'a>, VmError>{
         let (class_to_load_name, array_info) = self.try_create_array_class(class_name)?;
         let bytes = self.class_path.resolve(class_to_load_name.as_str())?.ok_or(ClassParseError::ClassResolveError(class_name.to_owned()))?;
-        self.parse_and_load_class(&vm, class_name, class_to_load_name.as_str(), array_info, bytes)
+        self.parse_and_load_class(ctx, class_name, class_to_load_name.as_str(), array_info, bytes)
     }
 
-    pub fn parse_and_load_class(&self, vm: &VM<'a>, class_name: &str, class_to_load_name: &str, array_info: Option<ArrayInfo>, bytes: Vec<u8>) -> VMResult<ClassRef<'a>>{
-        let class = self.define_class(vm, Some(class_name), array_info, bytes)?;
+    pub fn parse_and_load_class(&self, ctx: &Context<'a, '_>, class_name: &str, class_to_load_name: &str, array_info: Option<ArrayInfo>, bytes: Vec<u8>) -> VMResult<ClassRef<'a>>{
+        let class = self.define_class(ctx, Some(class_name), array_info, bytes)?;
 
         if class.array_info.is_some(){
-            let _ = self.get_or_resolve_class(vm, class_to_load_name)?;
+            let _ = self.get_or_resolve_class(ctx, class_to_load_name)?;
         }
 
         // alloc + register
@@ -105,7 +105,7 @@ impl<'a> ClassManager<'a>{
         Ok(class_ref)
     }
 
-    pub fn define_class(&self, vm: &VM<'a>, class_name: Option<&str>, array_info: Option<ArrayInfo>, bytes: Vec<u8>) -> VMResult<Class<'a>>{
+    pub fn define_class(&self, ctx: &Context<'a, '_>, class_name: Option<&str>, array_info: Option<ArrayInfo>, bytes: Vec<u8>) -> VMResult<Class<'a>>{
         let parsed_class = parse_class_file(bytes.clone())?;
         let next_id = *self.next_id.read()?;
         *self.next_id.write()? += 1;
@@ -145,13 +145,14 @@ impl<'a> ClassManager<'a>{
             first_field_index: 0,
             transitive_method_count: 0,
             first_method_index: 0,
+            class_loader: None,
             attributes: ClassFileAttributes::default(),
             array_info,
         };
 
         // resolve super and interface classes
         class.superclass = if parsed_class.super_class > 0 {
-            class.get_or_resolve_constant(&vm, parsed_class.super_class)
+            class.get_or_resolve_constant(ctx, parsed_class.super_class)
                 .map(|e| if let ConstantPoolEntry::Class(clazz) = e {Some(clazz)} else {None})
                 .flatten()
         } else {
@@ -159,7 +160,7 @@ impl<'a> ClassManager<'a>{
         };
 
         class.interfaces = parsed_class.interfaces.iter()
-            .map(|i| class.get_or_resolve_constant(&vm, *i)
+            .map(|i| class.get_or_resolve_constant(ctx, *i)
                 .map(|e| if let ConstantPoolEntry::Class(clazz) = e {Some(clazz)} else {None}))
             .flatten()
             .try_collect::<Vec<ClassRef>>()
@@ -167,7 +168,7 @@ impl<'a> ClassManager<'a>{
 
         // build class attributes
         for ra in parsed_class.attributes.into_iter(){
-            if let Some(ConstantPoolEntry::Utf8(name)) = class.get_or_resolve_constant(&vm, ra.attribute_name_index){
+            if let Some(ConstantPoolEntry::Utf8(name)) = class.get_or_resolve_constant(ctx, ra.attribute_name_index){
                 class.attributes.set(name.as_str(), ra.info).unwrap();
             } else {
                 warn!("Attribute of {} ({}) could not be loaded.", class.name, ra.attribute_name_index);
@@ -181,12 +182,12 @@ impl<'a> ClassManager<'a>{
         };
         class.fields = parsed_class.fields.iter()
             .enumerate()
-            .map(|(i, raw_field)| (i, raw_field, class.get_or_resolve_constant(&vm, raw_field.name_index), class.get_or_resolve_constant(&vm, raw_field.descriptor_index)))
+            .map(|(i, raw_field)| (i, raw_field, class.get_or_resolve_constant(ctx, raw_field.name_index), class.get_or_resolve_constant(ctx, raw_field.descriptor_index)))
             .map(|optional| match optional {
                 (i, raw_field, Some(ConstantPoolEntry::Utf8(name)), Some(ConstantPoolEntry::Utf8(descriptor))) => {
                     let mut field_attributes = FieldInfoAttributes::default();
                     for ra in raw_field.attributes.iter(){
-                        if let Some(ConstantPoolEntry::Utf8(name)) = class.get_or_resolve_constant(&vm, ra.attribute_name_index){
+                        if let Some(ConstantPoolEntry::Utf8(name)) = class.get_or_resolve_constant(ctx, ra.attribute_name_index){
                             field_attributes.set(name.as_str(), ra.info.clone()).unwrap();
                         }
                     }
@@ -213,19 +214,19 @@ impl<'a> ClassManager<'a>{
         };
         class.methods = parsed_class.methods.iter()
             .enumerate()
-            .map(|(i, raw_method)| (i, raw_method, class.get_or_resolve_constant(&vm, raw_method.name_index), class.get_or_resolve_constant(&vm, raw_method.descriptor_index)))
+            .map(|(i, raw_method)| (i, raw_method, class.get_or_resolve_constant(ctx, raw_method.name_index), class.get_or_resolve_constant(ctx, raw_method.descriptor_index)))
             .map(|optional| match optional {
                 (i, raw_field, Some(ConstantPoolEntry::Utf8(name)), Some(ConstantPoolEntry::Utf8(descriptor))) => {
                     let mut method_attributes = MethodInfoAttributes::default();
                     for ra in raw_field.attributes.iter(){
-                        if let Some(ConstantPoolEntry::Utf8(name)) = class.get_or_resolve_constant(&vm, ra.attribute_name_index){
+                        if let Some(ConstantPoolEntry::Utf8(name)) = class.get_or_resolve_constant(ctx, ra.attribute_name_index){
                             method_attributes.set(name.as_str(), ra.info.clone()).unwrap();
                         }
                     }
                     if let Some(code) = &mut method_attributes.code {
                         let mut code_attributes = CodeAttributes::default();
                         for ra in code.raw_attributes.iter(){
-                            if let Some(ConstantPoolEntry::Utf8(name)) = class.get_or_resolve_constant(&vm, ra.attribute_name_index){
+                            if let Some(ConstantPoolEntry::Utf8(name)) = class.get_or_resolve_constant(ctx, ra.attribute_name_index){
                                 code_attributes.set(name.as_str(), ra.info.clone()).unwrap();
                             }
                         }
@@ -264,13 +265,13 @@ impl<'a> ClassManager<'a>{
         Ok(class)
     }
     
-    fn get_or_create_primitive_class(&self, vm: &VM<'a>, name: &str) -> VMResult<ClassId> {
+    fn get_or_create_primitive_class(&self, ctx: &Context<'a, '_>, name: &str) -> VMResult<ClassId> {
         if !self.primitive_class_ids.read()?.contains_key(name){
             let id = *self.next_id.read()?;
             *self.next_id.write()? += 1;
             self.primitive_class_ids.write()?.insert(name.to_owned(), ClassId(id));
 
-            let wrapper = self.get_or_resolve_class(&vm, primitive_to_wrapper_name(name).as_str()).unwrap();
+            let wrapper = self.get_or_resolve_class(ctx, primitive_to_wrapper_name(name).as_str()).unwrap();
 
             let class = Class{
                 id: ClassId(id),
@@ -286,6 +287,7 @@ impl<'a> ClassManager<'a>{
                 first_field_index: wrapper.first_field_index,
                 transitive_method_count: wrapper.transitive_method_count,
                 first_method_index: wrapper.first_method_index,
+                class_loader: None,
                 attributes: wrapper.attributes.clone(),
                 array_info: wrapper.array_info.clone(),
             };
@@ -308,8 +310,8 @@ impl<'a> ClassManager<'a>{
     }
     
     /// Use this carefully! The is no ClassRef for this id
-    pub fn get_primitive_class(&self, vm: &VM<'a>, name: &str) -> ClassId {
-        let Ok(id) = self.get_or_create_primitive_class(vm, name) else {
+    pub fn get_primitive_class(&self, ctx: &Context<'a, '_>, name: &str) -> ClassId {
+        let Ok(id) = self.get_or_create_primitive_class(ctx, name) else {
             unreachable!()
         };
         id

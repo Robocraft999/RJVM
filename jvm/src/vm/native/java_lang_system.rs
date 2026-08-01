@@ -46,7 +46,7 @@ gen_delegate!(delegate_identity_hash_code, |_ctx, _obj_ref, args| {
 });
 
 gen_delegate!(delegate_set_in0, |ctx, _obj_ref, args| {
-    let clazz = ctx.vm.get_or_resolve_class(JAVA_LANG_SYSTEM)?;
+    let clazz = ctx.get_or_resolve_class(JAVA_LANG_SYSTEM)?;
     if let Some(static_obj_refect) = ctx.vm.get_static_class_object(clazz.id){
         if let Some(Value::Reference(object)) = args.get(0){
             static_obj_refect.set_field(SYSTEM_in_INDEX, Value::Reference(*object));
@@ -60,7 +60,7 @@ gen_delegate!(delegate_set_in0, |ctx, _obj_ref, args| {
 });
 
 gen_delegate!(delegate_set_out0, |ctx, _obj_ref, args| {
-    let clazz = ctx.vm.get_or_resolve_class(JAVA_LANG_SYSTEM)?;
+    let clazz = ctx.get_or_resolve_class(JAVA_LANG_SYSTEM)?;
     if let Some(static_obj_refect) = ctx.vm.get_static_class_object(clazz.id){
         if let Some(Value::Reference(object)) = args.get(0){
             static_obj_refect.set_field(SYSTEM_out_INDEX, Value::Reference(*object));
@@ -74,7 +74,7 @@ gen_delegate!(delegate_set_out0, |ctx, _obj_ref, args| {
 });
 
 gen_delegate!(delegate_set_err0, |ctx, _obj_ref, args| {
-    let clazz = ctx.vm.get_or_resolve_class(JAVA_LANG_SYSTEM)?;
+    let clazz = ctx.get_or_resolve_class(JAVA_LANG_SYSTEM)?;
     if let Some(static_obj_refect) = ctx.vm.get_static_class_object(clazz.id){
         if let Some(Value::Reference(object_id)) = args.get(0){
             static_obj_refect.set_field(SYSTEM_err_INDEX, Value::Reference(*object_id));
@@ -146,12 +146,12 @@ gen_delegate!(delegate_init_properties, |ctx, _obj_ref, args| {
             ("os.name", "Windows".to_owned()),
         ];
     }
-    let properties_set_method = ctx.vm.resolve_class_method("java/util/Properties", "setProperty", "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/Object;")?;
+    let properties_set_method = ctx.resolve_class_method("java/util/Properties", "setProperty", "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/Object;")?;
     let current_frame_index = ctx.thread.call_stack.frames.borrow().len() as isize - 1;
     for (key, value) in props.into_iter(){
         //FIXME could be bad to unwrap
-        let arg1 = ctx.vm.try_new_string_object(key)?;
-        let arg2 = ctx.vm.try_new_string_object(value.as_str())?;
+        let arg1 = ctx.try_new_string_object(key)?;
+        let arg2 = ctx.try_new_string_object(value.as_str())?;
         ctx.create_and_push_call_frame(properties_set_method.clone(), Some(properties_ref), vec![Value::Reference(arg1.id), Value::Reference(arg2.id)], false)
     }
     let _res = JavaThread::invoke_frames_until(ctx, current_frame_index)?;
@@ -167,7 +167,7 @@ gen_delegate!(delegate_system_map_library_name, |ctx, _obj_ref, args| {
             "linux" => format!("lib{name}.so"),
             _ => name
         };
-        let string_ref = wrap_init!(ctx, ctx.vm.new_string_object(new_name.as_str())?);
+        let string_ref = wrap_init!(ctx, ctx.new_string_object(new_name.as_str())?);
         non_failing_some(Value::Reference(string_ref.id))
     } else {
         invalidation!("Expected Reference but found '{:?}'", args.get(0))

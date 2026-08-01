@@ -155,16 +155,16 @@ gen_delegate!(delegate_environ, |ctx, _obj_ref, _args| {
     let vars = vec![
         ("DISPLAY", ":0")
     ];
-    fn byte_array_from_str<'s>(vm: &VM<'s>, string: &str) -> VMResult<Reference<'s>>{
-        vm.try_new_array(1, FieldType::Primitive(PrimitiveType::Byte).to_array_field_type(1), RwLock::new(string.as_bytes().iter().map(|c| Value::Integer(*c as i32)).collect()))
+    fn byte_array_from_str<'s>(ctx: &Context<'s, '_>, string: &str) -> VMResult<Reference<'s>>{
+        ctx.try_new_array(1, FieldType::Primitive(PrimitiveType::Byte).to_array_field_type(1), RwLock::new(string.as_bytes().iter().map(|c| Value::Integer(*c as i32)).collect()))
     }
-    let _ = wrap_init!(ctx, ctx.vm.new_array(1, FieldType::Primitive(PrimitiveType::Byte).to_array_field_type(1), RwLock::new(Vec::new()))?);
+    let _ = wrap_init!(ctx, ctx.new_array(1, FieldType::Primitive(PrimitiveType::Byte).to_array_field_type(1), RwLock::new(Vec::new()))?);
     let values: Vec<Value> = vars.iter()
         .flat_map(|(k, v)| vec![
-            Value::Reference(byte_array_from_str(ctx.vm, k).unwrap().id),
-            Value::Reference(byte_array_from_str(ctx.vm, v).unwrap().id),
+            Value::Reference(byte_array_from_str(&ctx, k).unwrap().id),
+            Value::Reference(byte_array_from_str(&ctx, v).unwrap().id),
         ])
         .collect();
-    let array_ref = wrap_init!(ctx, ctx.vm.new_array(2, FieldType::Primitive(PrimitiveType::Byte).to_array_field_type(2), RwLock::new(values.clone()))?);
+    let array_ref = wrap_init!(ctx, ctx.new_array(2, FieldType::Primitive(PrimitiveType::Byte).to_array_field_type(2), RwLock::new(values.clone()))?);
     non_failing_some(Value::Reference(array_ref.id))
 });

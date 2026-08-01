@@ -662,7 +662,7 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                 }
 
                 Instruction::PUTSTATIC(index) => {
-                    let caf = class_and_method.get_constant_field_ref(&ctx.vm, *index).unwrap();
+                    let caf = class_and_method.get_constant_field_ref(&ctx, *index).unwrap();
                     get_or_init_option!(ctx.ensure_initialized(caf.class));
                     if ctx.vm.class_manager.expect_class_state(caf.class.id, ClassLoadingState::LOADED){
                         unimplemented!()
@@ -680,7 +680,7 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                     object.set_field(field_index, value);
                 }
                 Instruction::GETSTATIC(index) => {
-                    let caf = class_and_method.get_constant_field_ref(&ctx.vm, *index).unwrap();
+                    let caf = class_and_method.get_constant_field_ref(&ctx, *index).unwrap();
                     get_or_init_option!(ctx.ensure_initialized(caf.class));
                     if ctx.vm.class_manager.expect_class_state(caf.class.id, ClassLoadingState::LOADED){
                         unimplemented!()
@@ -696,7 +696,7 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                     ctx.thread.call_stack.push_operand_value(value);
                 }
                 Instruction::GETFIELD(index) => {
-                    let caf = class_and_method.get_constant_field_ref(&ctx.vm, *index).unwrap();
+                    let caf = class_and_method.get_constant_field_ref(&ctx, *index).unwrap();
                     debug!("GETFIELD {}.{} {}", caf.class.name, caf.field.name, caf.field.field_type.to_descriptor());
                     let (field_index, info) = caf.class.find_field(caf.field.name.as_str()).unwrap();
                     let object = ctx.thread.call_stack.pop_operand_value().unwrap();
@@ -713,7 +713,7 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                     }
                 }
                 Instruction::PUTFIELD(index) => {
-                    let caf = class_and_method.get_constant_field_ref(&ctx.vm, *index).unwrap();
+                    let caf = class_and_method.get_constant_field_ref(&ctx, *index).unwrap();
                     let (field_index, info) = caf.class.find_field(caf.field.name.as_str()).unwrap();
                     debug!("PUTFIELD {}.{} {} {} {:?}", caf.class.name, caf.field.name, caf.field.field_type.to_descriptor(), field_index, info);
                     let value = ctx.thread.call_stack.pop_operand_value().unwrap();
@@ -738,20 +738,20 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                 Instruction::INVOKEINTERFACE(index, _, _) => { return Some(execute_invoke(ctx, *index, InvokeKind::INTERFACE)) }
                 Instruction::INVOKEDYNAMIC(index, _, _) => {
                     debug!("INVOKEDYNAMIC");
-                    let Some(ConstantPoolEntry::InvokeDynamic(bm, name, typ)) = class_and_method.class.get_or_resolve_constant(ctx.vm, *index) else { unreachable!("Do Errors") };
-                    let caller_obj = Value::Reference(get_or_init_option!(ctx.vm.new_class_object_by_class(class_and_method.class)).id);
+                    let Some(ConstantPoolEntry::InvokeDynamic(bm, name, typ)) = class_and_method.class.get_or_resolve_constant(&ctx, *index) else { unreachable!("Do Errors") };
+                    let caller_obj = Value::Reference(get_or_init_option!(ctx.new_class_object_by_class(class_and_method.class)).id);
 
-                    let Some(ConstantPoolEntry::MethodHandleMethod(bm_kind, bootstrap_cam)) = class_and_method.class.get_or_resolve_constant(ctx.vm, bm.bootstrap_method_ref) else { unreachable!("Do Errors") };
+                    let Some(ConstantPoolEntry::MethodHandleMethod(bm_kind, bootstrap_cam)) = class_and_method.class.get_or_resolve_constant(&ctx, bm.bootstrap_method_ref) else { unreachable!("Do Errors") };
                     let Some(Value::Reference(bm_type_id)) = get_or_init_option!(ctx.new_method_type(&bootstrap_cam.method.descriptor)) else { unreachable!("Do errors") };
                     let bm_type_ref = wrap_error!(ctx.vm.resolve_object_by_id(bm_type_id));
                     let bootstrap_method_obj = get_or_init_option!(ctx.new_method_handle(class_and_method.class, bm_kind, bootstrap_cam, bm_type_ref)).unwrap();
 
-                    let name_obj = Value::Reference(get_or_init_option!(ctx.vm.new_string_object(name.as_str())).id);
+                    let name_obj = Value::Reference(get_or_init_option!(ctx.new_string_object(name.as_str())).id);
                     let Some(type_obj) = get_or_init_option!(ctx.new_method_type(&MethodDescriptor::new(typ))) else { unreachable!("Do Errors") };
 
                     let mut static_args = Vec::new();
                     for index in bm.bootstrap_arguments.iter() {
-                        let Some(val) = (match class_and_method.class.get_or_resolve_constant(ctx.vm, *index) {
+                        let Some(val) = (match class_and_method.class.get_or_resolve_constant(&ctx, *index) {
                             Some(ConstantPoolEntry::MethodType(desc)) => get_or_init_option!(ctx.new_method_type(&desc)),
                             Some(ConstantPoolEntry::MethodHandleMethod(arg_kind, arg_cam)) => {
                                 let Some(Value::Reference(arg_method_type_id)) = get_or_init_option!(ctx.new_method_type(&arg_cam.method.descriptor)) else {
@@ -766,13 +766,13 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                         };
                         static_args.push(val);
                     }
-                    let static_arguments = Value::Reference(get_or_init_option!(ctx.vm.new_object_array_1(static_args)).id);
+                    let static_arguments = Value::Reference(get_or_init_option!(ctx.new_object_array_1(static_args)).id);
 
-                    let appendix_ref = get_or_init_option!(ctx.vm.new_object_array_1(vec![ctx.vm.null()]));
+                    let appendix_ref = get_or_init_option!(ctx.new_object_array_1(vec![ctx.vm.null()]));
                     let appendix_result = Value::Reference(appendix_ref.id);
 
                     println!("schwubbel1");
-                    let helper = ctx.vm.resolve_class_method(
+                    let helper = ctx.resolve_class_method(
                         "java/lang/invoke/MethodHandleNatives",
                         "linkCallSite",
                         "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/invoke/MemberName;"
@@ -786,11 +786,11 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                     let typ_ref = wrap_error!(ctx.vm.resolve_object_by_id(typ_id));
 
                     let Value::Reference(class_ref_id) = mname_ref.get_field(MEMBERNAME_clazz_INDEX) else { unreachable!("Do Errors") };
-                    let clazz = wrap_error!(ctx.vm.resolve_clazz_by_class_ref_id(class_ref_id));
+                    let clazz = wrap_error!(ctx.resolve_clazz_by_class_ref_id(class_ref_id));
                     let name = ctx.vm.extract_string_from_value(mname_ref.get_field(MEMBERNAME_name_INDEX)).unwrap();
                     println!("IVD: {}", name);
 
-                    let desc = ctx.vm.extract_descriptor_from_method_type(typ_ref).unwrap();
+                    let desc = ctx.extract_descriptor_from_method_type(typ_ref).unwrap();
                     let desc = MethodDescriptor::new(desc);
 
                     let method = clazz.find_method(name.as_str(), desc.as_str()).unwrap();
@@ -808,12 +808,12 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                 }
 
                 Instruction::NEW(index) => {
-                    let clazz = class_and_method.get_constant_class_ref(ctx.vm, *index).unwrap();
+                    let clazz = class_and_method.get_constant_class_ref(&ctx, *index).unwrap();
                     get_or_init_option!(ctx.ensure_initialized(clazz));
                     if ctx.vm.class_manager.expect_class_state(clazz.id, ClassLoadingState::LOADED){
                         unimplemented!("Cannot create instance of {:?} if not initializ-ed/-ing", clazz.name);
                     }
-                    let new_object = ctx.vm.new_object_from_class(clazz);
+                    let new_object = ctx.new_object_from_class(clazz);
 
                     debug!("NEW: {} {} {:?}", index, clazz.name, &new_object.print(ctx.vm));
                     ctx.thread.call_stack.push_operand_value(Value::Reference(new_object.id));
@@ -837,7 +837,7 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                     ctx.thread.call_stack.push_operand_value(array);
                 }
                 Instruction::ANEWARRAY(index) => {
-                    let class = class_and_method.get_constant_class_ref(ctx.vm, *index).unwrap();
+                    let class = class_and_method.get_constant_class_ref(&ctx, *index).unwrap();
                     let array_field_type = FieldType::Object(class.name.clone()).to_array_field_type(1);
                     let array = get_or_init_option!(execute_create_array(ctx, array_field_type, 1));
                     
@@ -878,10 +878,10 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
 
                 Instruction::CHECKCAST(constant_index) => {
                     //TODO
-                    debug!("CHECKCAST {:?}", &class_and_method.class.get_or_resolve_constant(&ctx.vm, *constant_index));
+                    debug!("CHECKCAST {:?}", &class_and_method.class.get_or_resolve_constant(&ctx, *constant_index));
                 }
                 Instruction::INSTANCEOF(constant_index) => {
-                    let of_class = match class_and_method.class.get_or_resolve_constant(ctx.vm, *constant_index){
+                    let of_class = match class_and_method.class.get_or_resolve_constant(&ctx, *constant_index){
                         Some(ConstantPoolEntry::Class(class_ref)) => class_ref,
                         _ => return Some(Err(VmError::ValidationError("Expected a resolvable class entry".to_string()))),
                     };
@@ -896,7 +896,7 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                     let object_class = ctx.vm.find_class_by_id(object.class_id).unwrap();
                     let instance_of = ctx.vm.is_instance_of(object_class, of_class);
 
-                    debug!("INSTANCEOF {:?} = {}", &class_and_method.class.get_or_resolve_constant(&ctx.vm, *constant_index), instance_of);
+                    debug!("INSTANCEOF {:?} = {}", &class_and_method.class.get_or_resolve_constant(&ctx, *constant_index), instance_of);
 
                     ctx.thread.call_stack.push_operand_value(Value::from(instance_of));
                 }
@@ -930,7 +930,7 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                     }
                 }
                 Instruction::MULTIANEWARRAY(index, dimensions ) => {
-                    if let Some(ConstantPoolEntry::Class(clazz)) = class_and_method.class.get_or_resolve_constant(ctx.vm, *index){
+                    if let Some(ConstantPoolEntry::Class(clazz)) = class_and_method.class.get_or_resolve_constant(&ctx, *index){
                         let class_name = clazz.name.as_str();
                         let array_field_type = FieldType::from_str(class_name).unwrap();
                         let array = get_or_init_option!(execute_create_array(ctx, array_field_type, *dimensions as usize));
@@ -1187,7 +1187,7 @@ fn execute_invoke<'a>(ctx: Context<'a, '_>, index: u16, kind: InvokeKind) -> VMP
     let calling_class_and_method_id = &ctx.thread.call_stack.get_class_and_method_id_cloned();
     let calling_class_and_method = &ClassAndMethod::try_resolve(ctx.vm, calling_class_and_method_id)?;
 
-    let (cam, args_count) = get_constant_method_ref_and_args_count(calling_class_and_method, ctx.vm, index).expect("GIB MICH DIE METHODE");
+    let (cam, args_count) = get_constant_method_ref_and_args_count(calling_class_and_method, &ctx, index).expect("GIB MICH DIE METHODE");
     trace!("loading class to execute on: '{}'", cam.class.name.as_str());
     get_or_init!(ctx.ensure_initialized(cam.class)?);
     if ctx.vm.class_manager.expect_class_state(cam.class.id, ClassLoadingState::LOADED) {
@@ -1335,8 +1335,8 @@ fn get_method_interface_virtual<'a>(class: ClassRef<'a>, method_name: &str, desc
     }
 }
 
-fn get_constant_method_ref_and_args_count<'a>(calling: &ClassAndMethod<'a>, vm: &VM<'a>, index: u16) -> Option<(ClassAndMethod<'a>, usize)> {
-    match calling.class.get_or_resolve_constant(vm, index) {
+fn get_constant_method_ref_and_args_count<'a>(calling: &ClassAndMethod<'a>, ctx: &Context<'a, '_>, index: u16) -> Option<(ClassAndMethod<'a>, usize)> {
+    match calling.class.get_or_resolve_constant(ctx, index) {
         Some(ConstantPoolEntry::MethodRef(cam)) | Some(ConstantPoolEntry::InterfaceMethodRef(cam)) => {
             let args_count = cam.method.descriptor.args.len();
             Some((cam, args_count))
@@ -1352,18 +1352,18 @@ fn get_constant_method_ref_and_args_count<'a>(calling: &ClassAndMethod<'a>, vm: 
 fn get_constant_as_value<'a>(ctx: Context<'a, '_>, index: u16) -> VMPartialResult<Value>{
     let camid = &ctx.thread.call_stack.get_class_and_method_id_cloned();
     let class_and_method = ClassAndMethod::try_resolve(ctx.vm, camid)?;
-    let constant_value = class_and_method.class.get_or_resolve_constant(&ctx.vm, index).unwrap();
+    let constant_value = class_and_method.class.get_or_resolve_constant(&ctx, index).unwrap();
     let value = match constant_value {
         ConstantPoolEntry::Integer(value) => Value::Integer(value),
         ConstantPoolEntry::Long(value) => Value::Long(value),
         ConstantPoolEntry::Float(value) => Value::Float(value),
         ConstantPoolEntry::Double(value) => Value::Double(value),
         ConstantPoolEntry::String(string) => {
-            let string_object = get_or_init!(ctx.vm.new_string_object(string.as_str())?);
+            let string_object = get_or_init!(ctx.new_string_object(string.as_str())?);
             Value::Reference(string_object.id)
         }
         ConstantPoolEntry::Class(clazz) => {
-            let class_object = get_or_init!(ctx.vm.new_class_object_by_class(clazz)?);
+            let class_object = get_or_init!(ctx.new_class_object_by_class(clazz)?);
             Value::Reference(class_object.id)
         }
         _ => unimplemented!("Constant of type {constant_value:?} cannot be converted to a value")
@@ -1375,7 +1375,7 @@ fn execute_create_array<'a>(ctx: Context<'a, '_>, array_field_type: FieldType, d
     if let FieldType::Array(_, component_type) = array_field_type{
         //ensure that the array class get loaded before popping the count(s)
         for i in 0..dims{
-            let _ = ctx.vm.get_or_resolve_class(component_type.clone().to_array_field_type(i+1).to_class_name().as_str())?;
+            let _ = ctx.get_or_resolve_class(component_type.clone().to_array_field_type(i+1).to_class_name().as_str())?;
         }
         let mut content = Vec::new();
         for i in 0..dims{
@@ -1390,13 +1390,13 @@ fn execute_create_array<'a>(ctx: Context<'a, '_>, array_field_type: FieldType, d
                 continue
             }
             for _ in 0..current_dim{
-                let arr_ref = ctx.vm.try_new_array(dims, component_type.clone().to_array_field_type(i), RwLock::new(content.clone()))?;
+                let arr_ref = ctx.try_new_array(dims, component_type.clone().to_array_field_type(i), RwLock::new(content.clone()))?;
                 local_content.push(Value::Reference(arr_ref.id))
             }
             content = local_content;
         }
         //FIXME component_type.to_array_field_type(dims) is just array_field_type
-        let arr_ref = ctx.vm.try_new_array(dims, component_type.to_array_field_type(dims), RwLock::new(content))?;
+        let arr_ref = ctx.try_new_array(dims, component_type.to_array_field_type(dims), RwLock::new(content))?;
         Ok(VMResultType::Successful(Value::Reference(arr_ref.id)))
     } else {
         Err(VmError::ValidationError(format!("Field type for creating an array must be FieldType::Array but is {:?}", array_field_type)))

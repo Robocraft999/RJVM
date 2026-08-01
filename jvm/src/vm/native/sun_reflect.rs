@@ -22,7 +22,7 @@ gen_delegate!(delegate_get_caller_class, |ctx, _obj_ref, _args| {
     let frame_index = ctx.thread.call_stack.frames.borrow().len() - 2 - 1;
     if let Some(frame) = ctx.thread.call_stack.frames.borrow().get(frame_index){
         let clazz = ctx.vm.find_class_by_id(frame.class_and_method.class_id).unwrap();
-        non_failing_some(Value::Reference(wrap_init!(ctx, ctx.vm.new_class_object_by_class(clazz)?).id))
+        non_failing_some(Value::Reference(wrap_init!(ctx, ctx.new_class_object_by_class(clazz)?).id))
     } else {
         invalidation!("There is no parent Callframe")
     }
@@ -30,7 +30,7 @@ gen_delegate!(delegate_get_caller_class, |ctx, _obj_ref, _args| {
 
 gen_delegate!(delegate_get_class_access_flags, |ctx, _obj_ref, args| {
     if let Some(Value::Reference(class_ref_id)) = args.get(0){
-        let clazz = ctx.vm.resolve_clazz_by_class_ref_id(*class_ref_id)?;
+        let clazz = ctx.resolve_clazz_by_class_ref_id(*class_ref_id)?;
         let flags = clazz.flags as i32;
         non_failing_some(Value::Integer(flags))
     } else {
@@ -67,11 +67,11 @@ gen_delegate!(delegate_new_instance0, |ctx, _obj_ref, args| {
         if let (Value::Reference(class_ref_id), Value::Reference(parameter_arr_ref_id)) = (clazz, parameter_types) {
             let parameter_arr_ref = ctx.vm.resolve_object_by_id(parameter_arr_ref_id)?;
             if let ReferenceType::Array(_, _, type_content) = &parameter_arr_ref.reference_type {
-                let class = ctx.vm.resolve_clazz_by_class_ref_id(class_ref_id)?;
+                let class = ctx.resolve_clazz_by_class_ref_id(class_ref_id)?;
                 let mut descriptor = String::from("(");
                 for constructor_parameter_type in type_content.read().iter() {
                     if let Value::Reference(parameter_type_ref_id) = constructor_parameter_type {
-                        let class = ctx.vm.resolve_clazz_by_class_ref_id(*parameter_type_ref_id)?;
+                        let class = ctx.resolve_clazz_by_class_ref_id(*parameter_type_ref_id)?;
                         if !class.is_array(){
                             descriptor.push_str(&get_class_descriptor(&class.name));
                         } else {
@@ -100,7 +100,7 @@ gen_delegate!(delegate_new_instance0, |ctx, _obj_ref, args| {
                     // we have to do this manually because vm.new_object() tries to resolve and init the class
                     // the problem is that if the class is anonymous it can't be resolved and it crashes
                     wrap_init!(ctx, ctx.ensure_initialized(class)?);
-                    let object_ref = ctx.vm.new_object_from_class(class);
+                    let object_ref = ctx.new_object_from_class(class);
                     let res = JavaThread::invoke_subroutine(ctx, class_and_method, Some(object_ref), constructor_args);
                     // invoke_frames_until returns occurred exceptions as Err(VmError::JavaException(JavaError::JavaExceptionThrown))
                     // because it doesn't know whether it is a subroutine or not
@@ -137,11 +137,11 @@ gen_delegate!(delegate_invoke0, |ctx, _obj_ref, args| {
         if let (Value::Reference(class_ref_id), Value::Reference(return_type_ref_id), Value::Reference(parameter_arr_ref_id)) = (class_val, return_type_val, parameter_types) {
             let parameter_arr_ref = ctx.vm.resolve_object_by_id(parameter_arr_ref_id)?;
             if let ReferenceType::Array(_, _, type_content) = &parameter_arr_ref.reference_type {
-                let clazz = ctx.vm.resolve_clazz_by_class_ref_id(class_ref_id)?;
+                let clazz = ctx.resolve_clazz_by_class_ref_id(class_ref_id)?;
                 let mut descriptor = String::from("(");
                 for method_parameter_type_val in type_content.read().iter() {
                     if let Value::Reference(parameter_type_ref_id) = method_parameter_type_val {
-                        let class = ctx.vm.resolve_clazz_by_class_ref_id(*parameter_type_ref_id)?;
+                        let class = ctx.resolve_clazz_by_class_ref_id(*parameter_type_ref_id)?;
                         if !class.is_array(){
                             descriptor.push_str(&get_class_descriptor(&class.name));
                         } else {
@@ -151,7 +151,7 @@ gen_delegate!(delegate_invoke0, |ctx, _obj_ref, args| {
                 }
                 descriptor.push_str(")");
                 if !return_type_ref_id.is_null(){
-                    let return_type = ctx.vm.resolve_clazz_by_class_ref_id(return_type_ref_id)?;
+                    let return_type = ctx.resolve_clazz_by_class_ref_id(return_type_ref_id)?;
                     if !return_type.is_array(){
                         descriptor.push_str(&get_class_descriptor(&return_type.name));
                     } else {

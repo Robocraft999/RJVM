@@ -9,7 +9,10 @@ use crate::vm::value::{Reference, Value};
 use crate::vm::{jni, Context, VmError, VM};
 use log::{error, trace};
 use std::cell::RefCell;
+use std::env;
 use std::pin::Pin;
+use parking_lot::RwLock;
+use crate::class_file::fields::field_type::FieldType;
 
 thread_local! {
     pub static JAVA_THREAD: RefCell<JavaThread> = RefCell::new(JavaThread::new(0));
@@ -55,7 +58,7 @@ impl <'a> Application<'a> {
         for (k,v) in self.vm.class_manager.class_loading_states.read()?.iter() {
             trace!(target: "debug", "Class: {:?}, state: {:?}", self.vm.find_class_by_id(ClassId(k.0)).unwrap().name, v);
         }
-        let init = self.vm.resolve_class_method(JAVA_LANG_SYSTEM, "initializeSystemClass", "()V")?;
+        let init = self.context().resolve_class_method(JAVA_LANG_SYSTEM, "initializeSystemClass", "()V")?;
         JavaThread::invoke_subroutine(self.context(), init, None, vec![])?;
         Ok(())
     }
@@ -86,8 +89,8 @@ impl <'a> Application<'a> {
 
     pub fn run_and_catch_method(&self, class_name: &str, method_name: &str, method_descriptor: &str, args: Vec<Value>) {
         self.init_class(class_name);
-        let main_method = self.vm.resolve_class_method(class_name, method_name, method_descriptor).unwrap();
         let context = self.context();
+        let main_method = context.resolve_class_method(class_name, method_name, method_descriptor).unwrap();
         let _result = self.handle_partial(JavaThread::invoke_subroutine(context, main_method, None, args));
     }
 
@@ -102,15 +105,16 @@ impl <'a> Application<'a> {
             thread().debug_helper.print();
             panic!("Could not allocate system thread group");
         };
-        let system_init = self.vm.resolve_class_method(JAVA_LANG_THREAD_GROUP, "<init>", "()V").unwrap();
+        let ctx = self.context();
+        let system_init = ctx.resolve_class_method(JAVA_LANG_THREAD_GROUP, "<init>", "()V").unwrap();
         let _ = self.handle_partial(JavaThread::invoke_subroutine(self.context(), system_init, Some(system_group), Vec::new()));
 
         let Ok(VMResultType::Successful(main_group)) = self.context().new_object(JAVA_LANG_THREAD_GROUP) else {
             thread().debug_helper.print();
             panic!("Could not allocate system thread group");
         };
-        let name = self.vm.try_new_string_object("main").unwrap();
-        let main_init = self.vm.resolve_class_method(JAVA_LANG_THREAD_GROUP, "<init>", "(Ljava/lang/ThreadGroup;Ljava/lang/String;)V").unwrap();
+        let name = ctx.try_new_string_object("main").unwrap();
+        let main_init = ctx.resolve_class_method(JAVA_LANG_THREAD_GROUP, "<init>", "(Ljava/lang/ThreadGroup;Ljava/lang/String;)V").unwrap();
         let _ = self.handle_partial(JavaThread::invoke_subroutine(self.context(), main_init, Some(main_group), vec![Value::Reference(system_group.id), Value::Reference(name.id)]));
 
         main_group
@@ -124,8 +128,9 @@ impl <'a> Application<'a> {
         thread.set_field(THREAD_priority_INDEX, Value::Integer(NORM_PRIORITY));
         crate::vm::application::thread().thread_obj_id.replace(thread.id);
 
-        let name = self.vm.try_new_string_object("main").unwrap();
-        let init = self.vm.resolve_class_method(JAVA_LANG_THREAD, "<init>", "(Ljava/lang/ThreadGroup;Ljava/lang/String;)V").unwrap();
+        let ctx = self.context();
+        let name = ctx.try_new_string_object("main").unwrap();
+        let init = ctx.resolve_class_method(JAVA_LANG_THREAD, "<init>", "(Ljava/lang/ThreadGroup;Ljava/lang/String;)V").unwrap();
         let _ = self.handle_partial(JavaThread::invoke_subroutine(self.context(), init, Some(thread), vec![Value::Reference(thread_group.id), Value::Reference(name.id)]));
 
         thread
@@ -133,7 +138,7 @@ impl <'a> Application<'a> {
 
     fn compute_system_class_loader(&self) {
         self.init_class(JAVA_LANG_CLASSLOADER);
-        let method = self.vm.resolve_class_method(JAVA_LANG_CLASSLOADER, "getSystemClassLoader", "()Ljava/lang/ClassLoader;").unwrap();
+        let method = self.context().resolve_class_method(JAVA_LANG_CLASSLOADER, "getSystemClassLoader", "()Ljava/lang/ClassLoader;").unwrap();
         let Some(Value::Reference(scl)) = self.handle_partial(JavaThread::invoke_subroutine(self.context(), method, None, Vec::new())) else {
             thread().debug_helper.print();
             panic!("Could not create system class loader");
@@ -176,5 +181,15 @@ impl <'a> Application<'a> {
             self.vm.debug_helper.exception_helper.print();
         }*/
         println!("Init complete. Starting Main Program");
+    }
+
+    pub fn start_user_code(&self) {
+        let ctx = self.context();
+        let args = env::args().skip(1).map(|s| Value::Reference(ctx.try_new_string_object(&s).unwrap().id)).collect();
+        let args_array = ctx.try_new_array(1, FieldType::Object(JAVA_LANG_STRING.to_owned()).to_array_field_type(1), RwLock::new(args)).unwrap();
+        let p_args = vec![Value::Reference(args_array.id)];
+        //run_and_catch_method(&mut vm, "de/klassenserver7b/k7bot/Main", "main", "([Ljava/lang/String;)V", p_args);
+        //app.run_and_catch_method("Main", "main", "([Ljava/lang/String;)V", p_args);
+        self.run_and_catch_method("logicsim/App", "main", "([Ljava/lang/String;)V", p_args);
     }
 }

@@ -156,7 +156,7 @@ impl <'a> NativeMethodRegistry<'a> {
             };
             if let Some(extern_native) = optional_extern {
                 let class_object_or_this = if cam.method.is_static(){
-                    ctx.vm.try_new_class_object(cam.class).ok()?
+                    ctx.try_new_class_object(cam.class).ok()?
                 } else {
                     object.unwrap()
                 };
