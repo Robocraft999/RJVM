@@ -20,6 +20,7 @@ pub fn register_natives(registry: &mut NativeMethodRegistry) {
     register("getDeclaredFields0", "(Z)[Ljava/lang/reflect/Field;", delegate_get_declared_fields0);
     register("getDeclaredConstructors0", "(Z)[Ljava/lang/reflect/Constructor;", delegate_get_declared_constructors0);
     register("getDeclaredMethods0", "(Z)[Ljava/lang/reflect/Method;", delegate_get_declared_methods0);
+    register("getInterfaces0", "()[Ljava/lang/Class;", delegate_get_interfaces0);
     register("getModifiers", "()I", delegate_get_modifiers);
     register("getSuperclass", "()Ljava/lang/Class;", delegate_get_superclass);
     register("getEnclosingMethod0", "()[Ljava/lang/Object;", delegate_get_enclosing_method0);
@@ -213,6 +214,21 @@ gen_delegate!(delegate_get_declared_methods0, |ctx, class_ref, args| {
         non_failing_some(Value::Reference(method_arr_ref.id))
     } else {
         invalidation!("Expected Class object and boolean")
+    }
+});
+
+gen_delegate!(delegate_get_interfaces0, |ctx, class_ref, _args| {
+    if let Some(class_ref) = class_ref{
+        let clazz = ctx.extract_class_from_class_object(class_ref)?;
+        let mut interfaces = Vec::with_capacity(clazz.interfaces.len());
+        for interface_clazz in clazz.interfaces.iter() {
+            let interface_clazz_ref = wrap_init!(ctx, ctx.new_class_object_by_class(interface_clazz)?);
+            interfaces.push(Value::Reference(interface_clazz_ref.id));
+        }
+        let arr_ref = wrap_init!(ctx, ctx.new_class_array_1(interfaces.clone())?);
+        non_failing_some(Value::Reference(arr_ref.id))
+    } else {
+        invalidation!("Expected Class object")
     }
 });
 
