@@ -136,6 +136,7 @@ pub mod classes {
     pub const JAVA_LANG_OBJECT_ARR: &str = "[Ljava/lang/Object;";
     pub const JAVA_LANG_PACKAGE: &str = "java/lang/Package";
     pub const JAVA_LANG_PROCESS_ENVIRONMENT: &str = "java/lang/ProcessEnvironment";
+    pub const JAVA_LANG_REFLECT_ARRAY: &str = "java/lang/reflect/Array";
     pub const JAVA_LANG_REFLECT_CONSTRUCTOR: &str = "java/lang/reflect/Constructor";
     pub const JAVA_LANG_REFLECT_FIELD: &str = "java/lang/reflect/Field";
     pub const JAVA_LANG_REFLECT_METHOD: &str = "java/lang/reflect/Method";
