@@ -362,6 +362,10 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                     let value = wrap_error!(ctx.thread.call_stack.pop_operand_value().unwrap().expect_long());
                     ctx.thread.call_stack.push_operand_value(Value::Long(-value))
                 }
+                Instruction::FNEG => {
+                    let value = wrap_error!(ctx.thread.call_stack.pop_operand_value().unwrap().expect_float());
+                    ctx.thread.call_stack.push_operand_value(Value::Float(-value))
+                }
 
                 Instruction::ISHL => wrap_error!(execute_i_arithmetic(ctx.thread, |val1, val2| Ok(val1 << (val2 & 0x1f)))),
                 Instruction::LSHL => wrap_error!(execute_ji_arithmetic(ctx.thread, |val1, val2| Ok(val1 << (val2 & 0x3f)))),
@@ -798,7 +802,12 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
 
                     let mut args = vec![];
                     for _ in 0..cam.method.get_args_count()-1 {
-                        args.push(ctx.thread.call_stack.pop_operand_value().unwrap())
+                        let popped = ctx.thread.call_stack.pop_operand_value().unwrap();
+                        match popped {
+                            Value::Long(_) | Value::Double(_) => {args.insert(0, Value::Dummy)}
+                            _ => {}
+                        }
+                        args.insert(0, popped);
                     }
                     args.push(appendix_ref.get_element(0));
                     if let Some(res) = get_or_init_option!(JavaThread::invoke_subroutine(ctx, cam, None, args)) {
