@@ -25,7 +25,7 @@ pub struct MonitorState {
 }
 
 pub struct Monitor {
-    state: Mutex<MonitorState>,
+    monitor_state: Mutex<MonitorState>,
 }
 
 impl Monitor {
@@ -39,25 +39,25 @@ impl Monitor {
             wait_list: VecDeque::new(),
         };
         Self {
-            state: Mutex::new(state),
+            monitor_state: Mutex::new(state),
         }
     }
 }
 
 pub struct MonitorHandler {
     // TODO consider using RwLock again. because of mere holdsLock() check (enter can still lock as write)
-    state: Mutex<HashMap<MonitorAssociate, Arc<Monitor>>>,
+    handler_state: Mutex<HashMap<MonitorAssociate, Arc<Monitor>>>,
 }
 
 impl MonitorHandler {
     pub fn new() -> Self {
         Self {
-            state: Mutex::new(HashMap::new()),
+            handler_state: Mutex::new(HashMap::new()),
         }
     }
 
     fn get_monitor(&self, ctx: Context, associate: MonitorAssociate) -> Arc<Monitor> {
-        let mut state = self.state.lock();
+        let mut state = self.handler_state.lock();
 
         state
             .entry(associate)
@@ -73,7 +73,7 @@ impl MonitorHandler {
 
     fn enter_or_block(&self, ctx: Context, associate: MonitorAssociate) -> VMResult<()> {
         let monitor = self.get_monitor(ctx, associate);
-        let mut monitor_guard = monitor.state.lock();
+        let mut monitor_guard = monitor.monitor_state.lock();
 
         if let Some(owner) = &monitor_guard.owner {
             if owner == &ctx.thread.meta {
@@ -101,12 +101,12 @@ impl MonitorHandler {
 
     fn exit(&self, ctx: Context, associate: MonitorAssociate) -> VMResult<()> {
         let monitor = {
-            let state = self.state.lock();
+            let state = self.handler_state.lock();
 
             state.get(&associate).ok_or_else(|| VmError::ValidationError(format!("Monitor for {:?} does not exist", associate))).cloned()
         }?;
 
-        let mut state_guard = monitor.state.lock();
+        let mut state_guard = monitor.monitor_state.lock();
         if !matches!(&state_guard.owner, Some(meta) if meta == &ctx.thread.meta) {
             return Err(VmError::ValidationError(format!("Cannot exit monitor owned by: {:?} with {:?}", &state_guard.owner, &ctx.thread.meta)))
         }
@@ -128,9 +128,9 @@ impl MonitorHandler {
     }
 
     pub fn holds_lock(&self, ctx: Context, ref_id: RefId) -> bool {
-        let state_guard = self.state.lock();
+        let state_guard = self.handler_state.lock();
         if let Some(monitor) = state_guard.get(&MonitorAssociate::Ref(ref_id)) {
-            let state_lock = monitor.state.lock();
+            let state_lock = monitor.monitor_state.lock();
             if let Some(owner) = &state_lock.owner {
                 return owner == &ctx.thread.meta
             }
@@ -142,8 +142,10 @@ impl MonitorHandler {
         let associate = MonitorAssociate::Ref(ref_id);
         let monitor = self.get_monitor(ctx, associate);
 
-        let mut monitor_guard = monitor.state.lock();
-        monitor_guard.wait_list.push_back(ctx.thread.meta.clone());
+        {
+            let mut monitor_guard = monitor.monitor_state.lock();
+            monitor_guard.wait_list.push_back(ctx.thread.meta.clone());
+        }
         if timeout == 0 {
             ctx.thread.meta.wait(associate);
             park();
@@ -157,7 +159,7 @@ impl MonitorHandler {
     pub fn notify(&self, ctx: Context, ref_id: RefId) {
         let monitor = self.get_monitor(ctx, MonitorAssociate::Ref(ref_id));
 
-        let mut monitor_guard = monitor.state.lock();
+        let mut monitor_guard = monitor.monitor_state.lock();
         if let Some(top) = monitor_guard.wait_list.pop_front() {
             top.notified();
             top.os_thread.unpark();
@@ -167,7 +169,7 @@ impl MonitorHandler {
     pub fn notify_all(&self, ctx: Context, ref_id: RefId) {
         let monitor = self.get_monitor(ctx, MonitorAssociate::Ref(ref_id));
 
-        let mut monitor_guard = monitor.state.lock();
+        let mut monitor_guard = monitor.monitor_state.lock();
         while let Some(top) = monitor_guard.wait_list.pop_front() {
             top.notified();
             top.os_thread.unpark();

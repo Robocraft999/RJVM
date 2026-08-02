@@ -573,7 +573,7 @@ gen_delegate!(delegate_unpark, |ctx, _obj_ref, args| {
         return invalidation!("Reference with {:?} has no associated JavaThread", thread_ref_id)
     };
 
-    if *meta.state.read() == ThreadState::Parked {
+    if *meta.thread_state.read() == ThreadState::Parked {
         meta.unpark();
         meta.os_thread.unpark();
     } else {

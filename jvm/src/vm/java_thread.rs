@@ -35,7 +35,7 @@ pub struct ThreadMeta {
     pub os_thread: Thread,
 
     pub interrupted: RwLock<bool>,
-    pub state: RwLock<ThreadState>,
+    pub thread_state: RwLock<ThreadState>,
     pub unsafe_unpark_count: Mutex<usize>,
 }
 
@@ -45,37 +45,37 @@ impl ThreadMeta {
             id,
             os_thread,
             interrupted: RwLock::new(false),
-            state: RwLock::new(ThreadState::Running),
+            thread_state: RwLock::new(ThreadState::Running),
             unsafe_unpark_count: Mutex::new(0),
         }
     }
 
     pub fn block(&self) {
-        *self.state.write() = ThreadState::Blocked
+        *self.thread_state.write() = ThreadState::Blocked
     }
     pub fn unblock(&self) {
-        *self.state.write() = ThreadState::Running
+        *self.thread_state.write() = ThreadState::Running
     }
 
     pub fn sleep(&self) {
-        *self.state.write() = ThreadState::Sleeping
+        *self.thread_state.write() = ThreadState::Sleeping
     }
     pub fn woken(&self) {
-        *self.state.write() = ThreadState::Running
+        *self.thread_state.write() = ThreadState::Running
     }
 
     pub fn wait(&self, associate: MonitorAssociate) {
-        *self.state.write() = ThreadState::Waiting(associate)
+        *self.thread_state.write() = ThreadState::Waiting(associate)
     }
     pub fn notified(&self) {
-        *self.state.write() = ThreadState::Running
+        *self.thread_state.write() = ThreadState::Running
     }
 
     pub fn park(&self) {
-        *self.state.write() = ThreadState::Parked
+        *self.thread_state.write() = ThreadState::Parked
     }
     pub fn unpark(&self) {
-        *self.state.write() = ThreadState::Running
+        *self.thread_state.write() = ThreadState::Running
     }
 }
 
