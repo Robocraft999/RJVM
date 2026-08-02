@@ -1014,7 +1014,9 @@ unsafe fn resolve_function_args_a<'a>(env: *mut JNIEnv, class_and_method: &Class
         }
     }
     pub unsafe extern "system-unwind" fn GetStringUTFLength(env: *mut JNIEnv, str: jstring) -> jsize{
-        unimplemented!()
+        let vm: &VM = unsafe{(*env).vm()};
+        let string = vm.extract_string_from_value(Value::Reference(RefId(str))).unwrap();
+        string.chars().count() as jsize
     }
     pub unsafe extern "system-unwind" fn GetStringUTFChars(env: *mut JNIEnv, str: jstring, isCopy: *mut jboolean) -> *const c_char{
         let vm: &VM = unsafe{(*env).vm()};
@@ -1149,6 +1151,20 @@ unsafe fn resolve_function_args_a<'a>(env: *mut JNIEnv, class_and_method: &Class
         }
     }
 
+    fn get_native_width(ft: &FieldType) -> usize{
+        match ft{
+            FieldType::Primitive(PrimitiveType::Boolean) => size_of::<jboolean>(),
+            FieldType::Primitive(PrimitiveType::Byte) => size_of::<jbyte>(),
+            FieldType::Primitive(PrimitiveType::Char) => size_of::<jchar>(),
+            FieldType::Primitive(PrimitiveType::Short) => size_of::<jshort>(),
+            FieldType::Primitive(PrimitiveType::Integer) => size_of::<jint>(),
+            FieldType::Primitive(PrimitiveType::Long) => size_of::<jlong>(),
+            FieldType::Primitive(PrimitiveType::Float) => size_of::<jfloat>(),
+            FieldType::Primitive(PrimitiveType::Double) => size_of::<jdouble>(),
+            _ => unreachable!()
+        }
+    }
+
     pub unsafe extern "system-unwind" fn GetPrimitiveArrayCritical(env: *mut JNIEnv, array: jarray, isCopy: *mut jboolean) -> *const u8 {
         let vm: &VM = unsafe{(*env).vm()};
         let array_ref = vm.resolve_object_by_jobject(array).unwrap();
@@ -1160,21 +1176,21 @@ unsafe fn resolve_function_args_a<'a>(env: *mut JNIEnv, class_and_method: &Class
         }
 
         if let ReferenceType::Array(_, ft, content) = &array_ref.reference_type {
-            let width = ft.get_locals_length() * 4;
-            let allocation_size = width * array_ref.get_length();
-            let ptr = vm.unsafe_allocator.allocate_memory(allocation_size);
-
             let bytes: Vec<u8> = content.read()
                 .iter()
-                .enumerate()
-                .flat_map(|(i, val)| match val {
-                    Value::Integer(val) => val.to_le_bytes().to_vec(),
-                    Value::Long(val) => val.to_le_bytes().to_vec(),
-                    Value::Float(val) => val.to_le_bytes().to_vec(),
-                    Value::Double(val) => val.to_le_bytes().to_vec(),
+                .flat_map(|val| match (ft, val) {
+                    (FieldType::Primitive(PrimitiveType::Boolean), Value::Integer(val)) => (*val as jboolean).to_le_bytes().to_vec(),
+                    (FieldType::Primitive(PrimitiveType::Byte), Value::Integer(val)) => (*val as jbyte).to_le_bytes().to_vec(),
+                    (FieldType::Primitive(PrimitiveType::Char), Value::Integer(val)) => (*val as jchar).to_le_bytes().to_vec(),
+                    (FieldType::Primitive(PrimitiveType::Short), Value::Integer(val)) => (*val as jshort).to_le_bytes().to_vec(),
+                    (FieldType::Primitive(PrimitiveType::Integer), Value::Integer(val)) => (*val as jint).to_le_bytes().to_vec(),
+                    (FieldType::Primitive(PrimitiveType::Long), Value::Long(val)) => (*val as jlong).to_le_bytes().to_vec(),
+                    (FieldType::Primitive(PrimitiveType::Float), Value::Float(val)) => (*val as jfloat).to_le_bytes().to_vec(),
+                    (FieldType::Primitive(PrimitiveType::Double), Value::Double(val)) => (*val as jdouble).to_le_bytes().to_vec(),
                     _ => unreachable!()
                 })
                 .collect();
+            let ptr = vm.unsafe_allocator.allocate_memory(bytes.len());
             vm.unsafe_allocator.put_bytes(ptr, &bytes).unwrap();
 
             ptr as *const u8
@@ -1188,19 +1204,19 @@ unsafe fn resolve_function_args_a<'a>(env: *mut JNIEnv, class_and_method: &Class
         let array_ref = vm.resolve_object_by_jobject(array).unwrap();
 
         if let ReferenceType::Array(_, ft, content) = &array_ref.reference_type {
-            let width = ft.get_locals_length() * 4;
+            let width = Self::get_native_width(ft);
             let allocation_size = width * array_ref.get_length();
 
             let bytes = vm.unsafe_allocator.get_bytes(carray as i64, allocation_size).unwrap();
             let vals= bytes.chunks(width).map(|bytes| match ft {
-                FieldType::Primitive(PrimitiveType::Boolean) => Value::Integer(i32::from_le_bytes(bytes.try_into().unwrap())),
-                FieldType::Primitive(PrimitiveType::Byte) => Value::Integer(i32::from_le_bytes(bytes.try_into().unwrap())),
-                FieldType::Primitive(PrimitiveType::Char) => Value::Integer(i32::from_le_bytes(bytes.try_into().unwrap())),
-                FieldType::Primitive(PrimitiveType::Short) => Value::Integer(i32::from_le_bytes(bytes.try_into().unwrap())),
-                FieldType::Primitive(PrimitiveType::Integer) => Value::Integer(i32::from_le_bytes(bytes.try_into().unwrap())),
-                FieldType::Primitive(PrimitiveType::Long) => Value::Long(i64::from_le_bytes(bytes.try_into().unwrap())),
-                FieldType::Primitive(PrimitiveType::Float) => Value::Float(f32::from_le_bytes(bytes.try_into().unwrap())),
-                FieldType::Primitive(PrimitiveType::Double) => Value::Double(f64::from_le_bytes(bytes.try_into().unwrap())),
+                FieldType::Primitive(PrimitiveType::Boolean) => Value::Integer(jboolean::from_le_bytes(bytes.try_into().unwrap()) as i32),
+                FieldType::Primitive(PrimitiveType::Byte) => Value::Integer(jbyte::from_le_bytes(bytes.try_into().unwrap()) as i32),
+                FieldType::Primitive(PrimitiveType::Char) => Value::Integer(jchar::from_le_bytes(bytes.try_into().unwrap()) as i32),
+                FieldType::Primitive(PrimitiveType::Short) => Value::Integer(jshort::from_le_bytes(bytes.try_into().unwrap()) as i32),
+                FieldType::Primitive(PrimitiveType::Integer) => Value::Integer(jint::from_le_bytes(bytes.try_into().unwrap())),
+                FieldType::Primitive(PrimitiveType::Long) => Value::Long(jlong::from_le_bytes(bytes.try_into().unwrap())),
+                FieldType::Primitive(PrimitiveType::Float) => Value::Float(jfloat::from_le_bytes(bytes.try_into().unwrap())),
+                FieldType::Primitive(PrimitiveType::Double) => Value::Double(jdouble::from_le_bytes(bytes.try_into().unwrap())),
                 _ => unreachable!()
             }).collect::<Vec<_>>();
 

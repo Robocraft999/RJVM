@@ -2,7 +2,7 @@ use crate::vm::constants::classes::JAVA_LANG_CLASSLOADER;
 use crate::vm::constants::{CLASSLOADER_NATIVELIBRARY_handle_INDEX, CLASSLOADER_NATIVELIBRARY_loaded_INDEX, CLASSLOADER_NATIVELIBRARY_name_INDEX};
 use crate::vm::native::{gen_delegate, invalidation, non_failing_none, non_failing_some, wrap_init, NativeMethodRegistry};
 use crate::vm::result::VMPartialResult;
-use crate::vm::value::{Reference, Value};
+use crate::vm::value::{Reference, ReferenceType, Value};
 use crate::vm::VmError;
 use libloading::{Library, Symbol};
 use log::debug;
@@ -12,6 +12,9 @@ pub fn register_natives(registry: &mut NativeMethodRegistry) {
     register("findLoadedClass0", "(Ljava/lang/String;)Ljava/lang/Class;", delegate_find_loaded_class0);
     register("findBootstrapClass", "(Ljava/lang/String;)Ljava/lang/Class;", delegate_find_bootstrap_class);
     register("findBuiltinLib", "(Ljava/lang/String;)Ljava/lang/String;", delegate_find_builtin_lib);
+    register("defineClass0", "(Ljava/lang/String;[BIILjava/security/ProtectionDomain;)Ljava/lang/Class;", delegate_define_class0);
+    register("defineClass1", "(Ljava/lang/String;[BIILjava/security/ProtectionDomain;Ljava/lang/String;)Ljava/lang/Class;", delegate_define_class1);
+    register("defineClass2", "(Ljava/lang/String;Ljava/nio/ByteBuffer;IILjava/security/ProtectionDomain;Ljava/lang/String;)Ljava/lang/Class;", delegate_define_class2);
     registry.register("java/lang/ClassLoader$NativeLibrary", "load", "(Ljava/lang/String;Z)V", delegate_native_lib_load);
 }
 
@@ -36,10 +39,13 @@ gen_delegate!(delegate_find_bootstrap_class, |ctx, _obj_ref, args| {
         let class_name = ctx.vm.extract_string_from_value(*str_object)?;
         let class_name = class_name.replace(".", "/");
 
-        match ctx.get_or_resolve_class(class_name.as_str()) {
+        ctx.thread.call_stack.class_loaders.borrow_mut().push(None);
+        let res = match ctx.get_or_resolve_class(class_name.as_str()) {
             Ok(clazz) => non_failing_some(Value::Reference(wrap_init!(ctx, ctx.new_class_object_by_class(clazz)?).id)),
             Err(_) => non_failing_some(ctx.vm.null())
-        }
+        };
+        ctx.thread.call_stack.class_loaders.borrow_mut().pop();
+        res
     } else {
         invalidation!("expected a string reference")
     }
@@ -84,4 +90,34 @@ gen_delegate!(delegate_native_lib_load, |ctx, obj_ref, _args| {
     } else {
         invalidation!("this is null")
     }
+});
+
+gen_delegate!(delegate_define_class0, |ctx, obj_ref, args| {
+    unimplemented!()
+});
+
+gen_delegate!(delegate_define_class1, |ctx, obj_ref, args| {
+    if let (Some(loader_ref), Some(name_val), Some(Value::Reference(b_arr_ref_id)), Some(Value::Integer(off)), Some(Value::Integer(len)), Some(source_val)) = (obj_ref, args.get(0), args.get(1), args.get(2), args.get(3), args.get(5)) {
+        let name = ctx.vm.extract_string_from_value(*name_val)?;
+        let name = name.replace(".", "/");
+        // seems to be nullable
+        // let source = ctx.vm.extract_string_from_value(*source_val)?;
+        let b_arr_ref = ctx.vm.resolve_object_by_id(*b_arr_ref_id)?;
+        let bytes = if let ReferenceType::Array(_, _, data) = &b_arr_ref.reference_type{
+            data.read().iter().map(|val| if let Value::Integer(byte) = val {*byte as u8} else {0}).collect()
+        } else {
+            Vec::new()
+        };
+        let bytes = bytes.into_iter().skip(*off as usize).take((*len) as usize).collect::<Vec<_>>();
+        ctx.thread.call_stack.class_loaders.borrow_mut().push(Some(loader_ref.id));
+        let class_object = wrap_init!(ctx, ctx.define_class(name.as_str(), bytes.clone())?);
+        ctx.thread.call_stack.class_loaders.borrow_mut().pop();
+        non_failing_some(Value::Reference(class_object.id))
+    } else {
+        invalidation!("Expected Classloader(this), String, byte arr, int, int, _, String")
+    }
+});
+
+gen_delegate!(delegate_define_class2, |ctx, obj_ref, args| {
+    unimplemented!()
 });

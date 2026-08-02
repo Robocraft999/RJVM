@@ -539,6 +539,7 @@ impl<'a> ClassAndMethod<'a>{
         }
     }
 
+    // FIXME Do error delegation if class load fails
     pub fn get_constant_class_ref(&self, ctx: &Context<'a, '_>, index: u16) -> Option<ClassRef<'a>>{
         match self.class.get_or_resolve_constant(ctx, index) {
             Some(ConstantPoolEntry::Class(class)) => Some(class),

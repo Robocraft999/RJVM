@@ -642,7 +642,7 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                             ctx.thread.debug_helper.tracker.push_object_event(this, format!("Function {} returned:\n    {}", class_and_method.format(), value.print(ctx.vm)))
                         }
                     }
-                    ctx.thread.debug_helper.tracker.push_method_event(class_and_method.format(), format!("returning: {:?}", value.print(ctx.vm)));
+                    ctx.thread.debug_helper.tracker.push_method_event(class_and_method.format(), format!("returning: {} at {}", value.print(ctx.vm), ctx.thread.call_stack.get_pc().0));
                     if !class_and_method.method.descriptor.return_type.clone().map(|rt| rt == value).unwrap_or(false) {
                         unreachable!("Trying to return {:?} but expecting: {:?}", value, class_and_method.method.descriptor.return_type)
                     }

@@ -11,8 +11,8 @@ use crate::error::ClassParseError;
 use crate::vm::application::thread;
 use crate::vm::class::{ArrayInfo, Class, ClassId, ClassRef};
 use crate::vm::class_path::ClassPath;
-use crate::vm::result::VMResult;
-use crate::vm::value::{RefId, Reference};
+use crate::vm::result::{VMResult, VMResultType};
+use crate::vm::value::{RefId, Reference, Value};
 use crate::vm::{bytecode, Context, VmError, VM};
 use log::{info, warn};
 use std::cmp::PartialEq;
@@ -20,6 +20,7 @@ use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::{Mutex, RwLock};
 use typed_arena::Arena;
+use crate::vm::java_thread::JavaThread;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ClassLoadingState{
@@ -64,7 +65,17 @@ impl<'a> ClassManager<'a>{
         if let Some(loaded_class) = self.find_class_by_name(class_name){
             Ok(loaded_class)
         } else {
-            self.resolve_class(ctx, class_name)
+            if let Some(class_loader_id) = ctx.thread.call_stack.get_context_class_loader() {
+                let class_loader_ref = ctx.vm.resolve_object_by_id(class_loader_id)?;
+                let class_loader_clazz = ctx.vm.find_class_by_id(class_loader_ref.class_id).unwrap();
+                let load_method = class_loader_clazz.resolve_method_virtual("loadClass", "(Ljava/lang/String;)Ljava/lang/Class;").unwrap();
+                let name_ref = ctx.try_new_string_object(class_name.replace("/", ".").as_str())?;
+                let VMResultType::Successful(Some(Value::Reference(class_ref_id))) = JavaThread::invoke_subroutine(*ctx, load_method, Some(class_loader_ref), vec![Value::Reference(name_ref.id)])? else { return Err(VmError::ValidationError("Class loader did not load the class".to_owned())); };
+                let res = ctx.resolve_clazz_by_class_ref_id(class_ref_id).unwrap();
+                Ok(res)
+            } else {
+                self.resolve_class(ctx, class_name)
+            }
         }
     }
 

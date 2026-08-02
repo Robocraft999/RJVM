@@ -126,12 +126,15 @@ pub mod classes {
     pub const JAVA_LANG_CLASSLOADER: &str = "java/lang/ClassLoader";
     pub const JAVA_LANG_DOUBLE: &str = "java/lang/Double";
     pub const JAVA_LANG_FLOAT: &str = "java/lang/Float";
+    pub const JAVA_LANG_ILLEGAL_ARGUMENT_EXCEPTION: &str = "java/lang/IllegalArgumentException";
     pub const JAVA_LANG_INVOKE_METHOD_HANDLE: &str = "java/lang/invoke/MethodHandle";
     pub const JAVA_LANG_INVOKE_MHN: &str = "java/lang/invoke/MethodHandleNatives";
     pub const JAVA_LANG_INVOKE_METHOD_TYPE: &str = "java/lang/invoke/MethodType";
     pub const JAVA_LANG_LONG: &str = "java/lang/Long";
+    pub const JAVA_LANG_NULL_POINTER_EXCEPTION: &str = "java/lang/NullPointerException";
     pub const JAVA_LANG_OBJECT: &str = "java/lang/Object";
     pub const JAVA_LANG_OBJECT_ARR: &str = "[Ljava/lang/Object;";
+    pub const JAVA_LANG_PACKAGE: &str = "java/lang/Package";
     pub const JAVA_LANG_PROCESS_ENVIRONMENT: &str = "java/lang/ProcessEnvironment";
     pub const JAVA_LANG_REFLECT_CONSTRUCTOR: &str = "java/lang/reflect/Constructor";
     pub const JAVA_LANG_REFLECT_FIELD: &str = "java/lang/reflect/Field";

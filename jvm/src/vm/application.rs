@@ -1,6 +1,6 @@
 use crate::vm::class::ClassId;
 use crate::vm::class_path::ClassPath;
-use crate::vm::constants::classes::{JAVA_LANG_CLASS, JAVA_LANG_CLASSLOADER, JAVA_LANG_INVOKE_METHOD_HANDLE, JAVA_LANG_INVOKE_METHOD_TYPE, JAVA_LANG_INVOKE_MHN, JAVA_LANG_REFLECT_METHOD, JAVA_LANG_STRING, JAVA_LANG_SYSTEM, JAVA_LANG_THREAD, JAVA_LANG_THREAD_GROUP};
+use crate::vm::constants::classes::{JAVA_LANG_CLASS, JAVA_LANG_CLASSLOADER, JAVA_LANG_ILLEGAL_ARGUMENT_EXCEPTION, JAVA_LANG_INVOKE_METHOD_HANDLE, JAVA_LANG_INVOKE_METHOD_TYPE, JAVA_LANG_INVOKE_MHN, JAVA_LANG_NULL_POINTER_EXCEPTION, JAVA_LANG_REFLECT_METHOD, JAVA_LANG_STRING, JAVA_LANG_SYSTEM, JAVA_LANG_THREAD, JAVA_LANG_THREAD_GROUP};
 use crate::vm::constants::{THREAD_eetop_INDEX, THREAD_priority_INDEX, THREAD_threadStatus_INDEX};
 use crate::vm::java_thread::{JavaThread, NORM_PRIORITY, RUNNABLE};
 use crate::vm::jni::types::{JNIEnv, JavaVM};
@@ -166,6 +166,8 @@ impl <'a> Application<'a> {
             }
         }
         self.compute_system_class_loader();
+        self.init_class(JAVA_LANG_NULL_POINTER_EXCEPTION);
+        self.init_class(JAVA_LANG_ILLEGAL_ARGUMENT_EXCEPTION);
 
         self.init_class(JAVA_LANG_INVOKE_METHOD_TYPE);
         self.init_class(JAVA_LANG_INVOKE_METHOD_HANDLE);

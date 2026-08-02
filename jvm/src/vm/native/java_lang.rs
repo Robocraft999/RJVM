@@ -1,7 +1,7 @@
 use crate::class_file::fields::field_type::{FieldType, PrimitiveType};
 use crate::vm::application::{thread, JAVA_THREAD};
 use crate::vm::class::ClassAndMethod;
-use crate::vm::constants::classes::{JAVA_LANG_PROCESS_ENVIRONMENT, JAVA_LANG_RUNTIME, JAVA_LANG_STRING, JAVA_LANG_THREAD, JAVA_LANG_THROWABLE};
+use crate::vm::constants::classes::{JAVA_LANG_PACKAGE, JAVA_LANG_PROCESS_ENVIRONMENT, JAVA_LANG_RUNTIME, JAVA_LANG_STRING, JAVA_LANG_THREAD, JAVA_LANG_THROWABLE};
 use crate::vm::constants::{THREADGROUP_maxPriority_INDEX, THREADGROUP_nUnstartedThreads_INDEX, THREADGROUP_name_INDEX, THREADGROUP_parent_INDEX, THREAD_group_INDEX, THREAD_name_INDEX, THREAD_priority_INDEX, THREAD_target_INDEX};
 use crate::vm::java_thread::JavaThread;
 use crate::vm::jni::types::{JNIEnv, JavaVM};
@@ -26,6 +26,7 @@ pub fn register_natives(registry: &mut NativeMethodRegistry) {
     registry.register(JAVA_LANG_RUNTIME, "availableProcessors", "()I", delegate_available_processors);
     registry.register(JAVA_LANG_RUNTIME, "freeMemory", "()J", delegate_free_memory);
     registry.register(JAVA_LANG_PROCESS_ENVIRONMENT, "environ", "()[[B", delegate_environ);
+    registry.register(JAVA_LANG_PACKAGE, "getSystemPackage0", "(Ljava/lang/String;)Ljava/lang/String;", delegate_get_system_package0)
 }
 
 gen_delegate!(delegate_fill_in_stacktrace, |_ctx, obj_ref, _args| {
@@ -167,4 +168,15 @@ gen_delegate!(delegate_environ, |ctx, _obj_ref, _args| {
         .collect();
     let array_ref = wrap_init!(ctx, ctx.new_array(2, FieldType::Primitive(PrimitiveType::Byte).to_array_field_type(2), RwLock::new(values.clone()))?);
     non_failing_some(Value::Reference(array_ref.id))
+});
+
+// return the path to the defining system jar like rt.jar or null if not system package
+gen_delegate!(delegate_get_system_package0, |ctx, _obj_ref, args| {
+    if let Some(name_val) = args.get(0) {
+        let name = ctx.vm.extract_string_from_value(*name_val)?;
+        let (prefix, _) = name.rsplit_once("/").unwrap();
+        non_failing_some(ctx.vm.null())
+    } else {
+        invalidation!("Expected a string argument")
+    }
 });

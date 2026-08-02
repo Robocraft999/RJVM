@@ -329,7 +329,8 @@ gen_delegate!(delegate_for_name0, |ctx, _class_object, args| {
         let Some(Value::Reference(class_loader_ref_id)) = args.get(2) else { return invalidation!("expected a classloader ref or null"); };
         let name = ctx.vm.extract_string_from_value(*name)?;
         let name = name.replace(".", "/");
-        ctx.thread.call_stack.class_loaders.borrow_mut().push(Some(*class_loader_ref_id));
+        let loader = if class_loader_ref_id.is_null() { None } else { Some(*class_loader_ref_id) };
+        ctx.thread.call_stack.class_loaders.borrow_mut().push(loader);
         let res = match ctx.get_or_resolve_class(&name){
             Ok(..) => {
                 non_failing_some(Value::Reference(wrap_init!(ctx, ctx.new_class_object_by_name(&name)?).id))

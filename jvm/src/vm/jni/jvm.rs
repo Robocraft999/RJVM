@@ -968,22 +968,18 @@ pub unsafe extern "system-unwind" fn JVM_NativePath(path: *const c_char) -> *con
 
 #[unsafe(no_mangle)]
 pub unsafe extern "system-unwind" fn JVM_Open(fname: *const c_char, flags: jint, mode: jint) -> jint {
-    let file_name = unsafe{CStr::from_ptr(fname)};
-    let file_name = file_name.to_string_lossy();
-    let path = Path::new(file_name.as_ref());
-    if let Ok(file) = OpenOptions::new().read(true).open(path){
-        let fd = file.into_raw_fd() as jint;
-        fd
+    let result = unsafe { libc::open(fname, flags, mode) };
+    if result >= 0 {
+        result as jint
     } else {
-        unimplemented!("NATIVE: JVM_Open: {}", file_name);
+        -1
     }
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "system-unwind" fn JVM_Close(fd: jint) -> jint {
-    let fd = unsafe{OwnedFd::from_raw_fd(RawFd::from_raw_fd(fd))};
-    drop(fd);
-    0 as jint //success
+    let res = unsafe { libc::close(fd) };
+    res as jint //success
 }
 
 #[unsafe(no_mangle)]

@@ -125,13 +125,15 @@ gen_delegate!(delegate_init_properties, |ctx, _obj_ref, args| {
         ("java.home", format!("{}/jre/", env!("JAVA_HOME"))),
         ("sun.boot.library.path", format!("{}/jre/lib/amd64/", env!("JAVA_HOME"))),
         ("sun.boot.class.path", "resources/rt.jar:resources/resources.jar".to_owned()),
+        ("java.class.path", "resources/LogicSim.jar".to_owned()),
         ("sun.arch.data.model", "64".to_owned()),
         ("user.dir", env::current_dir().unwrap().to_string_lossy().to_string()),
         ("user.home", env::home_dir().unwrap().to_string_lossy().to_string()),
         ("os.name", "Linux".to_owned()),
         ("os.arch", "x86_64".to_owned()),
         ("java.awt.graphicsenv", "sun.awt.X11GraphicsEnvironment".to_owned()),
-        ("awt.toolkit", "sun.awt.X11.XToolkit".to_owned())
+        ("awt.toolkit", "sun.awt.X11.XToolkit".to_owned()),
+        ("sun.jnu.encoding", "UTF-8".to_owned()),
     ];
     if env::consts::OS == "windows"{
         props = vec![
