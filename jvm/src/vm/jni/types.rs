@@ -1239,7 +1239,16 @@ unsafe fn resolve_function_args_a<'a>(env: *mut JNIEnv, class_and_method: &Class
     }
 
     pub unsafe extern "system-unwind" fn NewDirectByteBuffer(env: *mut JNIEnv, address: *const c_void, capacity: jlong) -> jobject{
-        unimplemented!()
+        let ctx = ctx!(env);
+        let class_name = "java/nio/DirectByteBuffer";
+        let byte_buffer_ref = native_init_wrap!(env, ctx.new_object(class_name));
+        let constructor = ctx.resolve_class_method(class_name, "<init>", "(JI)V").unwrap();
+        let res = JavaThread::invoke_subroutine(ctx, constructor, Some(byte_buffer_ref), vec![Value::Long(address as i64), Value::Dummy, Value::Integer(capacity as i32)]).unwrap();
+        if let VMResultType::Successful(None) = res{
+            byte_buffer_ref.id.nid()
+        } else {
+            unreachable!("Error when calling constructor")
+        }
     }
 
     pub unsafe extern "system-unwind" fn GetDirectBufferAddress(env: *mut JNIEnv, buf: jobject) -> *const c_void {
