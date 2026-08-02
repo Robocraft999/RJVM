@@ -162,13 +162,17 @@ gen_delegate!(delegate_invoke0, |ctx, _obj_ref, args| {
                 if let Some(method) = clazz.find_method(method_name.as_str(), descriptor.as_str()) {
                     debug!("method: {:?}", method);
                     let class_and_method = ClassAndMethod {class: clazz, method};
-                    let args_arr_ref = ctx.vm.resolve_object_by_id(*args_arr_ref_id)?;
-                    let method_args = if let ReferenceType::Array(_, _, args_content) = &args_arr_ref.reference_type {
-                        let mut args = Vec::new();
-                        for (i, provided_arg) in args_content.read().iter().filter(|a| !matches!(a, Value::Dummy)).enumerate(){
-                            args.extend(unbox_param_if_needed(ctx, &class_and_method.method.descriptor.args[i], provided_arg.clone())?);
+                    let method_args = if !args_arr_ref_id.is_null() {
+                        let args_arr_ref = ctx.vm.resolve_object_by_id(*args_arr_ref_id)?;
+                        if let ReferenceType::Array(_, _, args_content) = &args_arr_ref.reference_type {
+                            let mut args = Vec::new();
+                            for (i, provided_arg) in args_content.read().iter().filter(|a| !matches!(a, Value::Dummy)).enumerate(){
+                                args.extend(unbox_param_if_needed(ctx, &class_and_method.method.descriptor.args[i], provided_arg.clone())?);
+                            }
+                            args
+                        } else {
+                            Vec::new()
                         }
-                        args
                     } else {
                         Vec::new()
                     };
