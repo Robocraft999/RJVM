@@ -328,7 +328,7 @@ unsafe fn resolve_function_args_v<'a>(env: *mut JNIEnv, class_and_method: &Class
             let ref_id: u32 = unsafe{raw.next_arg()};
             {
                 let reference = Value::Reference(RefId(ref_id));
-                println!("NATIVE: arg for {}: {:?}", class_and_method.format(), reference.print(vm));
+                debug!(target: "native", "arg for {}: {:?}", class_and_method.format(), reference.print(vm));
                 vec![reference]
             }
         }
@@ -360,7 +360,7 @@ unsafe fn resolve_function_args_a<'a>(env: *mut JNIEnv, class_and_method: &Class
             let ref_id: u32 = unsafe{args.add(i).read().l};
             {
                 let reference = Value::Reference(RefId(ref_id));
-                println!("NATIVE: arg for {}: {:?}", class_and_method.format(), reference.print(vm));
+                debug!(target: "native", "arg for {}: {:?}", class_and_method.format(), reference.print(vm));
                 vec![reference]
             }
         }
@@ -517,7 +517,7 @@ unsafe fn resolve_function_args_a<'a>(env: *mut JNIEnv, class_and_method: &Class
 
     pub fn NewGlobalRef(env: *mut JNIEnv, lobj: jobject) -> jobject{
         let vm = unsafe{(*env).vm()};
-        debug!("NATIVE: NewGlobalRef: {:?}", vm.resolve_object_by_jobject(lobj));
+        debug!(target: "native", "NATIVE: NewGlobalRef: {:?}", vm.resolve_object_by_jobject(lobj));
         //FIXME currently the object exits forever so this is fine
         lobj
     }
@@ -525,7 +525,7 @@ unsafe fn resolve_function_args_a<'a>(env: *mut JNIEnv, class_and_method: &Class
         unimplemented!()
     }
     pub fn DeleteLocalRef(env: *mut JNIEnv, obj: jobject){
-        debug!("NATIVE: DeleteLocalRef: {}", obj);
+        debug!(target: "native", "NATIVE: DeleteLocalRef: {}", obj);
     }
     pub fn IsSameObject(env: *mut JNIEnv, obj1: jobject, obj2: jobject) -> jboolean{
         unimplemented!()
@@ -534,7 +534,7 @@ unsafe fn resolve_function_args_a<'a>(env: *mut JNIEnv, class_and_method: &Class
         unimplemented!()
     }
     pub fn EnsureLocalCapacity(env: *mut JNIEnv, capacity: jint) -> jint{
-        debug!("NATIVE: EnsureLocalCapacity: amount:{}", capacity);
+        debug!(target: "native", "NATIVE: EnsureLocalCapacity: amount:{}", capacity);
         //TODO
         JNI_OK
     }
@@ -610,7 +610,7 @@ unsafe fn resolve_function_args_a<'a>(env: *mut JNIEnv, class_and_method: &Class
         let ctx = ctx!(env);
 
         let class_ref = ctx.resolve_class_object_by_jclass(clazz);
-        println!("NATIVE: GetMethodID: {}::{}{}", class_ref.name, method_name, signature);
+        debug!(target: "native", "NATIVE: GetMethodID: {}::{}{}", class_ref.name, method_name, signature);
         class_ref.find_method_slot(method_name, signature).ok_or(VmError::Native(format!("GetMethodID: {}::{}{} not found", class_ref.name, method_name, signature))).unwrap()
     }
 
@@ -708,7 +708,7 @@ unsafe fn resolve_function_args_a<'a>(env: *mut JNIEnv, class_and_method: &Class
         let ctx = ctx!(env);
 
         let class_ref = ctx.resolve_class_object_by_jclass(clazz);
-        println!("NATIVE: GetFieldID: {}::{}{}", class_ref.name, field_name, signature);
+        debug!(target: "native", "NATIVE: GetFieldID: {}::{}{}", class_ref.name, field_name, signature);
         // FIXME same as GetMethodID, there is a field at index 0 which is recognized as NULL
         if let Some(index) = class_ref.find_field_slot(field_name){
             index as jfieldID
@@ -817,7 +817,7 @@ unsafe fn resolve_function_args_a<'a>(env: *mut JNIEnv, class_and_method: &Class
 
         let class_ref = ctx.resolve_class_object_by_jclass(clazz);
         native_init_wrap!(env, ctx.ensure_initialized(class_ref));
-        println!("NATIVE: GetStaticMethodID: {}::{}{}", class_ref.name, method_name, signature);
+        debug!(target: "native", "NATIVE: GetStaticMethodID: {}::{}{}", class_ref.name, method_name, signature);
         class_ref.find_method_slot(method_name, signature).ok_or(VmError::Native(format!("GetStaticMethodID: {}::{}{} not found", class_ref.name, method_name, signature))).unwrap()
     }
 
@@ -886,7 +886,7 @@ unsafe fn resolve_function_args_a<'a>(env: *mut JNIEnv, class_and_method: &Class
         let ctx = ctx!(env);
 
         let clazz = ctx.resolve_class_object_by_jclass(clazz);
-        println!("NATIVE: GetStaticFieldID: {}::{}{}", clazz.name, field_name, signature);
+        debug!(target: "native", "NATIVE: GetStaticFieldID: {}::{}{}", clazz.name, field_name, signature);
         // FIXME same as GetMethodID, there is a field at index 0 which is recognized as NULL
         if let Some(index) = clazz.find_field_slot(field_name){
             index as jfieldID
@@ -978,7 +978,7 @@ unsafe fn resolve_function_args_a<'a>(env: *mut JNIEnv, class_and_method: &Class
         let raw_slice = unsafe { slice::from_raw_parts(unicode, len as usize) };
         let unicode_str = String::from_utf16_lossy(raw_slice);
 
-        println!("NATIVE: NewString: '{}' , {:?}", unicode_str, raw_slice);
+        debug!(target: "native", "NATIVE: NewString: '{}' , {:?}", unicode_str, raw_slice);
         let ctx = ctx!(env);
         let str = ctx.try_new_string_object(unicode_str.as_str()).map_err(|e| VmError::Native(e.to_string())).unwrap();
         str.id.nid()
@@ -1002,7 +1002,7 @@ unsafe fn resolve_function_args_a<'a>(env: *mut JNIEnv, class_and_method: &Class
     //0x7ffde0618048
     //0x7ffde0618390
     pub unsafe extern "system-unwind" fn NewStringUTF(env: *const JNIEnv, utf: *const c_char) -> jstring{
-        debug!("NATIVE: NewStringUTF");
+        debug!(target: "native", "NATIVE: NewStringUTF");
         if utf.is_null() {
             return 0 as jstring
         }
@@ -1114,7 +1114,7 @@ unsafe fn resolve_function_args_a<'a>(env: *mut JNIEnv, class_and_method: &Class
     pub unsafe extern "system-unwind" fn GetJavaVM(env: *mut JNIEnv, vm_ptr: *mut *const JavaVM) -> jint{
         unsafe {
             *vm_ptr = thread().java_vm.as_ref().get_ref() as *const JavaVM;
-            println!("NATIVE: GetJavaVM: {:?} {:p}", *vm_ptr, *vm_ptr);
+            debug!(target: "native", "NATIVE: GetJavaVM: {:?} {:p}", *vm_ptr, *vm_ptr);
         }
         JNI_OK
     }
