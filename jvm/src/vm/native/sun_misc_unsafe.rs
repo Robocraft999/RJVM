@@ -553,15 +553,18 @@ gen_delegate!(delegate_park, |ctx, _obj_ref, args| {
     if *time > 0 {
         if *is_absolute == 0 {
             park_timeout(Duration::from_millis(*time as u64));
+            ctx.check_canceled();
         } else if *is_absolute == 1 {
             let amount = Duration::from_millis(*time as u64) - SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap();
             park_timeout(amount);
+            ctx.check_canceled();
         } else {
             unreachable!("Boolean cannot be {}", is_absolute);
         }
     } else {
         ctx.thread.meta.park();
         park();
+        ctx.check_canceled();
     }
     ctx.thread.meta.unpark();
     non_failing_none()

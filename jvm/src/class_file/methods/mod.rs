@@ -50,6 +50,9 @@ impl MethodInfo{
     pub fn is_final(&self) -> bool {
         self.flags & method_flags::FINAL > 0
     }
+    pub fn is_synchronized(&self) -> bool {
+        self.flags & method_flags::SYNCHRONIZED > 0
+    }
 
     pub fn is_public(&self) -> bool { self.flags & method_flags::PUBLIC > 0 }
     pub fn is_private(&self) -> bool {

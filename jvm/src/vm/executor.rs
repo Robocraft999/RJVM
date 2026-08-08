@@ -11,6 +11,7 @@ use crate::{bytecode::Instruction, get_or_init, get_or_init_option, vm::{bytecod
 use log::{debug, error, info, trace, warn};
 use parking_lot::RwLock;
 use std::{str::FromStr};
+use crate::vm::monitoring::MonitorAssociate;
 
 macro_rules! wrap_error {
     ($res:expr) => {
@@ -916,6 +917,8 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                         if lock_ref.is_null() {
                             return Some(Err(VmError::ValidationError("Can not lock on null".to_string())))
                         }
+                        #[cfg(feature = "debug")]
+                        ctx.thread.debug_helper.monitor_logger.push_event(MonitorAssociate::Ref(lock_ref), format!("ENTER in {} at {}", class_and_method.format(), ctx.thread.call_stack.get_pc().0));
                         wrap_error!(ctx.vm.monitor_handler.enter_ref_or_block(ctx, lock_ref));
                     } else {
                         warn!("No object to lock")
@@ -927,6 +930,8 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                         if lock_ref.is_null() {
                             return Some(Err(VmError::ValidationError("Can not unlock on null".to_string())))
                         }
+                        #[cfg(feature = "debug")]
+                        ctx.thread.debug_helper.monitor_logger.push_event(MonitorAssociate::Ref(lock_ref), format!("EXIT in {} at {}", class_and_method.format(), ctx.thread.call_stack.get_pc().0));
                         wrap_error!(ctx.vm.monitor_handler.exit_ref(ctx, lock_ref))
                     } else {
                         warn!("No object to lock")

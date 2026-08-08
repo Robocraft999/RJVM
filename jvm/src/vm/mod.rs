@@ -4,6 +4,8 @@ use parking_lot::{Mutex, RwLock};
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::{Arc, PoisonError};
+use std::thread::{park, sleep};
+use std::time::Duration;
 use thiserror::Error;
 
 use crate::class_file::constant_pool::BytecodeBehavior;
@@ -68,6 +70,7 @@ pub struct VM<'a>{
     pub next_thread_id: Mutex<TID>,
     pub monitor_handler: MonitorHandler,
     pub thread_lookup: RwLock<HashMap<RefId, Arc<ThreadMeta>>>,
+    pub canceled_flag: RwLock<bool>,
     pub system_class_loader: RwLock<Option<RefId>>,
 }
 
@@ -91,6 +94,7 @@ impl<'a> VM<'a>{
             next_thread_id: Mutex::new(1),
             monitor_handler: MonitorHandler::new(),
             thread_lookup: RwLock::new(HashMap::new()),
+            canceled_flag: RwLock::new(false),
             system_class_loader: RwLock::new(None),
         }
     }
@@ -264,6 +268,14 @@ impl<'a> VM<'a>{
             } else {
                 return Ok(false);
             }
+        }
+    }
+
+    pub fn mark_canceled(&self) {
+        *self.canceled_flag.write() = true;
+        for (_, m) in self.thread_lookup.read().iter() {
+            m.os_thread.unpark();
+            sleep(Duration::from_millis(100));
         }
     }
 
@@ -657,6 +669,14 @@ impl<'a> Context<'a, '_> {
     pub fn resolve_clazz_by_class_ref_id(&self, ref_id: RefId) -> VMResult<ClassRef<'a>> {
         let class_ref = self.vm.resolve_object_by_id(ref_id)?;
         self.extract_class_from_class_object(&class_ref)
+    }
+
+    pub fn check_canceled(&self) {
+        if *self.vm.canceled_flag.read() {
+            self.thread.call_stack.print_call_stack(self.vm);
+            self.thread.debug_helper.print();
+            park();
+        }
     }
 }
 

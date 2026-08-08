@@ -1,16 +1,19 @@
 use crate::vm::debug::bytecode::BytecodeHelper;
 use crate::vm::debug::exceptions::ExceptionHelper;
+use crate::vm::debug::monitors::MonitorLogger;
 use crate::vm::debug::tracker::Tracker;
 
 mod exceptions;
 mod tracker;
 mod bytecode;
 pub(crate) mod validation;
+mod monitors;
 
 pub struct DebugHelper{
     pub exception_helper: ExceptionHelper,
     pub tracker: Tracker,
     pub bytecode_helper: BytecodeHelper,
+    pub monitor_logger: MonitorLogger,
 }
 
 impl DebugHelper{
@@ -19,6 +22,7 @@ impl DebugHelper{
             exception_helper: ExceptionHelper::new(),
             tracker: Tracker::new(None, None),
             bytecode_helper: BytecodeHelper::new(),
+            monitor_logger: MonitorLogger::new(),
         }
     }
 
@@ -29,10 +33,12 @@ impl DebugHelper{
                 if config.enabled_modules.contains("exceptions"){ self.exception_helper.print() }
                 if config.enabled_modules.contains("tracker"){ self.tracker.print() }
                 if config.enabled_modules.contains("bytecode"){ self.bytecode_helper.print() }
+                if config.enabled_modules.contains("monitors"){ self.monitor_logger.print() }
             } else {
                 self.exception_helper.print();
                 self.tracker.print();
                 self.bytecode_helper.print();
+                self.monitor_logger.print();
             }
         }
     }

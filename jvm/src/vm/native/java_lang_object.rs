@@ -75,7 +75,7 @@ gen_delegate!(delegate_wait, |ctx, obj_ref, args| {
         if obj_ref.is_null() {
             return invalidation!("Cannot wait on null object");
         }
-        ctx.vm.monitor_handler.wait(ctx, obj_ref.id, *millies as u64);
+        ctx.vm.monitor_handler.wait(ctx, obj_ref.id, *millies as u64)?;
         non_failing_none()
     } else {
         invalidation!("Expected this and long param")
@@ -85,7 +85,7 @@ gen_delegate!(delegate_wait, |ctx, obj_ref, args| {
 gen_delegate!(delegate_notify, |ctx, obj_ref, _args| {
     debug!("notify");
     if let Some(obj_ref) = obj_ref{
-        ctx.vm.monitor_handler.notify(ctx, obj_ref.id);
+        ctx.vm.monitor_handler.notify(ctx, obj_ref.id)?;
         non_failing_none()
     } else {
         invalidation!("Expected object")
@@ -95,7 +95,7 @@ gen_delegate!(delegate_notify, |ctx, obj_ref, _args| {
 gen_delegate!(delegate_notify_all, |ctx, obj_ref, _args| {
     debug!("notify all");
     if let Some(obj_ref) = obj_ref{
-        ctx.vm.monitor_handler.notify_all(ctx, obj_ref.id);
+        ctx.vm.monitor_handler.notify_all(ctx, obj_ref.id)?;
         non_failing_none()
     } else {
         invalidation!("Expected object")

@@ -128,6 +128,7 @@ gen_delegate!(delegate_start0, |ctx, obj_ref, _args| {
         let result = JavaThread::thread_entry(context, camid, target_id, Vec::new());
         if let Err(err) = result {
             error!("Thread failed with: {}", err);
+            context.vm.mark_canceled();
         }
     }).unwrap();
     non_failing_none()

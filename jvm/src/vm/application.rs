@@ -75,6 +75,8 @@ impl <'a> Application<'a> {
             Ok(VMResultType::ExceptionThrown) => {
                 error!("Exception thrown");
                 thread().debug_helper.print();
+
+                self.vm.mark_canceled();
                 panic!()
             }
             Err(error) => {
@@ -82,6 +84,8 @@ impl <'a> Application<'a> {
                 println!("Frames:");
                 thread().call_stack.print_call_stack(&self.vm);
                 thread().debug_helper.print();
+
+                self.vm.mark_canceled();
                 panic!()
             }
         }
