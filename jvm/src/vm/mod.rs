@@ -638,7 +638,12 @@ impl<'a> Context<'a, '_> {
                 let provided_args_count = args.iter().filter(|a| !matches!(a, Value::Dummy)).count();
                 assert_eq!(class_and_method.method.get_args_count(), provided_args_count, "[Validation]: Invalid Argument Count. Expected: {}, Got: {}", class_and_method.method.get_args_count(), provided_args_count);
                 for (i, provided_arg) in args.iter().filter(|a| !matches!(a, Value::Dummy)).enumerate(){
-                    class_and_method.method.descriptor.args[i].validate(provided_arg.clone(), self.clone()).unwrap();
+                    class_and_method.method.descriptor.args[i].validate(provided_arg.clone(), self.clone()).unwrap_or_else(|e| {
+                        error!("{}", e);
+                        self.thread.call_stack.print_call_stack(self.vm);
+                        self.thread.debug_helper.print();
+                        panic!()
+                    });
                 }
             }
         } else {

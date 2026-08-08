@@ -189,11 +189,11 @@ gen_delegate!(delegate_invoke0, |ctx, _obj_ref, args| {
                     // because it doesn't know whether it is a subroutine or not
                     return match res {
                         Ok(VMResultType::Successful(None)) => {
-                            assert!(return_type_ref_id.is_null());
+                            assert!(method.descriptor.return_type.is_none());
                             non_failing_some(ctx.vm.null())
                         }
                         Ok(VMResultType::Successful(Some(value))) => {
-                            assert!(!return_type_ref_id.is_null());
+                            assert!(method.descriptor.return_type.is_some());
                             non_failing_some(value)
                         }
                         Ok(typ) => unreachable!("{:?} can't escape invoke_frames_until", typ),

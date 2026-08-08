@@ -11,7 +11,7 @@ pub struct Unsafe {
 impl Unsafe {
     pub fn new() -> Self {
         Self{
-            memory: RwLock::new(MemoryChunk::new(1024 * 1024))
+            memory: RwLock::new(MemoryChunk::new(1024 * 1024 * 10))
         }
     }
 

@@ -508,11 +508,16 @@ unsafe fn resolve_function_args_a<'a>(env: *mut JNIEnv, class_and_method: &Class
         panic!()
     }
 
-    pub fn PushLocalFrame(env: *mut JNIEnv, capacity: jint) -> jint{
-        unimplemented!()
+    pub fn PushLocalFrame(env: *mut JNIEnv, capacity: jint) -> jint {
+        JNI_OK
     }
-    pub fn PopLocalFrame(env: *mut JNIEnv, result: jobject) -> jint{
-        unimplemented!()
+    pub fn PopLocalFrame(env: *mut JNIEnv, result: jobject) -> jobject{
+        if result != 0 {
+            let ctx = ctx!(env);
+            let res = ctx.vm.resolve_object_by_jobject(result);
+            warn!(target: "native", "NATIVE: PopLocalFrame: result is not null: {}", result);
+        }
+        result
     }
 
     pub fn NewGlobalRef(env: *mut JNIEnv, lobj: jobject) -> jobject{
