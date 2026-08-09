@@ -257,11 +257,49 @@ macro_rules! gen_prim_array_methods {
         }
 
         pub unsafe extern "system-unwind" fn $name_get_elems(env: *mut JNIEnv, array: $native_arr_type, isCopy: *mut jboolean) -> *const $native_type{
-            unimplemented!()
+            let vm: &VM = unsafe{(*env).vm()};
+            let array_ref = vm.resolve_object_by_jobject(array).unwrap();
+
+            if !isCopy.is_null() {
+                unsafe {
+                    *isCopy = JNI_TRUE;
+                }
+            }
+
+            if let ReferenceType::Array(_, ft, content) = &array_ref.reference_type {
+                let bytes: Vec<u8> = content.read()
+                    .iter()
+                    .flat_map(|val| match (ft, val) {
+                        (FieldType::Primitive($prim_type), $typ(val)) => (*val as $native_type).to_le_bytes().to_vec(),
+                        _ => unreachable!()
+                    })
+                    .collect();
+                let ptr = vm.unsafe_allocator.allocate_memory(bytes.len());
+                vm.unsafe_allocator.put_bytes(ptr, &bytes).unwrap();
+
+                ptr as *const $native_type
+            } else {
+                ptr::null()
+            }
         }
 
         pub unsafe extern "system-unwind" fn $name_rel_elems(env: *mut JNIEnv, array: $native_arr_type, elems: *const $native_type, mode: jint) {
-            unimplemented!()
+            let vm: &VM = unsafe{(*env).vm()};
+            let array_ref = vm.resolve_object_by_jobject(array).unwrap();
+
+            if let ReferenceType::Array(_, ft, content) = &array_ref.reference_type {
+                let width = Self::get_native_width(ft);
+                let allocation_size = width * array_ref.get_length();
+
+                let bytes = vm.unsafe_allocator.get_bytes(elems as i64, allocation_size).unwrap();
+                let vals = bytes.chunks(width).map(|bytes| match ft {
+                    FieldType::Primitive($prim_type) => $typ(<$native_type>::from_le_bytes(bytes.try_into().unwrap()) as $simple_typ),
+                    _ => unreachable!()
+                }).collect::<Vec<_>>();
+
+                let mut guard = content.write();
+                guard.copy_from_slice(vals.as_slice())
+            }
         }
 
         pub unsafe extern "system-unwind" fn $name_get_region(env: *mut JNIEnv, array: $native_arr_type, start: jsize, len: jsize, buf: *mut $native_type){
@@ -298,6 +336,28 @@ macro_rules! gen_prim_array_methods {
             } else {
                 unimplemented!()
             }
+        }
+    };
+}
+
+macro_rules! gen_field_access {
+    ($name_get:ident, $name_set:ident, $name_get_static:ident, $name_set_static:ident, $typ:path, $native_type:ty, $simple_typ:ty) => {
+        pub unsafe extern "system-unwind" fn $name_get(env: *mut JNIEnv, obj: jobject, fieldID: jfieldID) -> $native_type{
+            let $typ(val) = (unsafe { Self::delegateGetField(env, obj, fieldID) }) else { unreachable!("{}: Expected: {}", stringify!($name_get), stringify!($typ)) };
+            val as $native_type
+        }
+
+        pub unsafe extern "system-unwind" fn $name_set(env: *mut JNIEnv, obj: jobject, fieldID: jfieldID, val: $native_type){
+            unsafe { Self::delegateSetField(env, obj, fieldID, $typ(val as $simple_typ)) }
+        }
+
+        pub unsafe extern "system-unwind" fn $name_get_static(env: *mut JNIEnv, clazz: jclass, fieldID: jfieldID) -> $native_type{
+            let $typ(val) = (unsafe { Self::delegateGetStaticField(env, clazz, fieldID) }) else { unreachable!("{}: Expected: {}", stringify!($name_get), stringify!($typ)) };
+            val as $native_type
+        }
+
+        pub unsafe extern "system-unwind" fn $name_set_static(env: *mut JNIEnv, clazz: jclass, fieldID: jfieldID, val: $native_type){
+            unsafe { Self::delegateSetStaticField(env, clazz, fieldID, $typ(val as $simple_typ)) }
         }
     };
 }
@@ -401,7 +461,7 @@ unsafe fn resolve_function_args_a<'a>(env: *mut JNIEnv, class_and_method: &Class
     }).collect()
 }
 
-                                      impl JNINativeInterface_ {
+impl JNINativeInterface_ {
     pub fn GetVersion(env: *mut JNIEnv) -> jint{
         unimplemented!()
     }
@@ -718,14 +778,14 @@ unsafe fn resolve_function_args_a<'a>(env: *mut JNIEnv, class_and_method: &Class
         if let Some(index) = class_ref.find_field_slot(field_name){
             index as jfieldID
         } else {
-            let message = format!("GetMethodID: {}::{} not found", class_ref.name, field_name);
+            let message = format!("GetFieldID: {}::{} not found", class_ref.name, field_name);
             // NoSuchFieldError
             let prev = thread().caught_exception.replace(Some((message, "JNI_GetFieldID".to_string(), ctx.vm.null())));
             0 as jfieldID
         }
     }
 
-    pub unsafe fn GetField(env: *mut JNIEnv, obj: jobject, fieldID: jfieldID) -> Value {
+    unsafe fn delegateGetField(env: *mut JNIEnv, obj: jobject, fieldID: jfieldID) -> Value {
         let vm = unsafe{(*env).vm()};
         let obj_ref = vm.resolve_object_by_jobject(obj).unwrap();
         // FIXME this works, but it should be verified that the id is always the slot which is index+1
@@ -733,43 +793,11 @@ unsafe fn resolve_function_args_a<'a>(env: *mut JNIEnv, class_and_method: &Class
     }
 
     pub unsafe extern "system-unwind" fn GetObjectField(env: *mut JNIEnv, obj: jobject, fieldID: jfieldID) -> jobject{
-        let Value::Reference(val) = (unsafe { Self::GetField(env, obj, fieldID) }) else { unreachable!("") };
+        let Value::Reference(val) = (unsafe { Self::delegateGetField(env, obj, fieldID) }) else { unreachable!("") };
         val.nid()
     }
-    pub unsafe extern "system-unwind" fn GetBooleanField(env: *mut JNIEnv, obj: jobject, fieldID: jfieldID) -> jboolean{
-        let Value::Integer(val) = (unsafe { Self::GetField(env, obj, fieldID) }) else { unreachable!("") };
-        val as jboolean
-    }
-    pub unsafe extern "system-unwind" fn GetByteField(env: *mut JNIEnv, obj: jobject, fieldID: jfieldID) -> jbyte{
-        let Value::Integer(val) = (unsafe { Self::GetField(env, obj, fieldID) }) else { unreachable!("") };
-        val as jbyte
-    }
-    pub unsafe extern "system-unwind" fn GetCharField(env: *mut JNIEnv, obj: jobject, fieldID: jfieldID) -> jchar{
-        let Value::Integer(val) = (unsafe { Self::GetField(env, obj, fieldID) }) else { unreachable!("") };
-        val as jchar
-    }
-    pub unsafe extern "system-unwind" fn GetShortField(env: *mut JNIEnv, obj: jobject, fieldID: jfieldID) -> jshort{
-        let Value::Integer(val) = (unsafe { Self::GetField(env, obj, fieldID) }) else { unreachable!("") };
-        val as jshort
-    }
-    pub unsafe extern "system-unwind" fn GetIntField(env: *mut JNIEnv, obj: jobject, fieldID: jfieldID) -> jint{
-        let Value::Integer(val) = (unsafe { Self::GetField(env, obj, fieldID) }) else { unreachable!("") };
-        val as jint
-    }
-    pub unsafe extern "system-unwind" fn GetLongField(env: *mut JNIEnv, obj: jobject, fieldID: jfieldID) -> jlong{
-        let Value::Long(val) = (unsafe { Self::GetField(env, obj, fieldID) }) else { unreachable!("") };
-        val as jlong
-    }
-    pub unsafe extern "system-unwind" fn GetFloatField(env: *mut JNIEnv, obj: jobject, fieldID: jfieldID) -> jfloat{
-        let Value::Float(val) = (unsafe { Self::GetField(env, obj, fieldID) }) else { unreachable!("") };
-        val as jfloat
-    }
-    pub unsafe extern "system-unwind" fn GetDoubleField(env: *mut JNIEnv, obj: jobject, fieldID: jfieldID) -> jdouble{
-        let Value::Double(val) = (unsafe { Self::GetField(env, obj, fieldID) }) else { unreachable!("") };
-        val as jdouble
-    }
 
-    unsafe fn SetField(env: *mut JNIEnv, obj: jobject, fieldID: jfieldID, val: Value) {
+    unsafe fn delegateSetField(env: *mut JNIEnv, obj: jobject, fieldID: jfieldID, val: Value) {
         let vm = unsafe{(*env).vm()};
         let obj_ref = vm.resolve_object_by_jobject(obj).unwrap();
         #[cfg(feature = "validation")]
@@ -788,32 +816,17 @@ unsafe fn resolve_function_args_a<'a>(env: *mut JNIEnv, class_and_method: &Class
         } else {
             vm.null()
         };
-        unsafe { Self::SetField(env, obj, fieldID, val) }
+        unsafe { Self::delegateSetField(env, obj, fieldID, val) }
     }
-    pub unsafe extern "system-unwind" fn SetBooleanField(env: *mut JNIEnv, obj: jobject, fieldID: jfieldID, val: jboolean) {
-        unsafe { Self::SetField(env, obj, fieldID, Value::Integer(val as i32)) }
-    }
-    pub unsafe extern "system-unwind" fn SetByteField(env: *mut JNIEnv, obj: jobject, fieldID: jfieldID, val: jbyte) {
-        unsafe { Self::SetField(env, obj, fieldID, Value::Integer(val as i32)) }
-    }
-    pub unsafe extern "system-unwind" fn SetCharField(env: *mut JNIEnv, obj: jobject, fieldID: jfieldID, val: jchar) {
-        unsafe { Self::SetField(env, obj, fieldID, Value::Integer(val as i32)) }
-    }
-    pub unsafe extern "system-unwind" fn SetShortField(env: *mut JNIEnv, obj: jobject, fieldID: jfieldID, val: jshort) {
-        unsafe { Self::SetField(env, obj, fieldID, Value::Integer(val as i32)) }
-    }
-    pub unsafe extern "system-unwind" fn SetIntField(env: *mut JNIEnv, obj: jobject, fieldID: jfieldID, val: jint) {
-        unsafe { Self::SetField(env, obj, fieldID, Value::Integer(val as i32)) }
-    }
-    pub unsafe extern "system-unwind" fn SetLongField(env: *mut JNIEnv, obj: jobject, fieldID: jfieldID, val: jlong) {
-        unsafe { Self::SetField(env, obj, fieldID, Value::Long(val as i64)) }
-    }
-    pub unsafe extern "system-unwind" fn SetFloatField(env: *mut JNIEnv, obj: jobject, fieldID: jfieldID, val: jfloat) {
-        unsafe { Self::SetField(env, obj, fieldID, Value::Float(val as f32)) }
-    }
-    pub unsafe extern "system-unwind" fn SetDoubleField(env: *mut JNIEnv, obj: jobject, fieldID: jfieldID, val: jdouble) {
-        unsafe { Self::SetField(env, obj, fieldID, Value::Double(val as f64)) }
-    }
+
+    gen_field_access!(GetBooleanField, SetBooleanField, GetStaticBooleanField, SetStaticBooleanField, Value::Integer, jboolean, i32);
+    gen_field_access!(GetByteField   , SetByteField   , GetStaticByteField   , SetStaticByteField   , Value::Integer, jbyte   , i32);
+    gen_field_access!(GetCharField   , SetCharField   , GetStaticCharField   , SetStaticCharField   , Value::Integer, jchar   , i32);
+    gen_field_access!(GetShortField  , SetShortField  , GetStaticShortField  , SetStaticShortField  , Value::Integer, jshort  , i32);
+    gen_field_access!(GetIntField    , SetIntField    , GetStaticIntField    , SetStaticIntField    , Value::Integer, jint    , i32);
+    gen_field_access!(GetLongField   , SetLongField   , GetStaticLongField   , SetStaticLongField   , Value::Long   , jlong   , i64);
+    gen_field_access!(GetFloatField  , SetFloatField  , GetStaticFloatField  , SetStaticFloatField  , Value::Float  , jfloat  , f32);
+    gen_field_access!(GetDoubleField , SetDoubleField , GetStaticDoubleField , SetStaticDoubleField , Value::Double , jdouble , f64);
 
     pub unsafe extern "system-unwind" fn GetStaticMethodID(env: *mut JNIEnv, clazz: jclass, name: *const c_char, sig: *const c_char) -> jmethodID{
         let method_name = unsafe{CStr::from_ptr(name)}.to_str().map_err(|e| VmError::Native(e.to_string())).unwrap();
@@ -903,7 +916,7 @@ unsafe fn resolve_function_args_a<'a>(env: *mut JNIEnv, class_and_method: &Class
         }
     }
 
-    unsafe fn GetStaticField(env: *mut JNIEnv, clazz: jclass, fieldID: jfieldID) -> Value{
+    unsafe fn delegateGetStaticField(env: *mut JNIEnv, clazz: jclass, fieldID: jfieldID) -> Value{
         let ctx = ctx!(env);
 
         let clazz = ctx.resolve_class_object_by_jclass(clazz);
@@ -915,68 +928,23 @@ unsafe fn resolve_function_args_a<'a>(env: *mut JNIEnv, class_and_method: &Class
     }
 
     pub unsafe extern "system-unwind" fn GetStaticObjectField(env: *mut JNIEnv, clazz: jclass, fieldID: jfieldID) -> jobject {
-        let Value::Reference(val) = (unsafe { Self::GetStaticField(env, clazz, fieldID) }) else { unimplemented!("GetStaticObjectField: not an object") };
+        let Value::Reference(val) = (unsafe { Self::delegateGetStaticField(env, clazz, fieldID) }) else { unimplemented!("GetStaticObjectField: not an object") };
         val.nid() as jobject
     }
-    pub unsafe extern "system-unwind" fn GetStaticBooleanField(env: *mut JNIEnv, clazz: jclass, fieldID: jfieldID) -> jboolean {
-        let Value::Integer(val) = (unsafe { Self::GetStaticField(env, clazz, fieldID) }) else { unimplemented!("GetStaticBooleanField: not an integer") };
-        val as jboolean
-    }
-    pub unsafe extern "system-unwind" fn GetStaticByteField(env: *mut JNIEnv, clazz: jclass, fieldID: jfieldID) -> jbyte {
-        let Value::Integer(val) = (unsafe { Self::GetStaticField(env, clazz, fieldID) }) else { unimplemented!("GetStaticByteField: not an integer") };
-        val as jbyte
-    }
-    pub unsafe extern "system-unwind" fn GetStaticCharField(env: *mut JNIEnv, clazz: jclass, fieldID: jfieldID) -> jchar {
-        let Value::Integer(val) = (unsafe { Self::GetStaticField(env, clazz, fieldID) }) else { unimplemented!("GetStaticCharField: not an integer") };
-        val as jchar
-    }
-    pub unsafe extern "system-unwind" fn GetStaticShortField(env: *mut JNIEnv, clazz: jclass, fieldID: jfieldID) -> jshort {
-        let Value::Integer(val) = (unsafe { Self::GetStaticField(env, clazz, fieldID) }) else { unimplemented!("GetStaticShortField: not an integer") };
-        val as jshort
-    }
-    pub unsafe extern "system-unwind" fn GetStaticIntField(env: *mut JNIEnv, clazz: jclass, fieldID: jfieldID) -> jint {
-        let Value::Integer(val) = (unsafe { Self::GetStaticField(env, clazz, fieldID) }) else { unimplemented!("GetStaticIntField: not an integer") };
-        val as jint
-    }
-    pub unsafe extern "system-unwind" fn GetStaticLongField(env: *mut JNIEnv, clazz: jclass, fieldID: jfieldID) -> jlong {
-        let Value::Integer(val) = (unsafe { Self::GetStaticField(env, clazz, fieldID) }) else { unimplemented!("GetStaticLongField: not a long") };
-        val as jlong
-    }
-    pub unsafe extern "system-unwind" fn GetStaticFloatField(env: *mut JNIEnv, clazz: jclass, fieldID: jfieldID) -> jfloat {
-        let Value::Integer(val) = (unsafe { Self::GetStaticField(env, clazz, fieldID) }) else { unimplemented!("GetStaticFloatField: not a float") };
-        val as jfloat
-    }
-    pub unsafe extern "system-unwind" fn GetStaticDoubleField(env: *mut JNIEnv, clazz: jclass, fieldID: jfieldID) -> jdouble {
-        let Value::Integer(val) = (unsafe { Self::GetStaticField(env, clazz, fieldID) }) else { unimplemented!("GetStaticDoubleField: not a double") };
-        val as jdouble
+
+    unsafe fn delegateSetStaticField(env: *mut JNIEnv, clazz: jclass, fieldID: jfieldID, val: Value){
+        let ctx = ctx!(env);
+
+        let clazz = ctx.resolve_class_object_by_jclass(clazz);
+        native_init_wrap!(env, ctx.ensure_initialized(clazz));
+
+        let class_ref = ctx.vm.get_static_class_object(clazz.id).unwrap();
+        // See note on GetField
+        class_ref.set_field(fieldID as usize - 1, val);
     }
 
-    pub fn SetStaticObjectField(clazz: jclass, fieldID: jfieldID, val: jobject){
-        unimplemented!()
-    }
-    pub fn SetStaticBooleanField(clazz: jclass, fieldID: jfieldID, val: jboolean){
-        unimplemented!()
-    }
-    pub fn SetStaticByteField(clazz: jclass, fieldID: jfieldID, val: jbyte){
-        unimplemented!()
-    }
-    pub fn SetStaticCharField(clazz: jclass, fieldID: jfieldID, val: jchar){
-        unimplemented!()
-    }
-    pub fn SetStaticShortField(clazz: jclass, fieldID: jfieldID, val: jshort){
-        unimplemented!()
-    }
-    pub fn SetStaticIntField(clazz: jclass, fieldID: jfieldID, val: jint){
-        unimplemented!()
-    }
-    pub fn SetStaticLongField(clazz: jclass, fieldID: jfieldID, val: jlong){
-        unimplemented!()
-    }
-    pub fn SetStaticFloatField(clazz: jclass, fieldID: jfieldID, val: jfloat){
-        unimplemented!()
-    }
-    pub fn SetStaticDoubleField(clazz: jclass, fieldID: jfieldID, val: jdouble){
-        unimplemented!()
+    pub unsafe extern "system-unwind" fn SetStaticObjectField(env: *mut JNIEnv, clazz: jclass, fieldID: jfieldID, val: jobject){
+        unsafe { Self::delegateSetStaticField(env, clazz, fieldID, Value::Reference(RefId(val))) }
     }
 
     pub unsafe extern "system-unwind" fn NewString(env: *mut JNIEnv, unicode: *const jchar, len: jsize) -> jstring{
