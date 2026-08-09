@@ -68,6 +68,18 @@ impl Unsafe {
         Ok(guard.get(ptr as u64, 1)?[0])
     }
 
+    pub fn put_float(&self, ptr: i64, value: f32) -> VMResult<()> {
+        let mut guard = self.memory.write();
+        guard.put(ptr as u64, 4, &value.to_le_bytes())
+    }
+
+    pub fn get_float(&self, ptr: i64) -> VMResult<f32> {
+        let guard = self.memory.read();
+        let bytes = guard.get(ptr as u64, 4)?;
+        let value = f32::from_le_bytes(bytes.try_into().unwrap());
+        Ok(value)
+    }
+
     pub fn put_bytes(&self, ptr: i64, bytes: &[u8]) -> VMResult<()> {
         let mut guard = self.memory.write();
         guard.put(ptr as u64, bytes.len(), bytes)

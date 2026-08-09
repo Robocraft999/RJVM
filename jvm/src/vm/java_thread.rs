@@ -31,6 +31,8 @@ pub enum ThreadState {
     
     Blocked,
     Parked,
+
+    Finished,
 }
 
 #[derive(Debug)]
@@ -39,16 +41,18 @@ pub struct ThreadMeta {
     pub os_thread: Thread,
 
     pub interrupted: RwLock<bool>,
+    pub daemon: bool,
     pub thread_state: RwLock<ThreadState>,
     pub unsafe_unpark_count: Mutex<usize>,
 }
 
 impl ThreadMeta {
-    pub fn new(id: TID, os_thread: Thread) -> Self {
+    pub fn new(id: TID, os_thread: Thread, daemon: bool) -> Self {
         Self {
             id,
             os_thread,
             interrupted: RwLock::new(false),
+            daemon,
             thread_state: RwLock::new(ThreadState::Running),
             unsafe_unpark_count: Mutex::new(0),
         }
@@ -83,6 +87,13 @@ impl ThreadMeta {
     pub fn unpark(&self) {
         *self.thread_state.write() = ThreadState::Running
     }
+
+    pub fn finish(&self) {
+        *self.thread_state.write() = ThreadState::Finished
+    }
+    pub fn is_finished(&self) -> bool {
+        *self.thread_state.read() == ThreadState::Finished
+    }
 }
 
 impl PartialEq for ThreadMeta {
@@ -104,9 +115,9 @@ pub struct JavaThread {
 }
 
 impl JavaThread {
-    pub fn new(id: TID) -> Self {
+    pub fn new(id: TID, daemon: bool) -> Self {
         Self {
-            meta: Arc::new(ThreadMeta::new(id, std::thread::current())),
+            meta: Arc::new(ThreadMeta::new(id, std::thread::current(), daemon)),
             thread_obj_id: None,
             call_stack: CallStack::new(),
             debug_helper: DebugHelper::new(),

@@ -40,6 +40,7 @@ pub fn register_natives(registry: &mut NativeMethodRegistry) {
     register("putInt", "(JI)V", delegate_put_int);
     register("getInt", "(J)I", delegate_get_int);
     register("getByte", "(J)B", delegate_get_byte);
+    register("getFloat", "(J)F", delegate_get_float);
     register("putObject", "(Ljava/lang/Object;JLjava/lang/Object;)V", delegate_put_object_volatile);
     register("getObject", "(Ljava/lang/Object;J)Ljava/lang/Object;", delegate_get_object_volatile);
     register("putInt", "(Ljava/lang/Object;JI)V", delegate_put_int_volatile);
@@ -419,6 +420,15 @@ gen_delegate!(delegate_get_byte, |ctx, _obj_ref, args| {
     if let Some(Value::Long(ptr)) = args.get(0){
         let val = ctx.vm.unsafe_allocator.get_byte(*ptr)?;
         non_failing_some(Value::Integer(val as i32))
+    } else {
+        invalidation!("Expected a long as address")
+    }
+});
+
+gen_delegate!(delegate_get_float, |ctx, _obj_ref, args| {
+    if let Some(Value::Long(ptr)) = args.get(0){
+        let val = ctx.vm.unsafe_allocator.get_float(*ptr)?;
+        non_failing_some(Value::Float(val))
     } else {
         invalidation!("Expected a long as address")
     }

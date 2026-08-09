@@ -134,7 +134,7 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                 Instruction::ALOAD2 => wrap_error!(aload(ctx.thread, 2)),
                 Instruction::ALOAD3 => wrap_error!(aload(ctx.thread, 3)),
 
-                Instruction::IALOAD | Instruction::LALOAD | Instruction::DALOAD | Instruction::AALOAD | Instruction::BALOAD | Instruction::CALOAD | Instruction::SALOAD => {
+                Instruction::IALOAD | Instruction::LALOAD | Instruction::FALOAD | Instruction::DALOAD | Instruction::AALOAD | Instruction::BALOAD | Instruction::CALOAD | Instruction::SALOAD => {
                     let index = ctx.thread.call_stack.pop_operand_value().unwrap().expect_int().unwrap();
                     let array = ctx.thread.call_stack.pop_operand_value();
                     debug!("XALOAD: {:?}[{}]", array, index);

@@ -61,6 +61,7 @@ pub const SYSTEM_err_INDEX: usize = 2;
 pub const THREAD_name_INDEX: usize = 0;
 pub const THREAD_priority_INDEX: usize = 1;
 pub const THREAD_eetop_INDEX: usize = 3;
+pub const THREAD_daemon_INDEX: usize = 5;
 pub const THREAD_stillborn_INDEX: usize = 6;
 pub const THREAD_target_INDEX: usize = 7;
 pub const THREAD_group_INDEX: usize = 8;
