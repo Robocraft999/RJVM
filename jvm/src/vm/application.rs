@@ -192,13 +192,14 @@ impl <'a> Application<'a> {
         //run_and_catch_method(&mut vm, "de/klassenserver7b/k7bot/Main", "main", "([Ljava/lang/String;)V", p_args);
         //app.run_and_catch_method("Main", "main", "([Ljava/lang/String;)V", p_args);
 
+        let main_class_name = "logicsim/App";
         ctx.thread.call_stack.class_loaders.borrow_mut().push(*ctx.vm.system_class_loader.read());
-        let clazz = ctx.get_or_resolve_class("logicsim/App").unwrap();
-        self.init_class("logicsim/App");
+        let clazz = ctx.get_or_resolve_class(main_class_name).unwrap();
+        self.init_class(main_class_name);
 
         let main_method = clazz.resolve_method_virtual("main", "([Ljava/lang/String;)V").unwrap();
         let _result = self.handle_partial(JavaThread::invoke_subroutine(ctx, main_method, None, args));
-        
+
         loop {
             if ctx.vm.thread_lookup.read().values().filter(|t| !t.daemon && !t.is_finished() && t != &&ctx.thread.meta).count() == 0 {
                 break;
