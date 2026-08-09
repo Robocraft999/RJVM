@@ -95,10 +95,11 @@ impl<'a> Class<'a>{
             })
     }
 
-    pub fn get_method_in_slot(&self, slot: usize) -> Option<&MethodInfo> {
+    pub fn get_method_in_slot(&'a self, slot: usize) -> Option<ClassAndMethod<'a>> {
         self.methods
             .iter()
             .find(|m| m.slot == slot)
+            .map(|m| ClassAndMethod{ class: self, method: m })
             .or_else(|| {
                 if let Some(superclass) = &self.superclass {
                     superclass.get_method_in_slot(slot)
@@ -151,11 +152,12 @@ impl<'a> Class<'a>{
             .find(|(_, f)| f.name == field_name)
             .map(|(index, field)| (index + self.first_field_index, field, self.id))
             .or_else(|| {
-                if let Some(superclass) = &self.superclass{
-                    superclass.find_field_static(field_name)
-                } else {
-                    None
+                for clazz in self.interfaces.iter().chain(&self.superclass) {
+                    if let Some(res) = clazz.find_field_static(field_name) {
+                        return Some(res);
+                    }
                 }
+                None
             })
     }
 
@@ -603,8 +605,8 @@ impl<'a> ClassAndMethod<'a>{
     
     pub fn try_resolve(vm: &VM<'a>, camid: &ClassAndMethodId) -> VMResult<Self> {
         let clazz = vm.find_class_by_id(camid.class_id).ok_or(VmError::ValidationError("Class not found".to_owned()))?;
-        let method = clazz.get_method_in_slot(camid.method_slot).ok_or(VmError::ValidationError("Method not found".to_owned()))?;
-        Ok(Self { class: clazz, method })
+        let cam = clazz.get_method_in_slot(camid.method_slot).ok_or(VmError::ValidationError("Method not found".to_owned()))?;
+        Ok(cam)
     }
     
     pub fn as_ids(&self) -> ClassAndMethodId {

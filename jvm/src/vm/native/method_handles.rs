@@ -212,8 +212,8 @@ gen_delegate!(delegate_init, |ctx, _obj_ref, args| {
                 let slot = target_ref.get_int_field(METHOD_slot_INDEX)?;
 
                 let class_ref = ctx.resolve_clazz_by_class_ref_id(class_ref_id)?;
-                let method_info = class_ref.get_method_in_slot(slot as usize).unwrap();
-                let info = CallInfo::new(&method_info, &class_ref);
+                let cam = class_ref.get_method_in_slot(slot as usize).unwrap();
+                let info = CallInfo::new(&cam.method, &cam.class);
 
                 // clazz
                 mname_ref.set_field(MEMBERNAME_clazz_INDEX, Value::Reference(class_ref_id));

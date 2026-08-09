@@ -131,13 +131,13 @@ pub fn resolve_virtual_call<'a>(receiver_class: ClassRef<'a>, resolved_class: Cl
 
         if vtable_index == NONVIRTUAL_VTABLE_INDEX {
             assert!(can_be_statically_bound(resolved_method, resolved_class));
-            resolved_method
+            cam
         } else {
             // FIXME get_method_at_vtable
             receiver_class.get_method_in_slot(vtable_index as usize).unwrap()
         }
     };
-    CallInfo::new_virtual(resolved_class, receiver_class, resolved_method, selected_method, vtable_index)
+    CallInfo::new_virtual(resolved_class, receiver_class, resolved_method, selected_method.method, vtable_index)
 }
 
 pub fn resolve_special_call<'a>(resolved_class: ClassRef<'a>, method_name: &str, method_signature: &str) -> CallInfo<'a> {

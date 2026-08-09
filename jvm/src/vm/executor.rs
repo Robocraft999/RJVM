@@ -11,6 +11,7 @@ use crate::{bytecode::Instruction, get_or_init, get_or_init_option, vm::{bytecod
 use log::{debug, error, info, trace, warn};
 use parking_lot::RwLock;
 use std::{str::FromStr};
+use crate::vm::constants::classes::JAVA_LANG_OBJECT;
 use crate::vm::monitoring::MonitorAssociate;
 
 macro_rules! wrap_error {
@@ -675,6 +676,7 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                     let value = ctx.thread.call_stack.pop_operand_value().unwrap();
 
                     let (field_index, info, class_id) = caf.class.find_field_static(caf.field.name.as_str()).unwrap();
+                    get_or_init_option!(ctx.ensure_initialized(ctx.vm.find_class_by_id(class_id).unwrap()));
                     let object = ctx.vm.get_static_class_object(class_id).unwrap();
                     ctx.thread.debug_helper.tracker.push_object_event(object.id, format!("Set static field: {}: {:?} to:\n    {}", info.name, info.field_type, value.print(ctx.vm)));
                     debug!("PUTSTATIC {} {} {} {:?}", caf.field.name, caf.field.field_type.to_descriptor(), field_index, info);
@@ -691,6 +693,7 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                         unimplemented!()
                     }
                     let (field_index, info, class_id) = caf.class.find_field_static(caf.field.name.as_str()).unwrap();
+                    get_or_init_option!(ctx.ensure_initialized(ctx.vm.find_class_by_id(class_id).unwrap()));
                     let object = ctx.vm.get_static_class_object(class_id).unwrap();
                     debug!("GETSTATIC {} {} {} {:?}", caf.field.name, caf.field.field_type.to_descriptor(), field_index, info);
                     let value = object.get_field(field_index);
@@ -1220,6 +1223,11 @@ fn execute_invoke<'a>(ctx: Context<'a, '_>, index: u16, kind: InvokeKind) -> VMP
         args.insert(0, popped);
     }
 
+    #[cfg(feature = "validation")]
+    if (kind == InvokeKind::STATIC && !cam.method.is_static()) || (kind != InvokeKind::STATIC && cam.method.is_static()){
+        return Err(VmError::ValidationError(format!("[Validation]: kind is: {:?} but method is_static? {}", kind, cam.method.is_static())));
+    }
+
     let class_and_method = match kind {
         InvokeKind::SPECIAL | InvokeKind::STATIC => {
             cam.class
@@ -1248,6 +1256,17 @@ fn execute_invoke<'a>(ctx: Context<'a, '_>, index: u16, kind: InvokeKind) -> VMP
             match receiver {
                 Some(obj) => {
                     let receiver_class = ctx.vm.find_class_by_id(obj.class_id).unwrap();
+                    #[cfg(feature = "validation")]{
+                        let is_instance = if class_and_method.class.name == JAVA_LANG_OBJECT || class_and_method.class.is_array(){
+                            true
+                        } else {
+                            ctx.vm.is_instance_of(receiver_class, class_and_method.class)
+                        };
+                        if !is_instance{
+                            ctx.vm.mark_canceled();
+                            return Err(VmError::ValidationError(format!("[Validation]: Expected subclass of: {} but got: {}", class_and_method.class.name, obj.print(ctx.vm))));
+                        }
+                    }
                     let method_resolver = if kind == InvokeKind::VIRTUAL {get_method_virtual} else {get_method_interface_virtual};
                     let resolved_method = method_resolver(receiver_class, class_and_method.method.name.as_str(), class_and_method.method.descriptor.as_str())?;
                     resolved_method

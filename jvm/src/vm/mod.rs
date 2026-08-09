@@ -630,6 +630,15 @@ impl<'a> Context<'a, '_> {
         let mut offset = 0;
         if !class_and_method.method.is_static(){
             locals[0] = Value::Reference(object.unwrap().id);
+            #[cfg(feature = "validation")]
+            {
+                FieldType::Object(class_and_method.class.name.clone()).validate(locals[0], *self).unwrap_or_else(|e| {
+                    error!("{}", e);
+                    self.thread.call_stack.print_call_stack(self.vm);
+                    self.thread.debug_helper.print();
+                    panic!()
+                });
+            }
             offset = 1;
         }
         if !class_and_method.class.has_method_polymorphic_signature(class_and_method.method) {

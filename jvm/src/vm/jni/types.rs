@@ -194,8 +194,8 @@ macro_rules! gen_call_type_methods {
         pub unsafe extern "system-unwind" fn $namev(env: *mut JNIEnv, obj: jobject, methodID: jmethodID, args: VaList) -> $native_typ {
             match unsafe {Self::delegateCallTypeMethodV(env, obj, methodID, args)} {
                 Some(Some($typ(val))) => val as $native_typ,
-                Some(Some(val)) => unreachable!("{}V: expected {} return value but got: {:?}", stringify!($namev), stringify!($native_typ), val),
-                Some(None) => unreachable!("{}V: expected {} return value but got Void", stringify!($namev), stringify!($native_typ)),
+                Some(Some(val)) => unreachable!("{}: expected {} return value but got: {:?}", stringify!($namev), stringify!($native_typ), val),
+                Some(None) => unreachable!("{}: expected {} return value but got Void", stringify!($namev), stringify!($native_typ)),
                 None => 0 as $native_typ //Error occurred
             }
         }
@@ -307,8 +307,8 @@ unsafe fn resolve_static_class_and_method<'a>(env: *mut JNIEnv, clazz: jclass, m
 
     let class_ref = ctx.resolve_class_object_by_jclass(clazz);
 
-    let method_info = class_ref.get_method_in_slot(method_id).unwrap();
-    ClassAndMethod{class: class_ref, method: method_info}
+    let cam = class_ref.get_method_in_slot(method_id).unwrap();
+    cam
 }
 
 unsafe fn resolve_class_and_method<'a>(env: *mut JNIEnv, obj: jobject, method_id: jmethodID) -> ClassAndMethod<'a>{
@@ -317,8 +317,8 @@ unsafe fn resolve_class_and_method<'a>(env: *mut JNIEnv, obj: jobject, method_id
     let obj_ref = ctx.vm.resolve_object_by_jobject(obj).unwrap();
     let class_ref = ctx.get_or_resolve_class(obj_ref.class_name.as_str()).unwrap();
 
-    let method_info = class_ref.get_method_in_slot(method_id).unwrap();
-    ClassAndMethod{class: class_ref, method: method_info}
+    let cam = class_ref.get_method_in_slot(method_id).unwrap();
+    cam
 }
 
 unsafe fn resolve_function_args_v<'a>(env: *mut JNIEnv, class_and_method: &ClassAndMethod, mut raw: VaList) -> Vec<Value>{
@@ -1231,11 +1231,11 @@ unsafe fn resolve_function_args_a<'a>(env: *mut JNIEnv, class_and_method: &Class
     }
 
     pub unsafe extern "system-unwind" fn NewWeakGlobalRef(env: *mut JNIEnv, obj: jobject) -> jweak {
-        unimplemented!()
+        obj
     }
 
     pub unsafe extern "system-unwind" fn DeleteWeakGlobalRef(env: *mut JNIEnv, obj: jweak) {
-        unimplemented!()
+        debug!(target: "native", "NATIVE: DeleteWeakGlobalRef: unimplemented")
     }
 
     pub unsafe extern "system-unwind" fn ExceptionCheck(env: *mut JNIEnv) -> jboolean{

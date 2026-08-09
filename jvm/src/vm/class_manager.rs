@@ -220,7 +220,7 @@ impl<'a> ClassManager<'a>{
         class.first_field_index = super_class_field_count;
 
         let super_class_method_count = match &class.superclass {
-            Some(clazz) => clazz.methods.len(),
+            Some(clazz) => clazz.transitive_method_count,
             None => 0,
         };
         class.methods = parsed_class.methods.iter()
@@ -248,7 +248,7 @@ impl<'a> ClassManager<'a>{
                     Some(MethodInfo{
                         name,
                         descriptor,
-                        slot: i+1,
+                        slot: super_class_method_count + i + 1,
                         vtable_index: GARBAGE_VTABLE_INDEX,
                         attributes: method_attributes,
                         is_holder_interface: class.is_interface(),
