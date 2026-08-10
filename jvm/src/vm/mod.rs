@@ -445,6 +445,7 @@ impl<'a> Context<'a, '_> {
         let obj = self.vm.object_allocator.allocate_object(class, fields);
         let mut guard = self.vm.objects_by_id.write();
         guard.insert(obj.id, obj);
+        #[cfg(feature = "debug")]
         thread().debug_helper.tracker.push_object_event(obj.id, format!("Object ({})", class.name));
         obj
     }
@@ -463,6 +464,7 @@ impl<'a> Context<'a, '_> {
         let class = self.get_or_resolve_class(class_name.as_str())?;
         let obj = self.vm.object_allocator.allocate_array(class, dims, *component_type, content);
         self.vm.objects_by_id.write().insert(obj.id, obj);
+        #[cfg(feature = "debug")]
         thread().debug_helper.tracker.push_object_event(obj.id, format!("Array allocated:   \n{:?}", obj.print(self.vm)));
         Ok(VMResultType::Successful(obj))
         /*get_or_init_special!(self.get_or_initialize_class(class_name.as_str())?,

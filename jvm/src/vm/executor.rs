@@ -183,6 +183,7 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                     debug!("XASTORE: {:?}[{}] <- {:?}", popped, index, value);
                     if let Value::Reference(array_id) = popped{
                         let array_ref = wrap_error!(ctx.vm.resolve_object_by_id(array_id));
+                        #[cfg(feature = "debug")]
                         ctx.thread.debug_helper.tracker.push_object_event(array_id, format!("Setting [{}] to:\n    {:?}", index, array_ref.print(ctx.vm)));
                         array_ref.set_element(index as usize, value);
                     }
@@ -669,9 +670,11 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                     debug!("XRETURN: {}", value.print(ctx.vm));
                     if !class_and_method.method.is_static(){
                         if let Some(Value::Reference(this)) = ctx.thread.call_stack.load_local(0){
+                            #[cfg(feature = "debug")]
                             ctx.thread.debug_helper.tracker.push_object_event(this, format!("Function {} returned:\n    {}", class_and_method.format(), value.print(ctx.vm)))
                         }
                     }
+                    #[cfg(feature = "debug")]
                     ctx.thread.debug_helper.tracker.push_method_event(class_and_method.format(), format!("returning: {} at {}", value.print(ctx.vm), ctx.thread.call_stack.get_pc().0));
                     if !class_and_method.method.descriptor.return_type.clone().map(|rt| rt == value).unwrap_or(false) {
                         unreachable!("Trying to return {:?} but expecting: {:?}", value, class_and_method.method.descriptor.return_type)
@@ -684,6 +687,7 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                 }
                 Instruction::RETURN => {
                     debug!("RETURN");
+                    #[cfg(feature = "debug")]
                     ctx.thread.debug_helper.tracker.push_method_event(class_and_method.format(), "returning".to_owned());
                     if class_and_method.method.name == "<clinit>"{
                         ctx.vm.class_manager.update_class_state(class_and_method.class, ClassLoadingState::INITIALIZED);
@@ -702,6 +706,7 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                     let (field_index, info, class_id) = caf.class.find_field_static(caf.field.name.as_str()).unwrap();
                     get_or_init_option!(ctx.ensure_initialized(ctx.vm.find_class_by_id(class_id).unwrap()));
                     let object = ctx.vm.get_static_class_object(class_id).unwrap();
+                    #[cfg(feature = "debug")]
                     ctx.thread.debug_helper.tracker.push_object_event(object.id, format!("Set static field: {}: {:?} to:\n    {}", info.name, info.field_type, value.print(ctx.vm)));
                     debug!("PUTSTATIC {} {} {} {:?}", caf.field.name, caf.field.field_type.to_descriptor(), field_index, info);
                     #[cfg(feature = "validation")]
@@ -752,6 +757,7 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                     let object = ctx.thread.call_stack.pop_operand_value().unwrap();
                     if let Value::Reference(obj_id) = object && !object.is_null(){
                         let obj = wrap_error!(ctx.vm.resolve_object_by_id(obj_id));
+                        #[cfg(feature = "debug")]
                         ctx.thread.debug_helper.tracker.push_object_event(obj_id, format!("Set field: {}: {:?} to:\n    {}", info.name, info.field_type, value.print(ctx.vm)));
                         #[cfg(feature = "validation")]
                         {
@@ -901,6 +907,7 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                             }
                         } else {String::new()};
                         let exception_name = ctx.vm.class_manager.find_class_by_id(error.class_id).unwrap().name.clone();
+                        #[cfg(feature = "debug")]
                         ctx.thread.debug_helper.exception_helper.push(format!("Throw   {}: {}\n└-- thrown by {} at {}", exception_name, string, class_and_method.format(), ctx.thread.call_stack.get_pc().0));
                         let prev = ctx.thread.caught_exception.replace(Some((string, class_and_method.format(), Value::Reference(error.id))));
                         assert!(prev.is_none());
@@ -1014,10 +1021,12 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
             ctx.thread.call_stack.store_local(top, *index);
         }
         InstructionBlock::IConstReturn(val) => {
+            #[cfg(feature = "debug")]
             ctx.thread.debug_helper.tracker.push_method_event(class_and_method.format(), format!("returning int: {}", val));
             return Some(Ok(VMResultType::Successful(Some(Value::Integer(*val)))))
         }
         InstructionBlock::LConstReturn(val) => {
+            #[cfg(feature = "debug")]
             ctx.thread.debug_helper.tracker.push_method_event(class_and_method.format(), format!("returning long: {}", val));
             return Some(Ok(VMResultType::Successful(Some(Value::Long(*val)))))
         }
@@ -1310,11 +1319,14 @@ fn execute_invoke<'a>(ctx: Context<'a, '_>, index: u16, kind: InvokeKind) -> VMP
         trace!("    [{}] {:?}", index, value);
     }
     debug!("INVOKE{:?}: {}{} on {:?}", kind, cam.method.name, cam.method.descriptor.as_str(), receiver);
-    if let Some(rec) = receiver{
-        ctx.thread.debug_helper.tracker.push_object_event(rec.id, format!("Preparing call {} with args:{}", class_and_method.format(), args.iter().map(|v| format!("\n    {}", v.print(ctx.vm))).collect::<Vec<_>>().join("")));
-        ctx.thread.debug_helper.tracker.push_method_event(class_and_method.format(), format!("Calling on {} from {} with args: {}", rec.print(ctx.vm), calling_class_and_method.format(), args.iter().map(|v| format!("\n    {}", v.print(ctx.vm))).collect::<Vec<_>>().join("") ));
-    } else {
-        ctx.thread.debug_helper.tracker.push_method_event(class_and_method.format(), format!("Calling static from {} with args: {}", calling_class_and_method.format(), args.iter().map(|v| format!("\n    {}", v.print(ctx.vm))).collect::<Vec<_>>().join("") ));
+    #[cfg(feature = "debug")]
+    {
+        if let Some(rec) = receiver{
+            ctx.thread.debug_helper.tracker.push_object_event(rec.id, format!("Preparing call {} with args:{}", class_and_method.format(), args.iter().map(|v| format!("\n    {}", v.print(ctx.vm))).collect::<Vec<_>>().join("")));
+            ctx.thread.debug_helper.tracker.push_method_event(class_and_method.format(), format!("Calling on {} from {} with args: {}", rec.print(ctx.vm), calling_class_and_method.format(), args.iter().map(|v| format!("\n    {}", v.print(ctx.vm))).collect::<Vec<_>>().join("") ));
+        } else {
+            ctx.thread.debug_helper.tracker.push_method_event(class_and_method.format(), format!("Calling static from {} with args: {}", calling_class_and_method.format(), args.iter().map(|v| format!("\n    {}", v.print(ctx.vm))).collect::<Vec<_>>().join("") ));
+        }
     }
     if !class_and_method.class.has_method_polymorphic_signature(class_and_method.method) {
         for (i, provided_arg) in args.iter().filter(|a| if let Value::Dummy = a {false} else {true}).enumerate(){

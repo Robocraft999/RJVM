@@ -105,6 +105,7 @@ gen_delegate!(delegate_arraycopy, |ctx, _obj_ref, args| {
             // if src and dst are the same, we must preserve the original content before we start copying.
             let src_content = src.read()[src_pos..src_pos + length].to_vec();
             dst.write()[dst_pos..dst_pos+length].clone_from_slice(&src_content);
+            #[cfg(feature = "debug")]
             ctx.thread.debug_helper.tracker.push_object_event(dst_ref.id, format!("Arraycopy from {:?} [{}:{}]->[{}:{}] :\n    {:?}", src_ref.id, src_pos, src_pos+length, dst_pos, dst_pos+length, dst_ref));
             return non_failing_none()
         }
