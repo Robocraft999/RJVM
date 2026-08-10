@@ -249,6 +249,7 @@ impl<'a> ClassManager<'a>{
                         slot: super_class_method_count + i + 1,
                         vtable_index: GARBAGE_VTABLE_INDEX,
                         attributes: method_attributes,
+                        holder_id: class.id,
                         is_holder_interface: class.is_interface(),
                         code_blocks,
                         flags: raw_field.access_flags,
