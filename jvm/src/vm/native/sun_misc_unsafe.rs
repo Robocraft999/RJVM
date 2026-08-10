@@ -24,6 +24,8 @@ pub fn register_natives(registry: &mut NativeMethodRegistry) {
     register("getObjectVolatile", "(Ljava/lang/Object;J)Ljava/lang/Object;", delegate_get_object_volatile);
     register("putIntVolatile", "(Ljava/lang/Object;JI)V", delegate_put_int_volatile);
     register("getIntVolatile", "(Ljava/lang/Object;J)I", delegate_get_int_volatile);
+    register("putBooleanVolatile", "(Ljava/lang/Object;JZ)V", delegate_put_int_volatile);
+    register("getBooleanVolatile", "(Ljava/lang/Object;J)Z", delegate_get_int_volatile);
     register("putLongVolatile", "(Ljava/lang/Object;JJ)V", delegate_put_long_volatile);
     register("getLongVolatile", "(Ljava/lang/Object;J)J", delegate_get_long_volatile);
     register("staticFieldBase", "(Ljava/lang/reflect/Field;)Ljava/lang/Object;", delegate_static_field_base);
@@ -57,6 +59,8 @@ pub fn register_natives(registry: &mut NativeMethodRegistry) {
     register("getObject", "(Ljava/lang/Object;J)Ljava/lang/Object;", delegate_get_object_volatile);
     register("putInt", "(Ljava/lang/Object;JI)V", delegate_put_int_volatile);
     register("getInt", "(Ljava/lang/Object;J)I", delegate_get_int_volatile);
+    register("putBoolean", "(Ljava/lang/Object;JZ)V", delegate_put_int_volatile);
+    register("getBoolean", "(Ljava/lang/Object;J)Z", delegate_get_int_volatile);
     register("putLong", "(Ljava/lang/Object;JJ)V", delegate_put_long_volatile);
     register("getLong", "(Ljava/lang/Object;J)J", delegate_get_long_volatile);
     register("putOrderedObject", "(Ljava/lang/Object;JLjava/lang/Object;)V", delegate_put_ordered_object);

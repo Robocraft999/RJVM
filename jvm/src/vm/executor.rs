@@ -11,7 +11,7 @@ use crate::{bytecode::Instruction, get_or_init, get_or_init_option, vm::{bytecod
 use log::{debug, error, info, trace, warn};
 use parking_lot::RwLock;
 use std::{str::FromStr};
-use crate::vm::constants::classes::JAVA_LANG_OBJECT;
+use crate::vm::constants::classes::{JAVA_LANG_ARITHMETIC_EXCEPTION, JAVA_LANG_OBJECT};
 use crate::vm::monitoring::MonitorAssociate;
 
 macro_rules! wrap_error {
@@ -331,27 +331,51 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                 Instruction::FMUL => wrap_error!(execute_f_arithmetic(ctx.thread, |val1, val2| Ok(val1 * val2))),
                 Instruction::DMUL => wrap_error!(execute_d_arithmetic(ctx.thread, |val1, val2| Ok(val1 * val2))),
 
-                Instruction::IDIV => wrap_error!(execute_i_arithmetic(ctx.thread, |val1, val2| {
-                    if val2 != 0 {
-                        Ok(val1.wrapping_div(val2))
+                Instruction::IDIV => {
+                    let value2 = ctx.thread.call_stack.pop_operand_value();
+                    let value1 = ctx.thread.call_stack.pop_operand_value();
+                    if let (Some(Value::Integer(val1)), Some(Value::Integer(val2))) = (value1, value2){
+                        if val2 == 0 {
+                            let error_clazz = get_or_init_option!(ctx.get_or_initialize_class(JAVA_LANG_ARITHMETIC_EXCEPTION));
+                            return Some(JavaThread::throw(ctx, error_clazz, "Division by Zero".to_owned(), class_and_method.format()))
+                        }
+                        let res = val1.wrapping_div(val2);
+                        debug!("Integer ARITHMETIC {}/{}={}", val1, val2, res);
+                        ctx.thread.call_stack.push_operand_value(Value::Integer(res));
                     } else {
-                        Err(VmError::JavaException(JavaError::DivisionByZero))
+                        return Some(Err(VmError::ValidationError("Expected two ints".to_string())))
                     }
-                })),
-                Instruction::FDIV => wrap_error!(execute_f_arithmetic(ctx.thread, |val1, val2| {
-                    if val2 != 0.0 {
-                        Ok(val1 / val2)
+                }
+                Instruction::FDIV => {
+                    let value2 = ctx.thread.call_stack.pop_operand_value();
+                    let value1 = ctx.thread.call_stack.pop_operand_value();
+                    if let (Some(Value::Float(val1)), Some(Value::Float(val2))) = (value1, value2){
+                        if val2 == 0.0 {
+                            let error_clazz = get_or_init_option!(ctx.get_or_initialize_class(JAVA_LANG_ARITHMETIC_EXCEPTION));
+                            return Some(JavaThread::throw(ctx, error_clazz, "Division by Zero".to_owned(), class_and_method.format()))
+                        }
+                        let res = val1 / val2;
+                        debug!("Float ARITHMETIC {}/{}={}", val1, val2, res);
+                        ctx.thread.call_stack.push_operand_value(Value::Float(res));
                     } else {
-                        Err(VmError::JavaException(JavaError::DivisionByZero))
+                        return Some(Err(VmError::ValidationError("Expected two floats".to_string())))
                     }
-                })),
-                Instruction::DDIV => wrap_error!(execute_d_arithmetic(ctx.thread, |val1, val2| {
-                    if val2 != 0.0 {
-                        Ok(val1 / val2)
+                }
+                Instruction::DDIV => {
+                    let value2 = ctx.thread.call_stack.pop_operand_value();
+                    let value1 = ctx.thread.call_stack.pop_operand_value();
+                    if let (Some(Value::Double(val1)), Some(Value::Double(val2))) = (value1, value2){
+                        if val2 == 0.0 {
+                            let error_clazz = get_or_init_option!(ctx.get_or_initialize_class(JAVA_LANG_ARITHMETIC_EXCEPTION));
+                            return Some(JavaThread::throw(ctx, error_clazz, "Division by Zero".to_owned(), class_and_method.format()))
+                        }
+                        let res = val1 / val2;
+                        debug!("Double ARITHMETIC {}/{}={}", val1, val2, res);
+                        ctx.thread.call_stack.push_operand_value(Value::Double(res));
                     } else {
-                        Err(VmError::JavaException(JavaError::DivisionByZero))
+                        return Some(Err(VmError::ValidationError("Expected two doubles".to_string())))
                     }
-                })),
+                }
 
                 Instruction::IREM => wrap_error!(execute_i_arithmetic(ctx.thread, |val1, val2| Ok(val1.wrapping_rem(val2)))),
                 Instruction::LREM => wrap_error!(execute_l_arithmetic(ctx.thread, |val1, val2| Ok(val1.wrapping_rem(val2)))),
