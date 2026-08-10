@@ -779,7 +779,6 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                     let appendix_ref = get_or_init_option!(ctx.new_object_array_1(vec![ctx.vm.null()]));
                     let appendix_result = Value::Reference(appendix_ref.id);
 
-                    println!("schwubbel1");
                     let helper = ctx.resolve_class_method(
                         "java/lang/invoke/MethodHandleNatives",
                         "linkCallSite",
@@ -788,7 +787,6 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                     
                     let Some(Value::Reference(mname_id)) = get_or_init_option!(JavaThread::invoke_subroutine(ctx, helper, None, vec![caller_obj, bootstrap_method_obj, name_obj, type_obj, static_arguments, appendix_result])) else { unreachable!("DO ERRORs") };
                     let mname_ref = wrap_error!(ctx.vm.resolve_object_by_id(mname_id));
-                    println!("schwubbel2");
 
                     let Value::Reference(typ_id) = mname_ref.get_field(MEMBERNAME_type_INDEX) else { unreachable!("DO errors") };
                     let typ_ref = wrap_error!(ctx.vm.resolve_object_by_id(typ_id));
@@ -796,7 +794,6 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                     let Value::Reference(class_ref_id) = mname_ref.get_field(MEMBERNAME_clazz_INDEX) else { unreachable!("Do Errors") };
                     let clazz = wrap_error!(ctx.resolve_clazz_by_class_ref_id(class_ref_id));
                     let name = ctx.vm.extract_string_from_value(mname_ref.get_field(MEMBERNAME_name_INDEX)).unwrap();
-                    println!("IVD: {}", name);
 
                     let desc = ctx.extract_descriptor_from_method_type(typ_ref).unwrap();
                     let desc = MethodDescriptor::new(desc);
@@ -817,7 +814,6 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                     if let Some(res) = get_or_init_option!(JavaThread::invoke_subroutine(ctx, cam, None, args)) {
                         ctx.thread.call_stack.push_operand_value(res);
                     }
-                    println!("schwubbel3");
                 }
 
                 Instruction::NEW(index) => {
