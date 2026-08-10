@@ -490,25 +490,23 @@ gen_delegate!(delegate_define_anon_class, |ctx, _obj_ref, args| {
             let bytes = bytes.read().iter().map(|val| if let Value::Integer(byte) = val {*byte as u8} else {0}).collect::<Vec<_>>();
             let class = ctx.vm.class_manager.define_class(&ctx, None, None, bytes)?;
             
-            let class_ref = match ctx.vm.class_manager.classes.lock() {
-                Ok(class_lock) => {
-                    let class_ref = class_lock.alloc(class);
-                    unsafe {
-                        let class_ptr: *const Class<'a> = class_ref;
-                        &*class_ptr
-                    }
+            let class_ref = {
+                let guard = ctx.vm.class_manager.classes.lock();
+                let class_ref = guard.alloc(class);
+                unsafe {
+                    let class_ptr: *const Class<'a> = class_ref;
+                    &*class_ptr
                 }
-                Err(e) => return Err(VmError::from(e))
             };
             
             // we have to assign 'this' here, because we can't resolve it later by name
-            class_ref.constants.write()?[class_ref.this_index as usize - 1] = ConstantPoolEntry::Class(class_ref);
+            class_ref.constants.write()[class_ref.this_index as usize - 1] = ConstantPoolEntry::Class(class_ref);
 
-            ctx.vm.class_manager.classes_by_id.write()?.insert(class_ref.id, class_ref);
+            ctx.vm.class_manager.classes_by_id.write().insert(class_ref.id, class_ref);
             //vm.class_manager.classes_by_name.borrow_mut().insert(class_ref.name.clone(), class_ref);
-            ctx.vm.class_manager.class_loading_states.write()?.insert(class_ref.id, ClassLoadingState::LOADED);
+            ctx.vm.class_manager.class_loading_states.write().insert(class_ref.id, ClassLoadingState::LOADED);
             let class_obj = wrap_init!(ctx, ctx.new_class_object_by_class(class_ref)?);
-            ctx.vm.class_manager.anonymous_classes.write()?.insert(class_obj.id, AnonClassInfo { clazz: class_ref, host: host_class_ref });
+            ctx.vm.class_manager.anonymous_classes.write().insert(class_obj.id, AnonClassInfo { clazz: class_ref, host: host_class_ref });
             non_failing_some(Value::Reference(class_obj.id))
         } else {
             invalidation!("define_anon_class: expected bytes array type but got: {:?}", byte_arr_ref)

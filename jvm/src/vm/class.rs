@@ -14,7 +14,7 @@ use crate::vm::{ProgramCounter, VmError};
 use std::fmt::{Debug, Formatter};
 use std::hash::Hash;
 use std::ops::Deref;
-use std::sync::RwLock;
+use parking_lot::RwLock;
 
 #[derive()]
 pub struct Class<'a>{
@@ -355,7 +355,7 @@ pub struct ArrayInfo{
 
 impl <'a> Class<'a>{
     pub fn get_or_resolve_constant(&self, ctx: &Context<'a, '_>, index: u16) -> Option<ConstantPoolEntry<'a>>{
-        let fast = self.constants.read().ok()?.get(index as usize - 1)?.clone();
+        let fast = self.constants.read().get(index as usize - 1)?.clone();
         match fast{
             ConstantPoolEntry::Class(..) |
             ConstantPoolEntry::FieldRef(..) |
@@ -375,35 +375,35 @@ impl <'a> Class<'a>{
             ConstantPoolEntry::InvokeDynamic(..) |
             ConstantPoolEntry::Dummy => {}
             ConstantPoolEntry::RawNameAndType(name_index, type_index) => {
-                let (name, typ) = resolve_name_and_type(self.constants.read().ok()?.deref(), name_index, type_index)?;
-                self.constants.write().ok()?[index as usize - 1] = ConstantPoolEntry::NameAndType(name, typ);
+                let (name, typ) = resolve_name_and_type(self.constants.read().deref(), name_index, type_index)?;
+                self.constants.write()[index as usize - 1] = ConstantPoolEntry::NameAndType(name, typ);
             }
             ConstantPoolEntry::RawString(utf8_index) => {
-                let string = resolve_utf(self.constants.read().ok()?.deref(), utf8_index)?;
-                self.constants.write().ok()?[index as usize - 1] = ConstantPoolEntry::String(string);
+                let string = resolve_utf(self.constants.read().deref(), utf8_index)?;
+                self.constants.write()[index as usize - 1] = ConstantPoolEntry::String(string);
             }
             ConstantPoolEntry::RawClass(name_index) => {
-                let name = resolve_utf(self.constants.read().ok()?.deref(), name_index)?;
+                let name = resolve_utf(self.constants.read().deref(), name_index)?;
                 let class = ctx.get_or_resolve_class(name.as_str()).ok()?;
-                self.constants.write().ok()?[index as usize - 1] = ConstantPoolEntry::Class(class);
+                self.constants.write()[index as usize - 1] = ConstantPoolEntry::Class(class);
             }
             ConstantPoolEntry::RawFieldRef(class_index, name_and_type_index) => {
-                let caf = resolve_class_and_field(&ctx, self.constants.read().ok()?.deref(), class_index, name_and_type_index)?;
-                self.constants.write().ok()?[index as usize - 1] = ConstantPoolEntry::FieldRef(caf);
+                let caf = resolve_class_and_field(&ctx, self.constants.read().deref(), class_index, name_and_type_index)?;
+                self.constants.write()[index as usize - 1] = ConstantPoolEntry::FieldRef(caf);
             }
             ConstantPoolEntry::RawMethodRef(class_index, name_and_type_index) => {
                 //let cam = resolve_class_and_method(&vm, &self.constants.borrow(), class_index, name_and_type_index, false)?;
-                let (clazz, method_name, method_descriptor) = resolve_class_and_name_and_type(ctx, self.constants.read().ok()?.deref(), class_index, name_and_type_index)?;
+                let (clazz, method_name, method_descriptor) = resolve_class_and_name_and_type(ctx, self.constants.read().deref(), class_index, name_and_type_index)?;
                 let cam = clazz.resolve_method_virtual(method_name.as_str(), method_descriptor.as_str()).unwrap();
                 if cam.class.has_method_polymorphic_signature(cam.method) {
-                    self.constants.write().ok()?[index as usize - 1] = ConstantPoolEntry::MethodRefSigPoly(cam, MethodDescriptor::new(method_descriptor));
+                    self.constants.write()[index as usize - 1] = ConstantPoolEntry::MethodRefSigPoly(cam, MethodDescriptor::new(method_descriptor));
                 } else {
-                    self.constants.write().ok()?[index as usize - 1] = ConstantPoolEntry::MethodRef(cam);
+                    self.constants.write()[index as usize - 1] = ConstantPoolEntry::MethodRef(cam);
                 }
             }
             ConstantPoolEntry::RawInterfaceMethodRef(class_index, name_and_type_index) => {
-                let cam = resolve_class_and_method(&ctx, self.constants.read().ok()?.deref(), class_index, name_and_type_index, true)?;
-                self.constants.write().ok()?[index as usize - 1] = ConstantPoolEntry::InterfaceMethodRef(cam);
+                let cam = resolve_class_and_method(&ctx, self.constants.read().deref(), class_index, name_and_type_index, true)?;
+                self.constants.write()[index as usize - 1] = ConstantPoolEntry::InterfaceMethodRef(cam);
             }
             ConstantPoolEntry::RawMethodHandle(kind, ref_index) => {
                 let kind = BytecodeBehavior::from_repr(kind)?;
@@ -412,47 +412,47 @@ impl <'a> Class<'a>{
                     BytecodeBehavior::REFGetStatic |
                     BytecodeBehavior::REFPutField |
                     BytecodeBehavior::REFPutStatic => {
-                        let reference = self.constants.read().ok()?.deref()[ref_index as usize - 1].clone();
+                        let reference = self.constants.read().deref()[ref_index as usize - 1].clone();
                         let caf = match reference {
-                            ConstantPoolEntry::RawFieldRef(class_index, name_and_type_index) => resolve_class_and_field(&ctx, self.constants.read().ok()?.deref(), class_index, name_and_type_index)?,
+                            ConstantPoolEntry::RawFieldRef(class_index, name_and_type_index) => resolve_class_and_field(&ctx, self.constants.read().deref(), class_index, name_and_type_index)?,
                             ConstantPoolEntry::FieldRef(caf) => caf,
                             _ => return None,
                         };
-                        self.constants.write().ok()?[index as usize - 1] = ConstantPoolEntry::MethodHandleField(kind, caf);
+                        self.constants.write()[index as usize - 1] = ConstantPoolEntry::MethodHandleField(kind, caf);
                     }
                     _ => {
-                        let reference = self.constants.read().ok()?.deref()[ref_index as usize - 1].clone();
+                        let reference = self.constants.read().deref()[ref_index as usize - 1].clone();
                         let cam = match reference {
-                            ConstantPoolEntry::RawMethodRef(class_index, name_and_type_index) => resolve_class_and_method(&ctx, self.constants.read().ok()?.deref(), class_index, name_and_type_index, false)?,
-                            ConstantPoolEntry::RawInterfaceMethodRef(class_index, name_and_type_index) => resolve_class_and_method(&ctx, self.constants.read().ok()?.deref(), class_index, name_and_type_index, true)?,
+                            ConstantPoolEntry::RawMethodRef(class_index, name_and_type_index) => resolve_class_and_method(&ctx, self.constants.read().deref(), class_index, name_and_type_index, false)?,
+                            ConstantPoolEntry::RawInterfaceMethodRef(class_index, name_and_type_index) => resolve_class_and_method(&ctx, self.constants.read().deref(), class_index, name_and_type_index, true)?,
                             ConstantPoolEntry::MethodRef(cam) | ConstantPoolEntry::InterfaceMethodRef(cam) => cam,
                             _ => return None,
                         };
-                        self.constants.write().ok()?[index as usize - 1] = ConstantPoolEntry::MethodHandleMethod(kind, cam);
+                        self.constants.write()[index as usize - 1] = ConstantPoolEntry::MethodHandleMethod(kind, cam);
                     }
                 }
             }
             ConstantPoolEntry::RawMethodType(descriptor_index) => {
-                let descriptor = resolve_utf(self.constants.read().ok()?.deref(), descriptor_index).map(MethodDescriptor::new).map(ConstantPoolEntry::MethodType)?;
-                self.constants.write().ok()?[index as usize - 1] = descriptor;
+                let descriptor = resolve_utf(self.constants.read().deref(), descriptor_index).map(MethodDescriptor::new).map(ConstantPoolEntry::MethodType)?;
+                self.constants.write()[index as usize - 1] = descriptor;
             }
             ConstantPoolEntry::RawInvokeDynamic(bootstrap_method_index, name_and_type_index) => {
                 let bm_attribute = self.attributes.bootstrap_methods.clone()?;
                 let bm = bm_attribute.bootstrap_methods.get(bootstrap_method_index as usize)?;
-                let name_and_type = self.constants.read().ok()?.deref()[name_and_type_index as usize - 1].clone();
+                let name_and_type = self.constants.read().deref()[name_and_type_index as usize - 1].clone();
                 let (handle_name, handle_type) = match name_and_type{
-                    ConstantPoolEntry::RawNameAndType(name_index, type_index) => resolve_name_and_type(self.constants.read().ok()?.deref(), name_index, type_index)?,
+                    ConstantPoolEntry::RawNameAndType(name_index, type_index) => resolve_name_and_type(self.constants.read().deref(), name_index, type_index)?,
                     ConstantPoolEntry::NameAndType(name, typ) => (name, typ),
                     _ => return None,
                 };
-                self.constants.write().ok()?[index as usize - 1] = ConstantPoolEntry::InvokeDynamic(bm.clone(), handle_name, handle_type);
+                self.constants.write()[index as usize - 1] = ConstantPoolEntry::InvokeDynamic(bm.clone(), handle_name, handle_type);
             }
         }
-        self.constants.read().ok()?.get(index as usize - 1).cloned()
+        self.constants.read().get(index as usize - 1).cloned()
     }
     
     pub fn get_constant(&self, index: u16) -> Option<ConstantPoolEntry<'a>> {
-        self.constants.read().ok()?.get(index as usize - 1).cloned()
+        self.constants.read().get(index as usize - 1).cloned()
     }
     
     pub fn get_utf_constant(&self, index: u16) -> VMResult<String> {

@@ -1210,7 +1210,7 @@ fn execute_invoke<'a>(ctx: Context<'a, '_>, index: u16, kind: InvokeKind) -> VMP
     if ctx.vm.class_manager.expect_class_state(cam.class.id, ClassLoadingState::LOADED) {
         unimplemented!()
     }
-    trace!("loading state is: {:?}", ctx.vm.class_manager.class_loading_states.read()?.get(&cam.class.id));
+    trace!("loading state is: {:?}", ctx.vm.class_manager.class_loading_states.read().get(&cam.class.id));
     trace!("finished loading class to execute on: '{}'", cam.class.name.as_str());
     trace!("args_count: {}", args_count);
     let mut args = Vec::new();
@@ -1247,7 +1247,7 @@ fn execute_invoke<'a>(ctx: Context<'a, '_>, index: u16, kind: InvokeKind) -> VMP
             let reference = ctx.vm.resolve_object_by_id(ref_id)?;
             Some(reference)
         } else {
-            println!("XXXX: {} {:?}", class_and_method.class.name, ctx.vm.class_manager.class_loading_states.read()?.get(&class_and_method.class.id));
+            println!("XXXX: {} {:?}", class_and_method.class.name, ctx.vm.class_manager.class_loading_states.read().get(&class_and_method.class.id));
             return Err(VmError::ValidationError(format!("Expected object or array as receiver for {} but found: {:?}", class_and_method.format(), popped)));
         }
     };

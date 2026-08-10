@@ -594,7 +594,7 @@ impl<'a> Context<'a, '_> {
         match class {
             Ok(class) => Ok(class),
             Err(e) => {
-                match self.vm.class_manager.anonymous_classes.read()?.get(&object.id) {
+                match self.vm.class_manager.anonymous_classes.read().get(&object.id) {
                     Some(info) => Ok(info.clazz),
                     None => Err(e),
                 }

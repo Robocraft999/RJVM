@@ -56,7 +56,7 @@ impl <'a> Application<'a> {
     }
 
     fn init_system(&self) -> Result<(), VmError>{
-        for (k,v) in self.vm.class_manager.class_loading_states.read()?.iter() {
+        for (k,v) in self.vm.class_manager.class_loading_states.read().iter() {
             trace!(target: "debug", "Class: {:?}, state: {:?}", self.vm.find_class_by_id(ClassId(k.0)).unwrap().name, v);
         }
         let init = self.context().resolve_class_method(JAVA_LANG_SYSTEM, "initializeSystemClass", "()V")?;
@@ -192,7 +192,7 @@ impl <'a> Application<'a> {
         //run_and_catch_method(&mut vm, "de/klassenserver7b/k7bot/Main", "main", "([Ljava/lang/String;)V", p_args);
         //app.run_and_catch_method("Main", "main", "([Ljava/lang/String;)V", p_args);
 
-        let main_class_name = "logicsim/App";
+        let main_class_name = "Main";
         ctx.thread.call_stack.class_loaders.borrow_mut().push(*ctx.vm.system_class_loader.read());
         let clazz = ctx.get_or_resolve_class(main_class_name).unwrap();
         self.init_class(main_class_name);

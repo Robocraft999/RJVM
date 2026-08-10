@@ -18,7 +18,7 @@ use log::{info, warn};
 use std::cmp::PartialEq;
 use std::collections::HashMap;
 use std::str::FromStr;
-use std::sync::{Mutex, RwLock};
+use parking_lot::{Mutex, RwLock};
 use typed_arena::Arena;
 use crate::vm::java_thread::JavaThread;
 
@@ -93,15 +93,13 @@ impl<'a> ClassManager<'a>{
         }
 
         // alloc + register
-        let class_ref = match self.classes.lock() {
-            Ok(class_lock) => {
-                let class_ref = class_lock.alloc(class);
-                unsafe {
-                    let class_ptr: *const Class<'a> = class_ref;
-                    &*class_ptr
-                }
+        let class_ref = { 
+            let guard = self.classes.lock();
+            let class_ref = guard.alloc(class);
+            unsafe {
+                let class_ptr: *const Class<'a> = class_ref;
+                &*class_ptr
             }
-            Err(e) => return Err(VmError::from(e))
         };
 
         let class_ref = unsafe {
@@ -109,17 +107,17 @@ impl<'a> ClassManager<'a>{
             &*class_ptr
         };
 
-        self.classes_by_name.write()?.insert(class_name.to_owned(), class_ref);
-        self.classes_by_id.write()?.insert(class_ref.id, class_ref);
-        self.class_loading_states.write()?.insert(class_ref.id, ClassLoadingState::LOADED);
+        self.classes_by_name.write().insert(class_name.to_owned(), class_ref);
+        self.classes_by_id.write().insert(class_ref.id, class_ref);
+        self.class_loading_states.write().insert(class_ref.id, ClassLoadingState::LOADED);
 
         Ok(class_ref)
     }
 
     pub fn define_class(&self, ctx: &Context<'a, '_>, class_name: Option<&str>, array_info: Option<ArrayInfo>, bytes: Vec<u8>) -> VMResult<Class<'a>>{
         let parsed_class = parse_class_file(bytes.clone())?;
-        let next_id = *self.next_id.read()?;
-        *self.next_id.write()? += 1;
+        let next_id = *self.next_id.read();
+        *self.next_id.write() += 1;
 
         let constants = parsed_class.constant_pool;
         let class_name = match class_name {
@@ -137,7 +135,7 @@ impl<'a> ClassManager<'a>{
             }
         }?;
 
-        if self.classes_by_name.read()?.contains_key(&class_name){
+        if self.classes_by_name.read().contains_key(&class_name){
             warn!("Duplicate class name {}", class_name);
         }
 
@@ -277,17 +275,17 @@ impl<'a> ClassManager<'a>{
     }
     
     fn get_or_create_primitive_class(&self, ctx: &Context<'a, '_>, name: &str) -> VMResult<ClassId> {
-        if !self.primitive_class_ids.read()?.contains_key(name){
-            let id = *self.next_id.read()?;
-            *self.next_id.write()? += 1;
-            self.primitive_class_ids.write()?.insert(name.to_owned(), ClassId(id));
+        if !self.primitive_class_ids.read().contains_key(name){
+            let id = *self.next_id.read();
+            *self.next_id.write() += 1;
+            self.primitive_class_ids.write().insert(name.to_owned(), ClassId(id));
 
             let wrapper = self.get_or_resolve_class(ctx, primitive_to_wrapper_name(name).as_str()).unwrap();
 
             let class = Class{
                 id: ClassId(id),
                 name: name.to_owned(),
-                constants: RwLock::new(wrapper.constants.read()?.clone()),
+                constants: RwLock::new(wrapper.constants.read().clone()),
                 flags: wrapper.flags,
                 superclass: wrapper.superclass,
                 this_index: wrapper.this_index,
@@ -303,21 +301,19 @@ impl<'a> ClassManager<'a>{
                 array_info: wrapper.array_info.clone(),
             };
 
-            let class_ref = match self.classes.lock() {
-                Ok(class_lock) => {
-                    let class_ref = class_lock.alloc(class);
-                    unsafe {
-                        let class_ptr: *const Class<'a> = class_ref;
-                        &*class_ptr
-                    }
+            let class_ref = {
+                let guard = self.classes.lock();
+                let class_ref = guard.alloc(class);
+                unsafe {
+                    let class_ptr: *const Class<'a> = class_ref;
+                    &*class_ptr
                 }
-                Err(e) => return Err(VmError::from(e))
             };
 
-            self.classes_by_id.write()?.insert(class_ref.id, class_ref);
-            self.classes_by_name.write()?.insert(name.to_owned(), class_ref);
+            self.classes_by_id.write().insert(class_ref.id, class_ref);
+            self.classes_by_name.write().insert(name.to_owned(), class_ref);
         }
-        Ok(self.primitive_class_ids.read()?.get(name).cloned().unwrap())
+        Ok(self.primitive_class_ids.read().get(name).cloned().unwrap())
     }
     
     /// Use this carefully! The is no ClassRef for this id
@@ -350,10 +346,8 @@ impl<'a> ClassManager<'a>{
 
     pub fn update_class_state(&self, clazz: ClassRef, new_state: ClassLoadingState){
         //TODO validate that the class existed
-        let Ok(mut res) = self.class_loading_states.write() else {
-            unreachable!("Could not acquire lock for class state unlock")
-        };
-        res.insert(clazz.id, new_state);
+        let mut guard =  self.class_loading_states.write();
+        guard.insert(clazz.id, new_state);
     }
 
     fn try_create_array_class(&self, class_name: &str) -> VMResult<(String, Option<ArrayInfo>)>{
@@ -377,18 +371,17 @@ impl<'a> ClassManager<'a>{
 
     pub fn find_class_by_name(&self, class_name: &str) -> Option<ClassRef<'a>>{
         //self.classes.iter().find(|c| c.name == class_name)
-        self.classes_by_name.read().ok()?.get(class_name).cloned()
+        self.classes_by_name.read().get(class_name).cloned()
     }
 
     pub fn find_class_by_id(&self, class_id: ClassId) -> Option<ClassRef<'a>>{
-        self.classes_by_id.read().ok()?.get(&class_id).cloned()
+        self.classes_by_id.read().get(&class_id).cloned()
     }
 
     pub fn expect_class_state(&self, class_id: ClassId, state: ClassLoadingState) -> bool{
-        if let Ok(res) = self.class_loading_states.read() {
-            res.get(&class_id).map(|s| s == &state).unwrap_or(false)
-        } else {
-            unreachable!("Could not acquire lock for class state")
-        }
+        self.class_loading_states.read()
+            .get(&class_id)
+            .map(|s| s == &state)
+            .unwrap_or(false)
     }
 }
