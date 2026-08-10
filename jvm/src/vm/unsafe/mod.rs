@@ -1,8 +1,25 @@
 use crate::vm::r#unsafe::memory_chunk::MemoryChunk;
 use crate::vm::result::VMResult;
 use parking_lot::RwLock;
+use crate::vm::jni::types::{jbyte, jchar, jdouble, jfloat, jint, jlong, jshort};
 
 mod memory_chunk;
+
+macro_rules! gen_mem_access {
+    ($name_get:ident, $name_put:ident, $simple_type:ty, $native_type:ty) => {
+        pub fn $name_put(&self, ptr: i64, value: $simple_type) -> VMResult<()> {
+            let mut guard = self.memory.write();
+            guard.put(ptr as u64, size_of::<$native_type>(), &(value as $native_type).to_le_bytes())
+        }
+
+        pub fn $name_get(&self, ptr: i64) -> VMResult<$simple_type> {
+            let guard = self.memory.read();
+            let bytes = guard.get(ptr as u64, size_of::<$native_type>())?;
+            let value = <$native_type>::from_le_bytes(bytes.try_into().unwrap()) as $simple_type;
+            Ok(value)
+        }
+    };
+}
 
 pub struct Unsafe {
     memory: RwLock<MemoryChunk>
@@ -11,7 +28,7 @@ pub struct Unsafe {
 impl Unsafe {
     pub fn new() -> Self {
         Self{
-            memory: RwLock::new(MemoryChunk::new(1024 * 1024 * 10))
+            memory: RwLock::new(MemoryChunk::new(1024 * 1024 * 50))
         }
     }
 
@@ -34,51 +51,13 @@ impl Unsafe {
         //TODO
     }
 
-    pub fn put_long(&self, ptr: i64, value: i64) -> VMResult<()> {
-        let mut guard = self.memory.write();
-        guard.put(ptr as u64, 8, &value.to_le_bytes())
-    }
-
-    pub fn get_long(&self, ptr: i64) -> VMResult<i64> {
-        let guard = self.memory.read();
-        let bytes = guard.get(ptr as u64, 8)?;
-        let value = i64::from_le_bytes(bytes.try_into().unwrap());
-        Ok(value)
-    }
-
-    pub fn put_int(&self, ptr: i64, value: i32) -> VMResult<()> {
-        let mut guard = self.memory.write();
-        guard.put(ptr as u64, 4, &value.to_le_bytes())
-    }
-
-    pub fn get_int(&self, ptr: i64) -> VMResult<i32> {
-        let guard = self.memory.read();
-        let bytes = guard.get(ptr as u64, 4)?;
-        let value = i32::from_le_bytes(bytes.try_into().unwrap());
-        Ok(value)
-    }
-
-    pub fn put_byte(&self, ptr: i64, value: u8) -> VMResult<()> {
-        let mut guard = self.memory.write();
-        guard.put(ptr as u64, 1, &[value])
-    }
-
-    pub fn get_byte(&self, ptr: i64) -> VMResult<u8> {
-        let guard = self.memory.read();
-        Ok(guard.get(ptr as u64, 1)?[0])
-    }
-
-    pub fn put_float(&self, ptr: i64, value: f32) -> VMResult<()> {
-        let mut guard = self.memory.write();
-        guard.put(ptr as u64, 4, &value.to_le_bytes())
-    }
-
-    pub fn get_float(&self, ptr: i64) -> VMResult<f32> {
-        let guard = self.memory.read();
-        let bytes = guard.get(ptr as u64, 4)?;
-        let value = f32::from_le_bytes(bytes.try_into().unwrap());
-        Ok(value)
-    }
+    gen_mem_access!(get_byte, put_byte, i32, jbyte);
+    gen_mem_access!(get_short, put_short, i32, jshort);
+    gen_mem_access!(get_char, put_char, i32, jchar);
+    gen_mem_access!(get_int, put_int, i32, jint);
+    gen_mem_access!(get_long, put_long, i64, jlong);
+    gen_mem_access!(get_float, put_float, f32, jfloat);
+    gen_mem_access!(get_double, put_double, f64, jdouble);
 
     pub fn put_bytes(&self, ptr: i64, bytes: &[u8]) -> VMResult<()> {
         let mut guard = self.memory.write();
