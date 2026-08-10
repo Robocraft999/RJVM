@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use crate::access_flags::{class_flags, method_flags};
 use crate::class_file::attributes::ClassFileAttributes;
 use crate::class_file::constant_pool::{BytecodeBehavior, ConstantPool, ConstantPoolEntry};
@@ -392,14 +393,8 @@ impl <'a> Class<'a>{
                 self.constants.write()[index as usize - 1] = ConstantPoolEntry::FieldRef(caf);
             }
             ConstantPoolEntry::RawMethodRef(class_index, name_and_type_index) => {
-                //let cam = resolve_class_and_method(&vm, &self.constants.borrow(), class_index, name_and_type_index, false)?;
-                let (clazz, method_name, method_descriptor) = resolve_class_and_name_and_type(ctx, self.constants.read().deref(), class_index, name_and_type_index)?;
-                let cam = clazz.resolve_method_virtual(method_name.as_str(), method_descriptor.as_str()).unwrap();
-                if cam.class.has_method_polymorphic_signature(cam.method) {
-                    self.constants.write()[index as usize - 1] = ConstantPoolEntry::MethodRefSigPoly(cam, MethodDescriptor::new(method_descriptor));
-                } else {
-                    self.constants.write()[index as usize - 1] = ConstantPoolEntry::MethodRef(cam);
-                }
+                let entry = resolve_method_ref(ctx, self.constants.read().deref(), class_index, name_and_type_index).unwrap();
+                self.constants.write()[index as usize - 1] = entry;
             }
             ConstantPoolEntry::RawInterfaceMethodRef(class_index, name_and_type_index) => {
                 let cam = resolve_class_and_method(&ctx, self.constants.read().deref(), class_index, name_and_type_index, true)?;
@@ -508,6 +503,49 @@ fn resolve_class_and_method<'a>(ctx: &Context<'a, '_>, constant_pool: &ConstantP
     } else {
         clazz.resolve_method_virtual(method_name.as_str(), method_descriptor.as_str()).unwrap()
     })
+}
+
+fn resolve_method_ref<'a>(ctx: &Context<'a, '_>, constant_pool: &ConstantPool<'a>, class_index: u16, name_and_type_index: u16) -> Option<ConstantPoolEntry<'a>> {
+    let (clazz, method_name, method_descriptor) = resolve_class_and_name_and_type(ctx, constant_pool, class_index, name_and_type_index)?;
+    // 1.
+    if clazz.is_interface() {
+        // TODO IncompatibleClassChangeError
+        return None;
+    }
+    // 2
+    let mut current_class = clazz;
+    loop {
+        if let Some(m) = current_class.find_method(method_name.as_str(), method_descriptor.as_str()) {
+            let cam = ClassAndMethod{ class: current_class, method: m };
+            return if current_class.has_method_polymorphic_signature(m) {
+                Some(ConstantPoolEntry::MethodRefSigPoly(cam, MethodDescriptor::new(method_descriptor)))
+            } else {
+                Some(ConstantPoolEntry::MethodRef(cam))
+            }
+        }
+        match &current_class.superclass {
+            Some(super_class) => current_class = super_class,
+            None => break,
+        }
+    }
+    // 3.1
+    let mut interface_queue = VecDeque::from(clazz.interfaces.clone());
+    while let Some(super_interface) = interface_queue.pop_front() {
+        if let Some(m) = super_interface.find_method(method_name.as_str(), method_descriptor.as_str()) && !m.is_abstract() {
+            return Some(ConstantPoolEntry::MethodRef(ClassAndMethod{ class: super_interface, method: m }));
+        }
+        interface_queue.extend(super_interface.interfaces.iter());
+    }
+    // 3.2
+    interface_queue = VecDeque::from(clazz.interfaces.clone());
+    while let Some(super_interface) = interface_queue.pop_front() {
+        if let Some(m) = super_interface.find_method(method_name.as_str(), method_descriptor.as_str()) && !m.is_private() && !m.is_static() {
+            return Some(ConstantPoolEntry::MethodRef(ClassAndMethod{ class: super_interface, method: m }));
+        }
+        interface_queue.extend(super_interface.interfaces.iter());
+    }
+    // 3.3
+    None
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
