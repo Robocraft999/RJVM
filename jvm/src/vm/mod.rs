@@ -365,7 +365,7 @@ impl<'a> Context<'a, '_> {
     }
 
     pub fn define_class(&self, class_name: &str, bytes: Vec<u8>) -> VMPartialResult<Reference<'a>>{
-        println!("FIXME: define_class");
+        //println!("FIXME: define_class");
         let resolved = match self.vm.find_class_by_name(class_name){
             Some(resolved) => resolved,
             None => self.vm.class_manager.parse_and_load_class(self, class_name, class_name, None, bytes)?
