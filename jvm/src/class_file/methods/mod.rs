@@ -8,6 +8,7 @@ use crate::vm::bytecode::InstructionBlock;
 use crate::vm::ProgramCounter;
 use crate::vm::VmError;
 use std::collections::BTreeMap;
+use crate::vm::class::ClassId;
 
 #[derive(Debug, Clone)]
 pub struct MethodInfo{
@@ -17,6 +18,7 @@ pub struct MethodInfo{
     pub slot: usize,
     pub vtable_index: isize,
     pub code_blocks: Option<BTreeMap<u16, InstructionBlock>>,
+    pub holder_id: ClassId,
     // FIXME store the entire holder instead.
     // This would require to store all methods including from superclass in a vtable to be useful
     // Although it would improve virtual resolving a lot

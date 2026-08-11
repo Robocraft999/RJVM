@@ -1,5 +1,6 @@
 #![allow(non_upper_case_globals)]
 
+use log::debug;
 use crate::access_flags::{field_flags, method_flags};
 use crate::class_file::fields::{get_class_descriptor, FieldInfo};
 use crate::class_file::methods::descriptor::MethodDescriptor;
@@ -77,7 +78,7 @@ gen_delegate!(delegate_link_to_static, |ctx, _obj_ref, args| {
         let typ_ref = ctx.vm.resolve_object_by_id(mname_ref.get_ref_field(MEMBERNAME_type_INDEX)?)?;
         let clazz = ctx.resolve_clazz_by_class_ref_id(mname_ref.get_ref_field(MEMBERNAME_clazz_INDEX)?)? ;
         let name = ctx.vm.extract_string_from_value(mname_ref.get_field(MEMBERNAME_name_INDEX))?;
-        println!("LTS: {}", name);
+        debug!(target: "native", "LTS: {}", name);
 
         let desc = ctx.extract_descriptor_from_method_type(typ_ref)?;
         let desc = MethodDescriptor::new(desc);

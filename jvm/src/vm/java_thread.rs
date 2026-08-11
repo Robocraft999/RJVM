@@ -153,6 +153,7 @@ impl JavaThread {
             if let Some((message, origin, Value::Reference(throwable_ref_id))) = ctx.thread.caught_exception.borrow().as_ref(){
                 let thrown_class_name = ctx.vm.resolve_object_by_id(*throwable_ref_id)?.class_name.clone();
                 if frame_amount as isize - 1 == stop_index {
+                    #[cfg(feature = "debug")]
                     ctx.thread.debug_helper.exception_helper.push(format!("Subroutine could not handle {} thrown by function {} with message: {}", thrown_class_name, origin, message));
                     return Err(VmError::JavaException(JavaError::JavaExceptionThrown(thrown_class_name, message.to_owned(), origin.to_owned())));
                 }
@@ -186,6 +187,7 @@ impl JavaThread {
                     ctx.thread.call_stack.set_pc(handler_pc);
                     ctx.thread.call_stack.clear_operand_stack();
                     ctx.thread.call_stack.push_operand_value(Value::Reference(*throwable_ref_id));
+                    #[cfg(feature = "debug")]
                     ctx.thread.debug_helper.exception_helper.push(format!("Handled {} by {}\n└-- thrown by {} with message: {}", thrown_class_name, class_and_method.format(), origin, message));
                     debug!("Exception thrown handled by {}", class_and_method.format());
                     clear_exception = true;

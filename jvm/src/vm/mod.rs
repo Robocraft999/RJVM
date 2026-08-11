@@ -356,7 +356,6 @@ impl<'a> Context<'a, '_> {
             "linkMethodHandleConstant",
             "(Ljava/lang/Class;ILjava/lang/Class;Ljava/lang/String;Ljava/lang/Object;)Ljava/lang/invoke/MethodHandle;"
         ).unwrap();
-        println!("NMH e");
         JavaThread::invoke_subroutine(*self, helper, None, vec![caller, ref_kind, callee, name, typ])
     }
 
@@ -366,7 +365,7 @@ impl<'a> Context<'a, '_> {
     }
 
     pub fn define_class(&self, class_name: &str, bytes: Vec<u8>) -> VMPartialResult<Reference<'a>>{
-        println!("FIXME: define_class");
+        //println!("FIXME: define_class");
         let resolved = match self.vm.find_class_by_name(class_name){
             Some(resolved) => resolved,
             None => self.vm.class_manager.parse_and_load_class(self, class_name, class_name, None, bytes)?
@@ -446,6 +445,7 @@ impl<'a> Context<'a, '_> {
         let obj = self.vm.object_allocator.allocate_object(class, fields);
         let mut guard = self.vm.objects_by_id.write();
         guard.insert(obj.id, obj);
+        #[cfg(feature = "debug")]
         thread().debug_helper.tracker.push_object_event(obj.id, format!("Object ({})", class.name));
         obj
     }
@@ -464,6 +464,7 @@ impl<'a> Context<'a, '_> {
         let class = self.get_or_resolve_class(class_name.as_str())?;
         let obj = self.vm.object_allocator.allocate_array(class, dims, *component_type, content);
         self.vm.objects_by_id.write().insert(obj.id, obj);
+        #[cfg(feature = "debug")]
         thread().debug_helper.tracker.push_object_event(obj.id, format!("Array allocated:   \n{:?}", obj.print(self.vm)));
         Ok(VMResultType::Successful(obj))
         /*get_or_init_special!(self.get_or_initialize_class(class_name.as_str())?,
@@ -594,7 +595,7 @@ impl<'a> Context<'a, '_> {
         match class {
             Ok(class) => Ok(class),
             Err(e) => {
-                match self.vm.class_manager.anonymous_classes.read()?.get(&object.id) {
+                match self.vm.class_manager.anonymous_classes.read().get(&object.id) {
                     Some(info) => Ok(info.clazz),
                     None => Err(e),
                 }
@@ -610,7 +611,7 @@ impl<'a> Context<'a, '_> {
             for p in content.read().iter() {
                 let Value::Reference(param_class_ref_id) = p else { return Err(VmError::ValidationError("Expected a reference".to_string())); };
                 let param_class_name = &self.resolve_clazz_by_class_ref_id(*param_class_ref_id)?.name;
-                println!("{}", param_class_name);
+                trace!(target: "native", "{}", param_class_name);
                 desc += get_class_descriptor(param_class_name.as_str()).as_str();
             }
         }
@@ -632,6 +633,7 @@ impl<'a> Context<'a, '_> {
             locals[0] = Value::Reference(object.unwrap().id);
             #[cfg(feature = "validation")]
             {
+                // FIXME prints error when initializing an anonymous class
                 FieldType::Object(class_and_method.class.name.clone()).validate(locals[0], *self).unwrap_or_else(|e| {
                     error!("{}", e);
                     self.thread.call_stack.print_call_stack(self.vm);
@@ -657,7 +659,7 @@ impl<'a> Context<'a, '_> {
             }
         } else {
             locals.resize(offset + args.len(), Value::Uninitialized);
-            println!("cam: {}, ({}), args:\n    {:?}", class_and_method.format(), locals.len(), args);
+            trace!(target: "debug", "cam: {}, ({}), args:\n    {:?}", class_and_method.format(), locals.len(), args);
         }
 
         for (dest, src) in locals[offset..].iter_mut().zip(args) {

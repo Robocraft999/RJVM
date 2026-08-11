@@ -24,6 +24,8 @@ pub fn register_natives(registry: &mut NativeMethodRegistry) {
     register("getObjectVolatile", "(Ljava/lang/Object;J)Ljava/lang/Object;", delegate_get_object_volatile);
     register("putIntVolatile", "(Ljava/lang/Object;JI)V", delegate_put_int_volatile);
     register("getIntVolatile", "(Ljava/lang/Object;J)I", delegate_get_int_volatile);
+    register("putBooleanVolatile", "(Ljava/lang/Object;JZ)V", delegate_put_int_volatile);
+    register("getBooleanVolatile", "(Ljava/lang/Object;J)Z", delegate_get_int_volatile);
     register("putLongVolatile", "(Ljava/lang/Object;JJ)V", delegate_put_long_volatile);
     register("getLongVolatile", "(Ljava/lang/Object;J)J", delegate_get_long_volatile);
     register("staticFieldBase", "(Ljava/lang/reflect/Field;)Ljava/lang/Object;", delegate_static_field_base);
@@ -35,16 +37,30 @@ pub fn register_natives(registry: &mut NativeMethodRegistry) {
     register("copyMemory", "(Ljava/lang/Object;JLjava/lang/Object;JJ)V", delegate_copy_memory);
     register("freeMemory", "(J)V", delegate_free_memory);
     register("pageSize", "()I", delegate_page_size);
-    register("putLong", "(JJ)V", delegate_put_long);
-    register("getLong", "(J)J", delegate_get_long);
-    register("putInt", "(JI)V", delegate_put_int);
-    register("getInt", "(J)I", delegate_get_int);
+
     register("getByte", "(J)B", delegate_get_byte);
+    register("putByte", "(JB)V", delegate_put_byte);
+    register("getShort", "(J)S", delegate_get_short);
+    register("putShort", "(JS)V", delegate_put_short);
+    register("getChar", "(J)C", delegate_get_char);
+    register("putChar", "(JC)V", delegate_put_char);
+    register("getInt", "(J)I", delegate_get_int);
+    register("putInt", "(JI)V", delegate_put_int);
+    register("getLong", "(J)J", delegate_get_long);
+    register("putLong", "(JJ)V", delegate_put_long);
     register("getFloat", "(J)F", delegate_get_float);
+    register("putFloat", "(JF)V", delegate_put_float);
+    register("getDouble", "(J)D", delegate_get_double);
+    register("putDouble", "(JD)V", delegate_put_double);
+
+    register("getAddress", "(J)J", delegate_get_long);
+    register("putAddress", "(JJ)V", delegate_put_long);
     register("putObject", "(Ljava/lang/Object;JLjava/lang/Object;)V", delegate_put_object_volatile);
     register("getObject", "(Ljava/lang/Object;J)Ljava/lang/Object;", delegate_get_object_volatile);
     register("putInt", "(Ljava/lang/Object;JI)V", delegate_put_int_volatile);
     register("getInt", "(Ljava/lang/Object;J)I", delegate_get_int_volatile);
+    register("putBoolean", "(Ljava/lang/Object;JZ)V", delegate_put_int_volatile);
+    register("getBoolean", "(Ljava/lang/Object;J)Z", delegate_get_int_volatile);
     register("putLong", "(Ljava/lang/Object;JJ)V", delegate_put_long_volatile);
     register("getLong", "(Ljava/lang/Object;J)J", delegate_get_long_volatile);
     register("putOrderedObject", "(Ljava/lang/Object;JLjava/lang/Object;)V", delegate_put_ordered_object);
@@ -378,25 +394,65 @@ gen_delegate!(delegate_page_size, |_ctx, _obj_ref, _args| {
     non_failing_some(Value::Integer(PAGE_SIZE))
 });
 
-gen_delegate!(delegate_put_long, |ctx, _obj_ref, args| {
-    //because args = [Long, Dummy, Long, Dummy]
-    if let (Some(Value::Long(ptr)), Some(Value::Long(value))) = (args.get(0), args.get(2)){
-        ctx.vm.unsafe_allocator.put_long(*ptr, *value)?;
-        non_failing_none()
-    } else {
-        invalidation!("Expected a long as address and a long as value")
-    }
-});
-
-gen_delegate!(delegate_get_long, |ctx, _obj_ref, args| {
+gen_delegate!(delegate_get_byte, |ctx, _obj_ref, args| {
     if let Some(Value::Long(ptr)) = args.get(0){
-        let val = ctx.vm.unsafe_allocator.get_long(*ptr)?;
-        non_failing_some(Value::Long(val))
+        let val = ctx.vm.unsafe_allocator.get_byte(*ptr)?;
+        non_failing_some(Value::Integer(val))
     } else {
         invalidation!("Expected a long as address")
     }
 });
-
+gen_delegate!(delegate_put_byte, |ctx, _obj_ref, args| {
+    //because args = [Long, Dummy, Byte]
+    if let (Some(Value::Long(ptr)), Some(Value::Integer(value))) = (args.get(0), args.get(2)) {
+        ctx.vm.unsafe_allocator.put_byte(*ptr, *value)?;
+        non_failing_none()
+    } else {
+        invalidation!("Expected a long as address and a int as value")
+    }
+});
+gen_delegate!(delegate_get_short, |ctx, _obj_ref, args| {
+    if let Some(Value::Long(ptr)) = args.get(0){
+        let val = ctx.vm.unsafe_allocator.get_short(*ptr)?;
+        non_failing_some(Value::Integer(val))
+    } else {
+        invalidation!("Expected a long as address")
+    }
+});
+gen_delegate!(delegate_put_short, |ctx, _obj_ref, args| {
+    //because args = [Long, Dummy, Short]
+    if let (Some(Value::Long(ptr)), Some(Value::Integer(value))) = (args.get(0), args.get(2)) {
+        ctx.vm.unsafe_allocator.put_short(*ptr, *value)?;
+        non_failing_none()
+    } else {
+        invalidation!("Expected a long as address and a int as value")
+    }
+});
+gen_delegate!(delegate_get_char, |ctx, _obj_ref, args| {
+    if let Some(Value::Long(ptr)) = args.get(0){
+        let val = ctx.vm.unsafe_allocator.get_char(*ptr)?;
+        non_failing_some(Value::Integer(val))
+    } else {
+        invalidation!("Expected a long as address")
+    }
+});
+gen_delegate!(delegate_put_char, |ctx, _obj_ref, args| {
+    //because args = [Long, Dummy, Char]
+    if let (Some(Value::Long(ptr)), Some(Value::Integer(value))) = (args.get(0), args.get(2)) {
+        ctx.vm.unsafe_allocator.put_char(*ptr, *value)?;
+        non_failing_none()
+    } else {
+        invalidation!("Expected a long as address and a int as value")
+    }
+});
+gen_delegate!(delegate_get_int, |ctx, _obj_ref, args| {
+    if let Some(Value::Long(ptr)) = args.get(0){
+        let val = ctx.vm.unsafe_allocator.get_int(*ptr)?;
+        non_failing_some(Value::Integer(val))
+    } else {
+        invalidation!("Expected a long as address")
+    }
+});
 gen_delegate!(delegate_put_int, |ctx, _obj_ref, args| {
     //because args = [Long, Dummy, Int]
     if let (Some(Value::Long(ptr)), Some(Value::Integer(value))) = (args.get(0), args.get(2)){
@@ -406,31 +462,55 @@ gen_delegate!(delegate_put_int, |ctx, _obj_ref, args| {
         invalidation!("Expected a long as address and a int as value")
     }
 });
-
-gen_delegate!(delegate_get_int, |ctx, _obj_ref, args| {
+gen_delegate!(delegate_get_long, |ctx, _obj_ref, args| {
     if let Some(Value::Long(ptr)) = args.get(0){
-        let val = ctx.vm.unsafe_allocator.get_int(*ptr)?;
-        non_failing_some(Value::Integer(val))
+        let val = ctx.vm.unsafe_allocator.get_long(*ptr)?;
+        non_failing_some(Value::Long(val))
     } else {
         invalidation!("Expected a long as address")
     }
 });
-
-gen_delegate!(delegate_get_byte, |ctx, _obj_ref, args| {
-    if let Some(Value::Long(ptr)) = args.get(0){
-        let val = ctx.vm.unsafe_allocator.get_byte(*ptr)?;
-        non_failing_some(Value::Integer(val as i32))
+gen_delegate!(delegate_put_long, |ctx, _obj_ref, args| {
+    //because args = [Long, Dummy, Long, Dummy]
+    if let (Some(Value::Long(ptr)), Some(Value::Long(value))) = (args.get(0), args.get(2)){
+        ctx.vm.unsafe_allocator.put_long(*ptr, *value)?;
+        non_failing_none()
     } else {
-        invalidation!("Expected a long as address")
+        invalidation!("Expected a long as address and a long as value")
     }
 });
-
 gen_delegate!(delegate_get_float, |ctx, _obj_ref, args| {
     if let Some(Value::Long(ptr)) = args.get(0){
         let val = ctx.vm.unsafe_allocator.get_float(*ptr)?;
         non_failing_some(Value::Float(val))
     } else {
         invalidation!("Expected a long as address")
+    }
+});
+gen_delegate!(delegate_put_float, |ctx, _obj_ref, args| {
+    //because args = [Long, Dummy, Float]
+    if let (Some(Value::Long(ptr)), Some(Value::Float(value))) = (args.get(0), args.get(2)){
+        ctx.vm.unsafe_allocator.put_float(*ptr, *value)?;
+        non_failing_none()
+    } else {
+        invalidation!("Expected a long as address and a float as value")
+    }
+});
+gen_delegate!(delegate_get_double, |ctx, _obj_ref, args| {
+    if let Some(Value::Long(ptr)) = args.get(0){
+        let val = ctx.vm.unsafe_allocator.get_double(*ptr)?;
+        non_failing_some(Value::Double(val))
+    } else {
+        invalidation!("Expected a long as address")
+    }
+});
+gen_delegate!(delegate_put_double, |ctx, _obj_ref, args| {
+    //because args = [Long, Dummy, Double, Dummy]
+    if let (Some(Value::Long(ptr)), Some(Value::Double(value))) = (args.get(0), args.get(2)){
+        ctx.vm.unsafe_allocator.put_double(*ptr, *value)?;
+        non_failing_none()
+    } else {
+        invalidation!("Expected a long as address and a double as value")
     }
 });
 
@@ -490,25 +570,23 @@ gen_delegate!(delegate_define_anon_class, |ctx, _obj_ref, args| {
             let bytes = bytes.read().iter().map(|val| if let Value::Integer(byte) = val {*byte as u8} else {0}).collect::<Vec<_>>();
             let class = ctx.vm.class_manager.define_class(&ctx, None, None, bytes)?;
             
-            let class_ref = match ctx.vm.class_manager.classes.lock() {
-                Ok(class_lock) => {
-                    let class_ref = class_lock.alloc(class);
-                    unsafe {
-                        let class_ptr: *const Class<'a> = class_ref;
-                        &*class_ptr
-                    }
+            let class_ref = {
+                let guard = ctx.vm.class_manager.classes.lock();
+                let class_ref = guard.alloc(class);
+                unsafe {
+                    let class_ptr: *const Class<'a> = class_ref;
+                    &*class_ptr
                 }
-                Err(e) => return Err(VmError::from(e))
             };
             
             // we have to assign 'this' here, because we can't resolve it later by name
-            class_ref.constants.write()?[class_ref.this_index as usize - 1] = ConstantPoolEntry::Class(class_ref);
+            class_ref.constants.write()[class_ref.this_index as usize - 1] = ConstantPoolEntry::Class(class_ref);
 
-            ctx.vm.class_manager.classes_by_id.write()?.insert(class_ref.id, class_ref);
+            ctx.vm.class_manager.classes_by_id.write().insert(class_ref.id, class_ref);
             //vm.class_manager.classes_by_name.borrow_mut().insert(class_ref.name.clone(), class_ref);
-            ctx.vm.class_manager.class_loading_states.write()?.insert(class_ref.id, ClassLoadingState::LOADED);
+            ctx.vm.class_manager.class_loading_states.write().insert(class_ref.id, ClassLoadingState::LOADED);
             let class_obj = wrap_init!(ctx, ctx.new_class_object_by_class(class_ref)?);
-            ctx.vm.class_manager.anonymous_classes.write()?.insert(class_obj.id, AnonClassInfo { clazz: class_ref, host: host_class_ref });
+            ctx.vm.class_manager.anonymous_classes.write().insert(class_obj.id, AnonClassInfo { clazz: class_ref, host: host_class_ref });
             non_failing_some(Value::Reference(class_obj.id))
         } else {
             invalidation!("define_anon_class: expected bytes array type but got: {:?}", byte_arr_ref)

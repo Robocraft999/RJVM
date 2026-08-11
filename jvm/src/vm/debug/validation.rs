@@ -27,7 +27,7 @@ impl FieldTypeExt for FieldType {
                                 ctx.vm.is_instance_of(val_clazz, target_clazz)
                             }
                         } else {
-                            error!(target: "validation", "Could not resolve both classes: {:?}, {:?}", val_clazz, target_clazz);
+                            //error!(target: "validation", "Could not resolve both classes: {:?}, {:?}", val_clazz, target_clazz);
                             true
                         }
                     }

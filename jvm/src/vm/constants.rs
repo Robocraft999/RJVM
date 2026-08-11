@@ -123,6 +123,7 @@ pub mod classes {
     pub const JAVA_IO_IOEXCEPTION: &str = "java/io/IOException";
     pub const JAVA_IO_RANDOM_ACCESS_FILE: &str = "java/io/RandomAccessFile";
     pub const JAVA_IO_UNIX_FILE_SYSTEM: &str = "java/io/UnixFileSystem";
+    pub const JAVA_LANG_ARITHMETIC_EXCEPTION: &str = "java/lang/ArithmeticException";
     pub const JAVA_LANG_CLASS: &str = "java/lang/Class";
     pub const JAVA_LANG_CLASSLOADER: &str = "java/lang/ClassLoader";
     pub const JAVA_LANG_DOUBLE: &str = "java/lang/Double";

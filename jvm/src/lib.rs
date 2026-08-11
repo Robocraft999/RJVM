@@ -65,14 +65,14 @@ macro_rules! get_or_init_special {
 
 pub fn run() {
     let mut class_path = ClassPath::default();
-    class_path.push("resources/rt.jar;resources/LogicSim.jar;resources/lib/unix;resources/lib").expect("TODO: panic message");
+    class_path.push("resources/rt.jar;resources/LogicSim.jar;resources/lib/unix;resources/lib;resources/test").expect("TODO: panic message");
 
     println!("Booting up VM");
 
     simple_logger::SimpleLogger::new()
         .with_level(LevelFilter::Info)
         .with_module_level("debug", LevelFilter::Debug)
-        .with_module_level("native", LevelFilter::Debug)
+        .with_module_level("native", LevelFilter::Info)
         .without_timestamps()
         .with_threads(true)
         .init()

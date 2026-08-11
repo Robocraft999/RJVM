@@ -12,6 +12,7 @@ use crate::vm::{jni, Context, VmError, VM};
 use log::error;
 use parking_lot::RwLock;
 use std::thread;
+use std::thread::yield_now;
 
 pub fn register_natives(registry: &mut NativeMethodRegistry) {
     registry.register(JAVA_LANG_THROWABLE, "fillInStackTrace", "(I)Ljava/lang/Throwable;", delegate_fill_in_stacktrace);
@@ -22,6 +23,7 @@ pub fn register_natives(registry: &mut NativeMethodRegistry) {
     registry.register(JAVA_LANG_THREAD, "holdsLock", "(Ljava/lang/Object;)Z", delegate_holds_lock);
     registry.register(JAVA_LANG_THREAD, "setPriority0", "(I)V", delegate_set_priority0);
     registry.register(JAVA_LANG_THREAD, "start0", "()V", delegate_start0);
+    registry.register(JAVA_LANG_THREAD, "yield", "()V", delegate_yield);
     registry.register(JAVA_LANG_THREAD, "isInterrupted", "(Z)Z", delegate_is_interrupted);
     registry.register(JAVA_LANG_RUNTIME, "availableProcessors", "()I", delegate_available_processors);
     registry.register(JAVA_LANG_RUNTIME, "freeMemory", "()J", delegate_free_memory);
@@ -133,6 +135,11 @@ gen_delegate!(delegate_start0, |ctx, obj_ref, _args| {
         }
         context.thread.meta.finish();
     }).unwrap();
+    non_failing_none()
+});
+
+gen_delegate!(delegate_yield, |_ctx, _obj_ref, _args| {
+    yield_now();
     non_failing_none()
 });
 

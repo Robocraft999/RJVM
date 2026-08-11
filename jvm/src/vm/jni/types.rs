@@ -1276,7 +1276,7 @@ impl JNIInvokeInterface_ {
     pub unsafe extern "system-unwind" fn GetEnv(vm: *mut JavaVM, penv: *mut *const c_void, version: jint) -> jint{
         unsafe {
             *penv = thread().jni_env.as_ref().get_ref() as *const JNIEnv as _;
-            println!("{:?} {:p}", *penv, *penv);
+            //println!("{:?} {:p}", *penv, *penv);
         }
         JNI_OK
     }

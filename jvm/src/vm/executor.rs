@@ -11,7 +11,7 @@ use crate::{bytecode::Instruction, get_or_init, get_or_init_option, vm::{bytecod
 use log::{debug, error, info, trace, warn};
 use parking_lot::RwLock;
 use std::{str::FromStr};
-use crate::vm::constants::classes::JAVA_LANG_OBJECT;
+use crate::vm::constants::classes::{JAVA_LANG_ARITHMETIC_EXCEPTION, JAVA_LANG_OBJECT};
 use crate::vm::monitoring::MonitorAssociate;
 
 macro_rules! wrap_error {
@@ -183,6 +183,7 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                     debug!("XASTORE: {:?}[{}] <- {:?}", popped, index, value);
                     if let Value::Reference(array_id) = popped{
                         let array_ref = wrap_error!(ctx.vm.resolve_object_by_id(array_id));
+                        #[cfg(feature = "debug")]
                         ctx.thread.debug_helper.tracker.push_object_event(array_id, format!("Setting [{}] to:\n    {:?}", index, array_ref.print(ctx.vm)));
                         array_ref.set_element(index as usize, value);
                     }
@@ -331,27 +332,38 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                 Instruction::FMUL => wrap_error!(execute_f_arithmetic(ctx.thread, |val1, val2| Ok(val1 * val2))),
                 Instruction::DMUL => wrap_error!(execute_d_arithmetic(ctx.thread, |val1, val2| Ok(val1 * val2))),
 
-                Instruction::IDIV => wrap_error!(execute_i_arithmetic(ctx.thread, |val1, val2| {
-                    if val2 != 0 {
-                        Ok(val1.wrapping_div(val2))
+                Instruction::IDIV => {
+                    let value2 = ctx.thread.call_stack.pop_operand_value();
+                    let value1 = ctx.thread.call_stack.pop_operand_value();
+                    if let (Some(Value::Integer(val1)), Some(Value::Integer(val2))) = (value1, value2){
+                        if val2 == 0 {
+                            let error_clazz = get_or_init_option!(ctx.get_or_initialize_class(JAVA_LANG_ARITHMETIC_EXCEPTION));
+                            return Some(JavaThread::throw(ctx, error_clazz, "Division by Zero".to_owned(), class_and_method.format()))
+                        }
+                        let res = val1.wrapping_div(val2);
+                        debug!("Integer ARITHMETIC {}/{}={}", val1, val2, res);
+                        ctx.thread.call_stack.push_operand_value(Value::Integer(res));
                     } else {
-                        Err(VmError::JavaException(JavaError::DivisionByZero))
+                        return Some(Err(VmError::ValidationError("Expected two ints".to_string())))
                     }
-                })),
-                Instruction::FDIV => wrap_error!(execute_f_arithmetic(ctx.thread, |val1, val2| {
-                    if val2 != 0.0 {
-                        Ok(val1 / val2)
+                }
+                Instruction::LDIV => {
+                    let value2 = ctx.thread.call_stack.pop_operand_value();
+                    let value1 = ctx.thread.call_stack.pop_operand_value();
+                    if let (Some(Value::Long(val1)), Some(Value::Long(val2))) = (value1, value2){
+                        if val2 == 0 {
+                            let error_clazz = get_or_init_option!(ctx.get_or_initialize_class(JAVA_LANG_ARITHMETIC_EXCEPTION));
+                            return Some(JavaThread::throw(ctx, error_clazz, "Division by Zero".to_owned(), class_and_method.format()))
+                        }
+                        let res = val1.wrapping_div(val2);
+                        debug!("Long ARITHMETIC {}/{}={}", val1, val2, res);
+                        ctx.thread.call_stack.push_operand_value(Value::Long(res));
                     } else {
-                        Err(VmError::JavaException(JavaError::DivisionByZero))
+                        return Some(Err(VmError::ValidationError("Expected two longs".to_string())))
                     }
-                })),
-                Instruction::DDIV => wrap_error!(execute_d_arithmetic(ctx.thread, |val1, val2| {
-                    if val2 != 0.0 {
-                        Ok(val1 / val2)
-                    } else {
-                        Err(VmError::JavaException(JavaError::DivisionByZero))
-                    }
-                })),
+                }
+                Instruction::FDIV => wrap_error!(execute_f_arithmetic(ctx.thread, |val1, val2| Ok(val1 / val2))),
+                Instruction::DDIV => wrap_error!(execute_d_arithmetic(ctx.thread, |val1, val2| Ok(val1 / val2))),
 
                 Instruction::IREM => wrap_error!(execute_i_arithmetic(ctx.thread, |val1, val2| Ok(val1.wrapping_rem(val2)))),
                 Instruction::LREM => wrap_error!(execute_l_arithmetic(ctx.thread, |val1, val2| Ok(val1.wrapping_rem(val2)))),
@@ -645,9 +657,11 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                     debug!("XRETURN: {}", value.print(ctx.vm));
                     if !class_and_method.method.is_static(){
                         if let Some(Value::Reference(this)) = ctx.thread.call_stack.load_local(0){
+                            #[cfg(feature = "debug")]
                             ctx.thread.debug_helper.tracker.push_object_event(this, format!("Function {} returned:\n    {}", class_and_method.format(), value.print(ctx.vm)))
                         }
                     }
+                    #[cfg(feature = "debug")]
                     ctx.thread.debug_helper.tracker.push_method_event(class_and_method.format(), format!("returning: {} at {}", value.print(ctx.vm), ctx.thread.call_stack.get_pc().0));
                     if !class_and_method.method.descriptor.return_type.clone().map(|rt| rt == value).unwrap_or(false) {
                         unreachable!("Trying to return {:?} but expecting: {:?}", value, class_and_method.method.descriptor.return_type)
@@ -660,6 +674,7 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                 }
                 Instruction::RETURN => {
                     debug!("RETURN");
+                    #[cfg(feature = "debug")]
                     ctx.thread.debug_helper.tracker.push_method_event(class_and_method.format(), "returning".to_owned());
                     if class_and_method.method.name == "<clinit>"{
                         ctx.vm.class_manager.update_class_state(class_and_method.class, ClassLoadingState::INITIALIZED);
@@ -678,6 +693,7 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                     let (field_index, info, class_id) = caf.class.find_field_static(caf.field.name.as_str()).unwrap();
                     get_or_init_option!(ctx.ensure_initialized(ctx.vm.find_class_by_id(class_id).unwrap()));
                     let object = ctx.vm.get_static_class_object(class_id).unwrap();
+                    #[cfg(feature = "debug")]
                     ctx.thread.debug_helper.tracker.push_object_event(object.id, format!("Set static field: {}: {:?} to:\n    {}", info.name, info.field_type, value.print(ctx.vm)));
                     debug!("PUTSTATIC {} {} {} {:?}", caf.field.name, caf.field.field_type.to_descriptor(), field_index, info);
                     #[cfg(feature = "validation")]
@@ -728,6 +744,7 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                     let object = ctx.thread.call_stack.pop_operand_value().unwrap();
                     if let Value::Reference(obj_id) = object && !object.is_null(){
                         let obj = wrap_error!(ctx.vm.resolve_object_by_id(obj_id));
+                        #[cfg(feature = "debug")]
                         ctx.thread.debug_helper.tracker.push_object_event(obj_id, format!("Set field: {}: {:?} to:\n    {}", info.name, info.field_type, value.print(ctx.vm)));
                         #[cfg(feature = "validation")]
                         {
@@ -779,7 +796,6 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                     let appendix_ref = get_or_init_option!(ctx.new_object_array_1(vec![ctx.vm.null()]));
                     let appendix_result = Value::Reference(appendix_ref.id);
 
-                    println!("schwubbel1");
                     let helper = ctx.resolve_class_method(
                         "java/lang/invoke/MethodHandleNatives",
                         "linkCallSite",
@@ -788,7 +804,6 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                     
                     let Some(Value::Reference(mname_id)) = get_or_init_option!(JavaThread::invoke_subroutine(ctx, helper, None, vec![caller_obj, bootstrap_method_obj, name_obj, type_obj, static_arguments, appendix_result])) else { unreachable!("DO ERRORs") };
                     let mname_ref = wrap_error!(ctx.vm.resolve_object_by_id(mname_id));
-                    println!("schwubbel2");
 
                     let Value::Reference(typ_id) = mname_ref.get_field(MEMBERNAME_type_INDEX) else { unreachable!("DO errors") };
                     let typ_ref = wrap_error!(ctx.vm.resolve_object_by_id(typ_id));
@@ -796,7 +811,6 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                     let Value::Reference(class_ref_id) = mname_ref.get_field(MEMBERNAME_clazz_INDEX) else { unreachable!("Do Errors") };
                     let clazz = wrap_error!(ctx.resolve_clazz_by_class_ref_id(class_ref_id));
                     let name = ctx.vm.extract_string_from_value(mname_ref.get_field(MEMBERNAME_name_INDEX)).unwrap();
-                    println!("IVD: {}", name);
 
                     let desc = ctx.extract_descriptor_from_method_type(typ_ref).unwrap();
                     let desc = MethodDescriptor::new(desc);
@@ -817,7 +831,6 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                     if let Some(res) = get_or_init_option!(JavaThread::invoke_subroutine(ctx, cam, None, args)) {
                         ctx.thread.call_stack.push_operand_value(res);
                     }
-                    println!("schwubbel3");
                 }
 
                 Instruction::NEW(index) => {
@@ -881,6 +894,7 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                             }
                         } else {String::new()};
                         let exception_name = ctx.vm.class_manager.find_class_by_id(error.class_id).unwrap().name.clone();
+                        #[cfg(feature = "debug")]
                         ctx.thread.debug_helper.exception_helper.push(format!("Throw   {}: {}\n└-- thrown by {} at {}", exception_name, string, class_and_method.format(), ctx.thread.call_stack.get_pc().0));
                         let prev = ctx.thread.caught_exception.replace(Some((string, class_and_method.format(), Value::Reference(error.id))));
                         assert!(prev.is_none());
@@ -943,6 +957,13 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
 
                 Instruction::WIDE(op, index, const_option) => {
                     match Instruction::from_repr(*op).unwrap(){
+                        Instruction::IINC(..) => {
+                            if let (Some(Value::Integer(value)), Some(amount)) = (ctx.thread.call_stack.load_local(*index as usize), const_option) {
+                                ctx.thread.call_stack.store_local(Value::Integer(value + *amount as i32), *index as usize);
+                            } else {
+                                return Some(Err(VmError::ValidationError("Expected an int and a constant value".to_owned())))
+                            }
+                        }
                         unknown => unreachable!("WIDE with op: {:?} not executable", unknown)
                     }
                 }
@@ -994,10 +1015,12 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
             ctx.thread.call_stack.store_local(top, *index);
         }
         InstructionBlock::IConstReturn(val) => {
+            #[cfg(feature = "debug")]
             ctx.thread.debug_helper.tracker.push_method_event(class_and_method.format(), format!("returning int: {}", val));
             return Some(Ok(VMResultType::Successful(Some(Value::Integer(*val)))))
         }
         InstructionBlock::LConstReturn(val) => {
+            #[cfg(feature = "debug")]
             ctx.thread.debug_helper.tracker.push_method_event(class_and_method.format(), format!("returning long: {}", val));
             return Some(Ok(VMResultType::Successful(Some(Value::Long(*val)))))
         }
@@ -1210,7 +1233,7 @@ fn execute_invoke<'a>(ctx: Context<'a, '_>, index: u16, kind: InvokeKind) -> VMP
     if ctx.vm.class_manager.expect_class_state(cam.class.id, ClassLoadingState::LOADED) {
         unimplemented!()
     }
-    trace!("loading state is: {:?}", ctx.vm.class_manager.class_loading_states.read()?.get(&cam.class.id));
+    trace!("loading state is: {:?}", ctx.vm.class_manager.class_loading_states.read().get(&cam.class.id));
     trace!("finished loading class to execute on: '{}'", cam.class.name.as_str());
     trace!("args_count: {}", args_count);
     let mut args = Vec::new();
@@ -1247,7 +1270,7 @@ fn execute_invoke<'a>(ctx: Context<'a, '_>, index: u16, kind: InvokeKind) -> VMP
             let reference = ctx.vm.resolve_object_by_id(ref_id)?;
             Some(reference)
         } else {
-            println!("XXXX: {} {:?}", class_and_method.class.name, ctx.vm.class_manager.class_loading_states.read()?.get(&class_and_method.class.id));
+            println!("XXXX: {} {:?}", class_and_method.class.name, ctx.vm.class_manager.class_loading_states.read().get(&class_and_method.class.id));
             return Err(VmError::ValidationError(format!("Expected object or array as receiver for {} but found: {:?}", class_and_method.format(), popped)));
         }
     };
@@ -1290,11 +1313,14 @@ fn execute_invoke<'a>(ctx: Context<'a, '_>, index: u16, kind: InvokeKind) -> VMP
         trace!("    [{}] {:?}", index, value);
     }
     debug!("INVOKE{:?}: {}{} on {:?}", kind, cam.method.name, cam.method.descriptor.as_str(), receiver);
-    if let Some(rec) = receiver{
-        ctx.thread.debug_helper.tracker.push_object_event(rec.id, format!("Preparing call {} with args:{}", class_and_method.format(), args.iter().map(|v| format!("\n    {}", v.print(ctx.vm))).collect::<Vec<_>>().join("")));
-        ctx.thread.debug_helper.tracker.push_method_event(class_and_method.format(), format!("Calling on {} from {} with args: {}", rec.print(ctx.vm), calling_class_and_method.format(), args.iter().map(|v| format!("\n    {}", v.print(ctx.vm))).collect::<Vec<_>>().join("") ));
-    } else {
-        ctx.thread.debug_helper.tracker.push_method_event(class_and_method.format(), format!("Calling static from {} with args: {}", calling_class_and_method.format(), args.iter().map(|v| format!("\n    {}", v.print(ctx.vm))).collect::<Vec<_>>().join("") ));
+    #[cfg(feature = "debug")]
+    {
+        if let Some(rec) = receiver{
+            ctx.thread.debug_helper.tracker.push_object_event(rec.id, format!("Preparing call {} with args:{}", class_and_method.format(), args.iter().map(|v| format!("\n    {}", v.print(ctx.vm))).collect::<Vec<_>>().join("")));
+            ctx.thread.debug_helper.tracker.push_method_event(class_and_method.format(), format!("Calling on {} from {} with args: {}", rec.print(ctx.vm), calling_class_and_method.format(), args.iter().map(|v| format!("\n    {}", v.print(ctx.vm))).collect::<Vec<_>>().join("") ));
+        } else {
+            ctx.thread.debug_helper.tracker.push_method_event(class_and_method.format(), format!("Calling static from {} with args: {}", calling_class_and_method.format(), args.iter().map(|v| format!("\n    {}", v.print(ctx.vm))).collect::<Vec<_>>().join("") ));
+        }
     }
     if !class_and_method.class.has_method_polymorphic_signature(class_and_method.method) {
         for (i, provided_arg) in args.iter().filter(|a| if let Value::Dummy = a {false} else {true}).enumerate(){
