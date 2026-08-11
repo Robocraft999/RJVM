@@ -957,6 +957,13 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
 
                 Instruction::WIDE(op, index, const_option) => {
                     match Instruction::from_repr(*op).unwrap(){
+                        Instruction::IINC(..) => {
+                            if let (Some(Value::Integer(value)), Some(amount)) = (ctx.thread.call_stack.load_local(*index as usize), const_option) {
+                                ctx.thread.call_stack.store_local(Value::Integer(value + *amount as i32), *index as usize);
+                            } else {
+                                return Some(Err(VmError::ValidationError("Expected an int and a constant value".to_owned())))
+                            }
+                        }
                         unknown => unreachable!("WIDE with op: {:?} not executable", unknown)
                     }
                 }
