@@ -15,7 +15,7 @@ use crate::class_file::methods::descriptor::MethodDescriptor;
 use crate::error::ClassParseError;
 use crate::vm::class::{ClassAndMethod, ClassId, ClassRef};
 use crate::vm::class_manager::ClassLoadingState;
-use crate::vm::constants::classes::{JAVA_LANG_CLASS, JAVA_LANG_INVOKE_MHN, JAVA_LANG_LONG, JAVA_LANG_STRING};
+use crate::vm::constants::classes::{JAVA_LANG_CHAR_ARR_PRIM, JAVA_LANG_CLASS, JAVA_LANG_CLASS_ARR, JAVA_LANG_INVOKE_MHN, JAVA_LANG_LONG, JAVA_LANG_OBJECT, JAVA_LANG_OBJECT_ARR, JAVA_LANG_STRING};
 use crate::vm::constants::{BOOLEAN_value_INDEX, BYTE_value_INDEX, CHARACTER_value_INDEX, CLASS_classloader_INDEX, CLASS_name_INDEX, DOUBLE_value_INDEX, FLOAT_value_INDEX, INTEGER_value_INDEX, LONG_value_INDEX, METHODTYPE_ptypes_INDEX, METHODTYPE_rtype_INDEX, SHORT_value_INDEX, STRING_hash_INDEX, STRING_value_INDEX};
 use crate::vm::gc::ObjectAllocator;
 use crate::vm::java_error::JavaError;
@@ -23,7 +23,6 @@ use crate::vm::java_thread::{JavaThread, ThreadMeta, TID};
 use crate::vm::jni::types::{jclass, jobject};
 use crate::vm::monitoring::MonitorHandler;
 use crate::vm::native::{register_all_natives, NativeMethodRegistry};
-use crate::vm::r#unsafe::Unsafe;
 use crate::vm::result::{VMPartialResult, VMResult, VMResultType};
 use crate::vm::value::{RefId, Reference, ReferenceType};
 use crate::{get_or_init, get_or_init_special};
@@ -33,6 +32,8 @@ use value::Value;
 use crate::vm::application::thread;
 use crate::vm::call_frame::CallFrame;
 use crate::vm::debug::validation::FieldTypeExt;
+use crate::vm::heap::direct::Unsafe;
+use crate::vm::heap::HeapAllocator;
 
 pub mod class_path;
 pub mod class_path_entry;
@@ -43,7 +44,6 @@ mod call_frame;
 mod callstack;
 pub mod class;
 mod gc;
-mod r#unsafe;
 pub mod result;
 pub mod bytecode; //TODO move out from vm
 mod executor;
@@ -55,11 +55,13 @@ mod native;
 mod java_thread;
 pub mod application;
 mod monitoring;
+mod heap;
 
 pub struct VM<'a>{
     pub class_manager: ClassManager<'a>,
     pub object_allocator: ObjectAllocator<'a>,
     pub unsafe_allocator: Unsafe,
+    pub heap_allocator: HeapAllocator,
     pub objects_by_id: RwLock<HashMap<RefId, Reference<'a>>>,
     pub static_class_objects: RwLock<HashMap<ClassId, Reference<'a>>>,
     pub string_objects: RwLock<HashMap<String, Reference<'a>>>,
@@ -84,6 +86,7 @@ impl<'a> VM<'a>{
             class_manager,
             object_allocator: ObjectAllocator::new(),
             unsafe_allocator,
+            heap_allocator: HeapAllocator::new(),
             objects_by_id: RwLock::new(HashMap::new()),
             static_class_objects: RwLock::new(HashMap::new()),
             string_objects: RwLock::new(HashMap::new()),
@@ -130,10 +133,8 @@ impl<'a> VM<'a>{
     pub fn extract_string_from_char_arr(&self, chars: Value) -> VMResult<String>{
         if let Value::Reference(char_arr_id) = chars {
             let char_ref = self.resolve_object_by_id(char_arr_id)?;
-            if let ReferenceType::Array(_, _, content) = &char_ref.reference_type{
-                let chars: Vec<u8> = content.read().iter().map(|v| if let Value::Integer(val) = v {*val as u8} else {0}).collect();
-                let string = from_java_cesu8(chars.as_slice())?.to_string();
-                return Ok(string);
+            if let ReferenceType::Array(content) = &char_ref.reference_type {
+                return content.read().get_as_string().ok_or(VmError::ValidationError("Not a Char array".to_owned()));
             }
         }
         Err(VmError::ValidationError(format!( "Expected CharArray but found: {:?}", chars)))
@@ -454,15 +455,10 @@ impl<'a> Context<'a, '_> {
         get_or_init_special!(self.get_or_initialize_class(class_name)?, |class| Ok(VMResultType::Successful(self.new_object_from_class(class))))
     }
 
-    pub fn new_array(&self, dims: usize, array_field_type: FieldType, content: RwLock<Vec<Value>>) -> VMPartialResult<Reference<'a>>{
-        let (class_name, component_type) = if let FieldType::Array(class_name, component_type) = array_field_type {
-            (class_name, component_type)
-        } else {
-            unreachable!("The field type for creating an array has to be an array field type")
-        };
+    pub fn new_array(&self, class: ClassRef<'a>, content: Vec<Value>) -> VMPartialResult<Reference<'a>>{
         //FIXME verify if this is correct / maybe have to init the component type
-        let class = self.get_or_resolve_class(class_name.as_str())?;
-        let obj = self.vm.object_allocator.allocate_array(class, dims, *component_type, content);
+        let content = self.vm.heap_allocator.allocate_array_body(class, content);
+        let obj = self.vm.object_allocator.allocate_array(class, content);
         self.vm.objects_by_id.write().insert(obj.id, obj);
         #[cfg(feature = "debug")]
         thread().debug_helper.tracker.push_object_event(obj.id, format!("Array allocated:   \n{:?}", obj.print(self.vm)));
@@ -477,8 +473,8 @@ impl<'a> Context<'a, '_> {
         )*/
     }
 
-    pub fn try_new_array(&self, dims: usize, array_field_type: FieldType, content: RwLock<Vec<Value>>) -> VMResult<Reference<'a>>{
-        let result = self.new_array(dims, array_field_type, content)?;
+    pub fn try_new_array(&self, class: ClassRef<'a>, content: Vec<Value>) -> VMResult<Reference<'a>>{
+        let result = self.new_array(class, content)?;
         if let VMResultType::Successful(object) = result {
             Ok(object)
         } else {
@@ -487,11 +483,13 @@ impl<'a> Context<'a, '_> {
     }
 
     pub fn new_class_array_1(&self, content: Vec<Value>) -> VMPartialResult<Reference<'a>>{
-        self.new_array(1, FieldType::Object("java/lang/Class".to_owned()).to_array_field_type(1), RwLock::new(content))
+        let arr_clazz = self.get_or_resolve_class(JAVA_LANG_CLASS_ARR)?;
+        self.new_array(arr_clazz, content)
     }
 
     pub fn new_object_array_1(&self, content: Vec<Value>) -> VMPartialResult<Reference<'a>>{
-        self.new_array(1, FieldType::Object("java/lang/Object".to_owned()).to_array_field_type(1), RwLock::new(content))
+        let arr_clazz = self.get_or_resolve_class(JAVA_LANG_OBJECT_ARR)?;
+        self.new_array(arr_clazz, content)
     }
 
     pub fn try_new_string_object(&self, string: &str) -> VMResult<Reference<'a>>{
@@ -518,9 +516,9 @@ impl<'a> Context<'a, '_> {
         }
 
         let char_array: Vec<Value> = string.chars().map(|c| Value::Integer(c as i32)).collect();
-        let char_array = RwLock::new(char_array);
 
-        let char_array = Value::Reference(get_or_init!(self.new_array(1, FieldType::Primitive(PrimitiveType::Char).to_array_field_type(1), char_array)?).id);
+        let arr_clazz = self.get_or_resolve_class(JAVA_LANG_CHAR_ARR_PRIM)?;
+        let char_array = Value::Reference(get_or_init!(self.new_array(arr_clazz, char_array)?).id);
 
         let string_clazz = self.get_or_resolve_class(JAVA_LANG_STRING)?;
         let string_object = self.new_object_from_class(string_clazz);
@@ -607,8 +605,8 @@ impl<'a> Context<'a, '_> {
         let ptypes_array_ref = self.vm.resolve_object_by_id(method_type_ref.get_ref_field(METHODTYPE_ptypes_INDEX)?)?;
 
         let mut desc = String::from("(");
-        if let ReferenceType::Array(_, _, content) = &ptypes_array_ref.reference_type {
-            for p in content.read().iter() {
+        if let ReferenceType::Array(content) = &ptypes_array_ref.reference_type {
+            for p in content.read().as_vec().iter() {
                 let Value::Reference(param_class_ref_id) = p else { return Err(VmError::ValidationError("Expected a reference".to_string())); };
                 let param_class_name = &self.resolve_clazz_by_class_ref_id(*param_class_ref_id)?.name;
                 trace!(target: "native", "{}", param_class_name);

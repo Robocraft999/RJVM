@@ -1,6 +1,6 @@
 use crate::vm::class::ClassId;
 use crate::vm::class_path::ClassPath;
-use crate::vm::constants::classes::{JAVA_LANG_CLASS, JAVA_LANG_CLASSLOADER, JAVA_LANG_ILLEGAL_ARGUMENT_EXCEPTION, JAVA_LANG_INVOKE_METHOD_HANDLE, JAVA_LANG_INVOKE_METHOD_TYPE, JAVA_LANG_INVOKE_MHN, JAVA_LANG_NULL_POINTER_EXCEPTION, JAVA_LANG_REFLECT_METHOD, JAVA_LANG_STRING, JAVA_LANG_SYSTEM, JAVA_LANG_THREAD, JAVA_LANG_THREAD_GROUP};
+use crate::vm::constants::classes::{JAVA_LANG_CLASS, JAVA_LANG_CLASSLOADER, JAVA_LANG_ILLEGAL_ARGUMENT_EXCEPTION, JAVA_LANG_INVOKE_METHOD_HANDLE, JAVA_LANG_INVOKE_METHOD_TYPE, JAVA_LANG_INVOKE_MHN, JAVA_LANG_NULL_POINTER_EXCEPTION, JAVA_LANG_REFLECT_METHOD, JAVA_LANG_STRING, JAVA_LANG_STRING_ARR, JAVA_LANG_SYSTEM, JAVA_LANG_THREAD, JAVA_LANG_THREAD_GROUP};
 use crate::vm::constants::{THREAD_eetop_INDEX, THREAD_priority_INDEX, THREAD_threadStatus_INDEX};
 use crate::vm::java_thread::{JavaThread, NORM_PRIORITY, RUNNABLE};
 use crate::vm::jni::types::{JNIEnv, JavaVM};
@@ -187,13 +187,14 @@ impl <'a> Application<'a> {
     pub fn start_user_code(&self) {
         let ctx = self.context();
         let args = env::args().skip(1).map(|s| Value::Reference(ctx.try_new_string_object(&s).unwrap().id)).collect();
-        let args_array = ctx.try_new_array(1, FieldType::Object(JAVA_LANG_STRING.to_owned()).to_array_field_type(1), RwLock::new(args)).unwrap();
+        let string_arr_clazz = ctx.get_or_resolve_class(JAVA_LANG_STRING_ARR).unwrap();
+        let args_array = ctx.try_new_array(string_arr_clazz, args).unwrap();
         let args = vec![Value::Reference(args_array.id)];
         //run_and_catch_method(&mut vm, "de/klassenserver7b/k7bot/Main", "main", "([Ljava/lang/String;)V", p_args);
         //app.run_and_catch_method("Main", "main", "([Ljava/lang/String;)V", p_args);
 
         let main_class_name = "logicsim/App";
-        //let main_class_name = "mt/Main";
+        //let main_class_name = "Hello";
         ctx.thread.call_stack.class_loaders.borrow_mut().push(*ctx.vm.system_class_loader.read());
         let clazz = ctx.get_or_resolve_class(main_class_name).unwrap();
         self.init_class(main_class_name);

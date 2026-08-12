@@ -32,6 +32,3 @@ debug = ["dep:toml", "dep:serde"]
 validation = []
 il = []
 default = ["il"]
-
-[profile.release]
-debug = true

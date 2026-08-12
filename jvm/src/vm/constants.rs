@@ -12,6 +12,9 @@ pub const FILEINPUTSTREAM_path_INDEX: usize = 2;
 // java.io.File
 pub const FILE_path_INDEX: usize = 1;
 
+// java.io.FileOutputStream
+pub const FILEOUTPUTSTREAM_fd_INDEX: usize = 0;
+
 // java.io.RandomAccessFile
 pub const RANDOMACCESSFILE_fd_INDEX: usize = 0;
 
@@ -124,7 +127,11 @@ pub mod classes {
     pub const JAVA_IO_RANDOM_ACCESS_FILE: &str = "java/io/RandomAccessFile";
     pub const JAVA_IO_UNIX_FILE_SYSTEM: &str = "java/io/UnixFileSystem";
     pub const JAVA_LANG_ARITHMETIC_EXCEPTION: &str = "java/lang/ArithmeticException";
+    pub const JAVA_LANG_BYTE_ARR_PRIM: &str = "[B";
+    pub const JAVA_LANG_BYTE_ARR_PRIM_2: &str = "[[B";
+    pub const JAVA_LANG_CHAR_ARR_PRIM: &str = "[C";
     pub const JAVA_LANG_CLASS: &str = "java/lang/Class";
+    pub const JAVA_LANG_CLASS_ARR: &str = "[Ljava/lang/Class;";
     pub const JAVA_LANG_CLASSLOADER: &str = "java/lang/ClassLoader";
     pub const JAVA_LANG_DOUBLE: &str = "java/lang/Double";
     pub const JAVA_LANG_FLOAT: &str = "java/lang/Float";
@@ -140,10 +147,14 @@ pub mod classes {
     pub const JAVA_LANG_PROCESS_ENVIRONMENT: &str = "java/lang/ProcessEnvironment";
     pub const JAVA_LANG_REFLECT_ARRAY: &str = "java/lang/reflect/Array";
     pub const JAVA_LANG_REFLECT_CONSTRUCTOR: &str = "java/lang/reflect/Constructor";
+    pub const JAVA_LANG_REFLECT_CONSTRUCTOR_ARR: &str = "[Ljava/lang/reflect/Constructor;";
     pub const JAVA_LANG_REFLECT_FIELD: &str = "java/lang/reflect/Field";
+    pub const JAVA_LANG_REFLECT_FIELD_ARR: &str = "[Ljava/lang/reflect/Field;";
     pub const JAVA_LANG_REFLECT_METHOD: &str = "java/lang/reflect/Method";
+    pub const JAVA_LANG_REFLECT_METHOD_ARR: &str = "[Ljava/lang/reflect/Method;";
     pub const JAVA_LANG_RUNTIME: &str = "java/lang/Runtime";
     pub const JAVA_LANG_STRING: &str = "java/lang/String";
+    pub const JAVA_LANG_STRING_ARR: &str = "[Ljava/lang/String;";
     pub const JAVA_LANG_SYSTEM: &str = "java/lang/System";
     pub const JAVA_LANG_THREAD: &str = "java/lang/Thread";
     pub const JAVA_LANG_THREAD_GROUP: &str = "java/lang/ThreadGroup";

@@ -1,10 +1,11 @@
-use std::ffi::CString;
-use libc::{c_int, stat64, FIONREAD};
+use std::ffi::{c_void, CString};
+use libc::{c_int, read, stat64, write, FIONREAD};
 use log::error;
 use crate::vm::constants::classes::JAVA_IO_IOEXCEPTION;
-use crate::vm::constants::FILEDESCRIPTOR_fd_INDEX;
+use crate::vm::constants::{FILEDESCRIPTOR_fd_INDEX};
 use crate::vm::Context;
 use crate::vm::java_thread::JavaThread;
+use crate::vm::jni::types::{jbyte, jchar};
 use crate::vm::native::wrap_init;
 use crate::vm::result::{VMPartialResult, VMResultType};
 use crate::vm::value::{Reference, Value};
@@ -103,4 +104,12 @@ pub unsafe fn file_close(ctx: Context, this_ref: Reference, fd_field_index: usiz
     }
 
     Ok(VMResultType::Successful(()))
+}
+
+pub unsafe fn handle_write(fd: i32, buf: *const jbyte, len: usize) -> isize {
+    unsafe { write(fd, buf as *const c_void, len) }
+}
+
+pub unsafe fn handle_read(fd: i32, buf: *mut jbyte, len: usize)  -> isize {
+    unsafe { read(fd, buf as *mut c_void, len) }
 }

@@ -1,9 +1,7 @@
-use crate::vm::r#unsafe::memory_chunk::MemoryChunk;
 use crate::vm::result::VMResult;
 use parking_lot::RwLock;
+use crate::vm::heap::memory_chunk::MemoryChunk;
 use crate::vm::jni::types::{jbyte, jchar, jdouble, jfloat, jint, jlong, jshort};
-
-mod memory_chunk;
 
 macro_rules! gen_mem_access {
     ($name_get:ident, $name_put:ident, $simple_type:ty, $native_type:ty) => {
@@ -72,7 +70,7 @@ impl Unsafe {
 
 #[cfg(test)]
 mod tests {
-    use crate::vm::r#unsafe::Unsafe;
+    use crate::vm::heap::direct::Unsafe;
 
     #[test]
     fn test_allocate_memory() {

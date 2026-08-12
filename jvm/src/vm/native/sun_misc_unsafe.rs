@@ -549,8 +549,8 @@ gen_delegate!(delegate_define_class, |ctx, _obj_ref, args| {
     if let (Some(class_name_value), Some(Value::Reference(bytes_ref_id)), Some(Value::Integer(start)), Some(Value::Integer(end))) = (args.get(0), args.get(1), args.get(2), args.get(3)) {
         let class_name = ctx.vm.extract_string_from_value(*class_name_value)?;
         let bytes_ref = ctx.vm.resolve_object_by_id(*bytes_ref_id)?;
-        let bytes = if let ReferenceType::Array(_, _, data) = &bytes_ref.reference_type{
-            data.read().iter().map(|val| if let Value::Integer(byte) = val {*byte as u8} else {0}).collect()
+        let bytes = if let ReferenceType::Array(data) = &bytes_ref.reference_type{
+            data.read().as_byte_vec().unwrap()
         } else {
             Vec::new()
         };
@@ -566,8 +566,8 @@ gen_delegate!(delegate_define_anon_class, |ctx, _obj_ref, args| {
     if let (Some(Value::Reference(host_class_id)), Some(Value::Reference(byte_arr_ref_id)), Some(Value::Reference(_cp_patch_arr_ref))) = (args.get(0), args.get(1), args.get(2)) {
         let host_class_ref = ctx.vm.resolve_object_by_id(*host_class_id)?;
         let byte_arr_ref = ctx.vm.resolve_object_by_id(*byte_arr_ref_id)?;
-        if let ReferenceType::Array(_, _, bytes ) = &byte_arr_ref.reference_type{
-            let bytes = bytes.read().iter().map(|val| if let Value::Integer(byte) = val {*byte as u8} else {0}).collect::<Vec<_>>();
+        if let ReferenceType::Array(bytes ) = &byte_arr_ref.reference_type{
+            let bytes = bytes.read().as_byte_vec().unwrap();
             let class = ctx.vm.class_manager.define_class(&ctx, None, None, bytes)?;
             
             let class_ref = {

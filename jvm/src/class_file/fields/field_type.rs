@@ -56,16 +56,18 @@ impl FieldType {
         }
         let prefix = "[".repeat(dims);
         match self.clone() {
+            // Extends the primitive type to an n-dim array type
             FieldType::Primitive(primitive_type) => {
                 let name = prefix + primitive_type_to_descriptor(&primitive_type).as_str();
                 FieldType::Array(name, Box::new(self))
             }
+            // Extends the object type to an n-dim array type
             FieldType::Object(name) => {
                 let name = prefix + "L" + name.as_str() + ";";
                 FieldType::Array(name, Box::new(self))
             }
-            //FIXME should we allow this?
-            FieldType::Array(_, _) => panic!("Can't make {self:?} an array type, because it is already one"),
+            // Extends the m-dim array type to an (n+m)-dim array type
+            FieldType::Array(name, component_type) => FieldType::Array(prefix + name.as_str(), component_type),
         }
     }
 

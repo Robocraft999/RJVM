@@ -1,7 +1,7 @@
 use crate::class_file::fields::field_type::{FieldType, PrimitiveType};
 use crate::vm::application::{thread, JAVA_THREAD};
 use crate::vm::class::ClassAndMethod;
-use crate::vm::constants::classes::{JAVA_LANG_PACKAGE, JAVA_LANG_PROCESS_ENVIRONMENT, JAVA_LANG_REFLECT_ARRAY, JAVA_LANG_RUNTIME, JAVA_LANG_STRING, JAVA_LANG_THREAD, JAVA_LANG_THROWABLE};
+use crate::vm::constants::classes::{JAVA_LANG_BYTE_ARR_PRIM, JAVA_LANG_BYTE_ARR_PRIM_2, JAVA_LANG_PACKAGE, JAVA_LANG_PROCESS_ENVIRONMENT, JAVA_LANG_REFLECT_ARRAY, JAVA_LANG_RUNTIME, JAVA_LANG_STRING, JAVA_LANG_THREAD, JAVA_LANG_THROWABLE};
 use crate::vm::constants::{THREADGROUP_maxPriority_INDEX, THREADGROUP_nUnstartedThreads_INDEX, THREADGROUP_name_INDEX, THREADGROUP_parent_INDEX, THREAD_daemon_INDEX, THREAD_group_INDEX, THREAD_name_INDEX, THREAD_priority_INDEX, THREAD_target_INDEX};
 use crate::vm::java_thread::JavaThread;
 use crate::vm::jni::types::{JNIEnv, JavaVM};
@@ -167,17 +167,15 @@ gen_delegate!(delegate_environ, |ctx, _obj_ref, _args| {
     let vars = vec![
         ("DISPLAY", ":0")
     ];
-    fn byte_array_from_str<'s>(ctx: &Context<'s, '_>, string: &str) -> VMResult<Reference<'s>>{
-        ctx.try_new_array(1, FieldType::Primitive(PrimitiveType::Byte).to_array_field_type(1), RwLock::new(string.as_bytes().iter().map(|c| Value::Integer(*c as i32)).collect()))
-    }
-    let _ = wrap_init!(ctx, ctx.new_array(1, FieldType::Primitive(PrimitiveType::Byte).to_array_field_type(1), RwLock::new(Vec::new()))?);
+    let arr_clazz_1 = ctx.get_or_resolve_class(JAVA_LANG_BYTE_ARR_PRIM)?;
+    let arr_clazz_2 = ctx.get_or_resolve_class(JAVA_LANG_BYTE_ARR_PRIM_2)?;
     let values: Vec<Value> = vars.iter()
         .flat_map(|(k, v)| vec![
-            Value::Reference(byte_array_from_str(&ctx, k).unwrap().id),
-            Value::Reference(byte_array_from_str(&ctx, v).unwrap().id),
+            Value::Reference(ctx.try_new_array(arr_clazz_1, k.as_bytes().iter().map(|c| Value::Integer(*c as i32)).collect()).unwrap().id),
+            Value::Reference(ctx.try_new_array(arr_clazz_1, v.as_bytes().iter().map(|c| Value::Integer(*c as i32)).collect()).unwrap().id),
         ])
         .collect();
-    let array_ref = wrap_init!(ctx, ctx.new_array(2, FieldType::Primitive(PrimitiveType::Byte).to_array_field_type(2), RwLock::new(values.clone()))?);
+    let array_ref = wrap_init!(ctx, ctx.new_array(arr_clazz_2, values.clone())?);
     non_failing_some(Value::Reference(array_ref.id))
 });
 
@@ -195,11 +193,12 @@ gen_delegate!(delegate_get_system_package0, |ctx, _obj_ref, args| {
 gen_delegate!(delegate_new_array, |ctx, _obj_ref, args| {
     if let (Some(Value::Reference(class_ref_id)), Some(Value::Integer(length))) = (args.get(0), args.get(1)) {
         let clazz = ctx.resolve_clazz_by_class_ref_id(*class_ref_id)?;
+        let arr_clazz_name = FieldType::Object(clazz.name.clone()).to_array_field_type(1).to_class_name();
+        let arr_clazz = ctx.get_or_resolve_class(arr_clazz_name.as_str())?;
         let content = vec![ctx.vm.null(); *length as usize];
         let arr_ref = wrap_init!(ctx, ctx.new_array(
-            1,
-            FieldType::Object(clazz.name.clone()).to_array_field_type(1),
-            RwLock::new(content.clone())
+            arr_clazz,
+            content.clone()
         )?);
         non_failing_some(Value::Reference(arr_ref.id))
     } else {

@@ -47,9 +47,10 @@ gen_delegate!(delegate_clone, |ctx, obj_ref, _args| {
     debug!("clone");
     if let Some(obj_ref) = obj_ref{
         match &obj_ref.reference_type {
-            ReferenceType::Array(dims, component_type, content) => {
+            ReferenceType::Array(content) => {
                 debug!("Cloning array: {:?}", obj_ref);
-                let new_array_ref = wrap_init!(ctx, ctx.new_array(*dims, component_type.clone().to_array_field_type(*dims), RwLock::new(content.read().clone()))?);
+                let arr_class = ctx.vm.find_class_by_id(obj_ref.class_id).unwrap();
+                let new_array_ref = wrap_init!(ctx, ctx.new_array(arr_class, content.read().as_vec())?);
                 #[cfg(feature = "debug")]
                 ctx.thread.debug_helper.tracker.push_object_event(new_array_ref.id, format!("Cloned from:\n    {:?}", obj_ref));
                 non_failing_some(Value::Reference(new_array_ref.id))

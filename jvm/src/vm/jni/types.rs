@@ -19,6 +19,8 @@ use std::ffi::{c_char, c_double, c_float, c_int, c_long, c_schar, c_short, c_uch
 use std::fmt::Debug;
 use std::os::unix::ffi::OsStrExt;
 use std::{ptr, slice};
+use std::ops::{Deref, DerefMut};
+use crate::vm::heap::array::ArrayContent;
 use crate::vm::jni::{ctx, native_init_wrap};
 
 //Platform dependent
@@ -244,14 +246,15 @@ macro_rules! gen_call_static_type_methods {
 }
 
 macro_rules! gen_prim_array_methods {
-    ($name_new:ident, $name_get_elems:ident, $name_rel_elems:ident, $name_get_region:ident, $name_set_region:ident, $prim_type:path, $native_arr_type:ty, $native_type:ty, $typ:path, $init_val:expr, $simple_typ:ty) => {
+    ($name_new:ident, $name_get_elems:ident, $name_rel_elems:ident, $name_get_region:ident, $name_set_region:ident, $prim_type:path, $arr_content_type:path, $native_arr_type:ty, $native_type:ty, $typ:path, $init_val:expr, $simple_typ:ty) => {
         pub unsafe extern "system-unwind" fn $name_new(env: *mut JNIEnv, length: jsize) -> $native_arr_type {
             let ctx = ctx!(env);
             let content = vec![$typ($init_val); length as usize];
+            let arr_class_name = FieldType::Primitive($prim_type).to_array_field_type(1).to_class_name();
+            let arr_clazz = ctx.get_or_resolve_class(arr_class_name.as_str()).unwrap();
             let array_ref = native_init_wrap!(env, ctx.new_array(
-                1,
-                FieldType::Primitive($prim_type).to_array_field_type(1),
-                RwLock::new(content.clone())
+                arr_clazz,
+                content.clone()
             ));
             array_ref.id.nid() as $native_arr_type
         }
@@ -262,22 +265,15 @@ macro_rules! gen_prim_array_methods {
 
             if !isCopy.is_null() {
                 unsafe {
-                    *isCopy = JNI_TRUE;
+                    *isCopy = JNI_FALSE;
                 }
             }
 
-            if let ReferenceType::Array(_, ft, content) = &array_ref.reference_type {
-                let bytes: Vec<u8> = content.read()
-                    .iter()
-                    .flat_map(|val| match (ft, val) {
-                        (FieldType::Primitive($prim_type), $typ(val)) => (*val as $native_type).to_le_bytes().to_vec(),
-                        _ => unreachable!()
-                    })
-                    .collect();
-                let ptr = vm.unsafe_allocator.allocate_memory(bytes.len());
-                vm.unsafe_allocator.put_bytes(ptr, &bytes).unwrap();
-
-                ptr as *const $native_type
+            if let ReferenceType::Array(content) = &array_ref.reference_type {
+                match &*content.read() {
+                    $arr_content_type(raw) => raw.as_ptr(),
+                    _ => unreachable!(),
+                }
             } else {
                 ptr::null()
             }
@@ -287,52 +283,35 @@ macro_rules! gen_prim_array_methods {
             let vm: &VM = unsafe{(*env).vm()};
             let array_ref = vm.resolve_object_by_jobject(array).unwrap();
 
-            if let ReferenceType::Array(_, ft, content) = &array_ref.reference_type {
-                let width = Self::get_native_width(ft);
-                let allocation_size = width * array_ref.get_length();
-
-                let bytes = vm.unsafe_allocator.get_bytes(elems as i64, allocation_size).unwrap();
-                let vals = bytes.chunks(width).map(|bytes| match ft {
-                    FieldType::Primitive($prim_type) => $typ(<$native_type>::from_le_bytes(bytes.try_into().unwrap()) as $simple_typ),
-                    _ => unreachable!()
-                }).collect::<Vec<_>>();
-
-                let mut guard = content.write();
-                guard.copy_from_slice(vals.as_slice())
+            if let ReferenceType::Array(content) = &array_ref.reference_type {
+                match &*content.write() {
+                    $arr_content_type(raw) => unsafe { raw.unchecked_copy_from(elems, 0, raw.len()) },
+                    _ => unreachable!(),
+                }
             }
         }
 
         pub unsafe extern "system-unwind" fn $name_get_region(env: *mut JNIEnv, array: $native_arr_type, start: jsize, len: jsize, buf: *mut $native_type){
             let vm: &VM = unsafe{(*env).vm()};
             let array_ref = vm.resolve_object_by_jobject(array).unwrap();
-            if let ReferenceType::Array(_, _, content) = &array_ref.reference_type{
-                content.read()
-                    .iter()
-                    .enumerate()
-                    .skip(start as usize)
-                    .for_each(|(i, val)| if let $typ(b) = val {
-                        unsafe {
-                            *(buf.add(i)) = *b as $native_type
-                        }
-                    } else {unreachable!()});
+            if let ReferenceType::Array(content) = &array_ref.reference_type{
+                match &*content.read() {
+                    $arr_content_type(raw) => unsafe { raw.unchecked_copy_to(buf, start as usize, len as usize) },
+                    _ => unreachable!(),
+                }
             } else {
                 unimplemented!()
             }
         }
 
-        pub unsafe extern "system-unwind" fn $name_set_region(env: *mut JNIEnv, array: $native_arr_type, start: jsize, len: jsize, buf: *mut $native_type) {
+        pub unsafe extern "system-unwind" fn $name_set_region(env: *mut JNIEnv, array: $native_arr_type, start: jsize, len: jsize, buf: *const $native_type) {
             let vm: &VM = unsafe{(*env).vm()};
             let array_ref = vm.resolve_object_by_jobject(array).unwrap();
-            if let ReferenceType::Array(_, _, content) = &array_ref.reference_type{
-                content.write()
-                    .iter_mut()
-                    .enumerate()
-                    .skip(start as usize)
-                    .for_each(|(i, val)| if let $typ(b) = val {
-                        unsafe {
-                            *b = *(buf.add(i)) as $simple_typ
-                        }
-                    } else {unreachable!()});
+            if let ReferenceType::Array(content) = &array_ref.reference_type{
+                match &*content.write() {
+                    $arr_content_type(raw) => unsafe { raw.unchecked_copy_from(buf, start as usize, len as usize) },
+                    _ => unreachable!(),
+                }
             } else {
                 unimplemented!()
             }
@@ -1022,10 +1001,10 @@ impl JNINativeInterface_ {
         };
 
         let content = vec![init_val; length as usize];
+        let arr_clazz = ctx.get_or_resolve_class(format!("[L{};", clazz.name).as_str()).unwrap();
         let array_ref = native_init_wrap!(env, ctx.new_array(
-            1,
-            FieldType::Object(clazz.name.clone()).to_array_field_type(1),
-            RwLock::new(content.clone())
+            arr_clazz,
+            content.clone()
         ));
         array_ref.id.nid() as jobjectArray
     }
@@ -1051,15 +1030,15 @@ impl JNINativeInterface_ {
         array_ref.set_element(index as usize, value_ref);
     }
 
-    //($name_new:ident, $name_get_elems:ident, $name_rel_elems:ident, $name_get_region:ident, $name_set_region:ident, $prim_type:path, $native_arr_type:ty, $native_type:ty, $typ:path, $init_val:expr, $simple_typ:ty)
-    gen_prim_array_methods!(NewBooleanArray, GetBooleanArrayElements, ReleaseBooleanArrayElements, GetBooleanArrayRegion, SetBooleanArrayRegion, PrimitiveType::Boolean, jbooleanArray, jboolean, Value::Integer, 0,   i32);
-    gen_prim_array_methods!(NewByteArray,    GetByteArrayElements,    ReleaseByteArrayElements,    GetByteArrayRegion,    SetByteArrayRegion,    PrimitiveType::Byte,    jbyteArray,    jbyte,    Value::Integer, 0,   i32);
-    gen_prim_array_methods!(NewCharArray,    GetCharArrayElements,    ReleaseCharArrayElements,    GetCharArrayRegion,    SetCharArrayRegion,    PrimitiveType::Char,    jcharArray,    jchar,    Value::Integer, 0,   i32);
-    gen_prim_array_methods!(NewShortArray,   GetShortArrayElements,   ReleaseShortArrayElements,   GetShortArrayRegion,   SetShortArrayRegion,   PrimitiveType::Short,   jshortArray,   jshort,   Value::Integer, 0,   i32);
-    gen_prim_array_methods!(NewIntArray,     GetIntArrayElements,     ReleaseIntArrayElements,     GetIntArrayRegion,     SetIntArrayRegion,     PrimitiveType::Integer, jintArray,     jint,     Value::Integer, 0,   i32);
-    gen_prim_array_methods!(NewLongArray,    GetLongArrayElements,    ReleaseLongArrayElements,    GetLongArrayRegion,    SetLongArrayRegion,    PrimitiveType::Long,    jlongArray,    jlong,    Value::Long,    0,   i64);
-    gen_prim_array_methods!(NewFloatArray,   GetFloatArrayElements,   ReleaseFloatArrayElements,   GetFloatArrayRegion,   SetFloatArrayRegion,   PrimitiveType::Float,   jfloatArray,   jfloat,   Value::Float,   0.0, f32);
-    gen_prim_array_methods!(NewDoubleArray,  GetDoubleArrayElements,  ReleaseDoubleArrayElements,  GetDoubleArrayRegion,  SetDoubleArrayRegion,  PrimitiveType::Double,  jdoubleArray,  jdouble,  Value::Double,  0.0, f64);
+    //($name_new:ident, $name_get_elems:ident, $name_rel_elems:ident, $name_get_region:ident, $name_set_region:ident, $prim_type:path, $arr_content_type:path, $native_arr_type:ty, $native_type:ty, $typ:path, $init_val:expr, $simple_typ:ty)
+    gen_prim_array_methods!(NewBooleanArray, GetBooleanArrayElements, ReleaseBooleanArrayElements, GetBooleanArrayRegion, SetBooleanArrayRegion, PrimitiveType::Boolean, ArrayContent::Bool,   jbooleanArray, jboolean, Value::Integer, 0,   i32);
+    gen_prim_array_methods!(NewByteArray,    GetByteArrayElements,    ReleaseByteArrayElements,    GetByteArrayRegion,    SetByteArrayRegion,    PrimitiveType::Byte,    ArrayContent::Byte,   jbyteArray,    jbyte,    Value::Integer, 0,   i32);
+    gen_prim_array_methods!(NewCharArray,    GetCharArrayElements,    ReleaseCharArrayElements,    GetCharArrayRegion,    SetCharArrayRegion,    PrimitiveType::Char,    ArrayContent::Char,   jcharArray,    jchar,    Value::Integer, 0,   i32);
+    gen_prim_array_methods!(NewShortArray,   GetShortArrayElements,   ReleaseShortArrayElements,   GetShortArrayRegion,   SetShortArrayRegion,   PrimitiveType::Short,   ArrayContent::Short,  jshortArray,   jshort,   Value::Integer, 0,   i32);
+    gen_prim_array_methods!(NewIntArray,     GetIntArrayElements,     ReleaseIntArrayElements,     GetIntArrayRegion,     SetIntArrayRegion,     PrimitiveType::Integer, ArrayContent::Int,    jintArray,     jint,     Value::Integer, 0,   i32);
+    gen_prim_array_methods!(NewLongArray,    GetLongArrayElements,    ReleaseLongArrayElements,    GetLongArrayRegion,    SetLongArrayRegion,    PrimitiveType::Long,    ArrayContent::Long,   jlongArray,    jlong,    Value::Long,    0,   i64);
+    gen_prim_array_methods!(NewFloatArray,   GetFloatArrayElements,   ReleaseFloatArrayElements,   GetFloatArrayRegion,   SetFloatArrayRegion,   PrimitiveType::Float,   ArrayContent::Float,  jfloatArray,   jfloat,   Value::Float,   0.0, f32);
+    gen_prim_array_methods!(NewDoubleArray,  GetDoubleArrayElements,  ReleaseDoubleArrayElements,  GetDoubleArrayRegion,  SetDoubleArrayRegion,  PrimitiveType::Double,  ArrayContent::Double, jdoubleArray,  jdouble,  Value::Double,  0.0, f64);
 
     pub unsafe extern "system-unwind" fn RegisterNatives(env: *mut JNIEnv, clazz: jclass, methods: *const JNINativeMethod, nMethods: jint) -> jint {
         unimplemented!()
@@ -1124,49 +1103,18 @@ impl JNINativeInterface_ {
         }
     }
 
-    fn get_native_width(ft: &FieldType) -> usize{
-        match ft{
-            FieldType::Primitive(PrimitiveType::Boolean) => size_of::<jboolean>(),
-            FieldType::Primitive(PrimitiveType::Byte) => size_of::<jbyte>(),
-            FieldType::Primitive(PrimitiveType::Char) => size_of::<jchar>(),
-            FieldType::Primitive(PrimitiveType::Short) => size_of::<jshort>(),
-            FieldType::Primitive(PrimitiveType::Integer) => size_of::<jint>(),
-            FieldType::Primitive(PrimitiveType::Long) => size_of::<jlong>(),
-            FieldType::Primitive(PrimitiveType::Float) => size_of::<jfloat>(),
-            FieldType::Primitive(PrimitiveType::Double) => size_of::<jdouble>(),
-            _ => unreachable!()
-        }
-    }
-
     pub unsafe extern "system-unwind" fn GetPrimitiveArrayCritical(env: *mut JNIEnv, array: jarray, isCopy: *mut jboolean) -> *const u8 {
         let vm: &VM = unsafe{(*env).vm()};
         let array_ref = vm.resolve_object_by_jobject(array).unwrap();
 
         if !isCopy.is_null() {
             unsafe {
-                *isCopy = JNI_TRUE;
+                *isCopy = JNI_FALSE;
             }
         }
 
-        if let ReferenceType::Array(_, ft, content) = &array_ref.reference_type {
-            let bytes: Vec<u8> = content.read()
-                .iter()
-                .flat_map(|val| match (ft, val) {
-                    (FieldType::Primitive(PrimitiveType::Boolean), Value::Integer(val)) => (*val as jboolean).to_le_bytes().to_vec(),
-                    (FieldType::Primitive(PrimitiveType::Byte), Value::Integer(val)) => (*val as jbyte).to_le_bytes().to_vec(),
-                    (FieldType::Primitive(PrimitiveType::Char), Value::Integer(val)) => (*val as jchar).to_le_bytes().to_vec(),
-                    (FieldType::Primitive(PrimitiveType::Short), Value::Integer(val)) => (*val as jshort).to_le_bytes().to_vec(),
-                    (FieldType::Primitive(PrimitiveType::Integer), Value::Integer(val)) => (*val as jint).to_le_bytes().to_vec(),
-                    (FieldType::Primitive(PrimitiveType::Long), Value::Long(val)) => (*val as jlong).to_le_bytes().to_vec(),
-                    (FieldType::Primitive(PrimitiveType::Float), Value::Float(val)) => (*val as jfloat).to_le_bytes().to_vec(),
-                    (FieldType::Primitive(PrimitiveType::Double), Value::Double(val)) => (*val as jdouble).to_le_bytes().to_vec(),
-                    _ => unreachable!()
-                })
-                .collect();
-            let ptr = vm.unsafe_allocator.allocate_memory(bytes.len());
-            vm.unsafe_allocator.put_bytes(ptr, &bytes).unwrap();
-
-            ptr as *const u8
+        if let ReferenceType::Array(content) = &array_ref.reference_type {
+            content.read().as_raw_ptr()
         } else {
             ptr::null()
         }
@@ -1176,25 +1124,18 @@ impl JNINativeInterface_ {
         let vm: &VM = unsafe{(*env).vm()};
         let array_ref = vm.resolve_object_by_jobject(array).unwrap();
 
-        if let ReferenceType::Array(_, ft, content) = &array_ref.reference_type {
-            let width = Self::get_native_width(ft);
-            let allocation_size = width * array_ref.get_length();
-
-            let bytes = vm.unsafe_allocator.get_bytes(carray as i64, allocation_size).unwrap();
-            let vals= bytes.chunks(width).map(|bytes| match ft {
-                FieldType::Primitive(PrimitiveType::Boolean) => Value::Integer(jboolean::from_le_bytes(bytes.try_into().unwrap()) as i32),
-                FieldType::Primitive(PrimitiveType::Byte) => Value::Integer(jbyte::from_le_bytes(bytes.try_into().unwrap()) as i32),
-                FieldType::Primitive(PrimitiveType::Char) => Value::Integer(jchar::from_le_bytes(bytes.try_into().unwrap()) as i32),
-                FieldType::Primitive(PrimitiveType::Short) => Value::Integer(jshort::from_le_bytes(bytes.try_into().unwrap()) as i32),
-                FieldType::Primitive(PrimitiveType::Integer) => Value::Integer(jint::from_le_bytes(bytes.try_into().unwrap())),
-                FieldType::Primitive(PrimitiveType::Long) => Value::Long(jlong::from_le_bytes(bytes.try_into().unwrap())),
-                FieldType::Primitive(PrimitiveType::Float) => Value::Float(jfloat::from_le_bytes(bytes.try_into().unwrap())),
-                FieldType::Primitive(PrimitiveType::Double) => Value::Double(jdouble::from_le_bytes(bytes.try_into().unwrap())),
-                _ => unreachable!()
-            }).collect::<Vec<_>>();
-
-            let mut guard = content.write();
-            guard.copy_from_slice(vals.as_slice())
+        if let ReferenceType::Array(content) = &array_ref.reference_type {
+            match &*content.write() {
+                ArrayContent::Ref(raw) => unsafe { raw.unchecked_copy_from(carray as *const jobject, 0, raw.len()) },
+                ArrayContent::Bool(raw) => unsafe { raw.unchecked_copy_from(carray as *const jboolean, 0, raw.len()) },
+                ArrayContent::Byte(raw) => unsafe { raw.unchecked_copy_from(carray as *const jbyte, 0, raw.len()) },
+                ArrayContent::Char(raw) => unsafe { raw.unchecked_copy_from(carray as *const jchar, 0, raw.len()) },
+                ArrayContent::Short(raw) => unsafe { raw.unchecked_copy_from(carray as *const jshort, 0, raw.len()) },
+                ArrayContent::Int(raw) => unsafe { raw.unchecked_copy_from(carray as *const jint, 0, raw.len()) },
+                ArrayContent::Long(raw) => unsafe { raw.unchecked_copy_from(carray as *const jlong, 0, raw.len()) },
+                ArrayContent::Float(raw) => unsafe { raw.unchecked_copy_from(carray as *const jfloat, 0, raw.len()) },
+                ArrayContent::Double(raw) => unsafe { raw.unchecked_copy_from(carray as *const jdouble, 0, raw.len()) },
+            }
         }
     }
 

@@ -1,6 +1,6 @@
-use crate::class_file::fields::field_type::{FieldType, PrimitiveType};
 use crate::vm::class::ClassId;
 use crate::vm::constants::STRING_value_INDEX;
+use crate::vm::heap::array::ArrayContent;
 use crate::vm::jni::types::jobject;
 use crate::vm::result::VMResult;
 use crate::vm::{VmError, VM};
@@ -123,10 +123,10 @@ impl From<bool> for Value{
 pub struct RefId(pub u32);
 
 impl RefId {
-    pub fn is_null(&self) -> bool {
+    pub const fn is_null(&self) -> bool {
         self.0 == 0
     }
-    pub fn nid(&self) -> jobject { self.0 as jobject }
+    pub const fn nid(&self) -> jobject { self.0 as jobject }
 }
 
 macro_rules! gen_typed_get_field {
@@ -162,7 +162,7 @@ impl ReferenceValue{
             ReferenceType::Object(fields) => {
                 fields.write()[index] = value
             }
-            ReferenceType::Array(_, _, _) => {unimplemented!("This reference represents an array, please use 'set_element()'")}
+            ReferenceType::Array(..) => {unimplemented!("This reference represents an array, please use 'set_element()'")}
         };
     }
 
@@ -171,7 +171,7 @@ impl ReferenceValue{
             ReferenceType::Object(fields) => {
                 fields.read()[index].clone()
             }
-            ReferenceType::Array(_, _, _) => {unimplemented!("This reference represents an array, please use 'get_element()'")}
+            ReferenceType::Array(..) => {unimplemented!("This reference represents an array, please use 'get_element()'")}
         }
     }
 
@@ -183,42 +183,42 @@ impl ReferenceValue{
 
     pub fn set_element(&self, index: usize, value: Value) {
         match &self.reference_type {
-            ReferenceType::Object(_) => {unimplemented!("This reference represents an object, please use 'set_field()'")}
-            ReferenceType::Array(_, _, content) => {
-                content.write()[index] = value
+            ReferenceType::Object(..) => {unimplemented!("This reference represents an object, please use 'set_field()'")}
+            ReferenceType::Array(content) => {
+                content.write().set(index, value)
             }
         };
     }
 
     pub fn get_element(&self, index: usize) -> Value{
         match &self.reference_type {
-            ReferenceType::Object(_) => {unimplemented!("This reference represents an object, please use 'get_field()'")}
-            ReferenceType::Array(_, _, content) => {
-                content.read()[index].clone()
+            ReferenceType::Object(..) => {unimplemented!("This reference represents an object, please use 'get_field()'")}
+            ReferenceType::Array(content) => {
+                content.read().get(index).unwrap()
             }
         }
     }
 
     pub fn get_length(&self) -> usize{
         match &self.reference_type {
-            ReferenceType::Object(_) => {unimplemented!("This reference represents an object, please use 'get_field()'")}
-            ReferenceType::Array(_, _, content) => {
+            ReferenceType::Object(..) => {unimplemented!("This reference represents an object, please use 'get_field()'")}
+            ReferenceType::Array(content) => {
                 content.read().len()
             }
         }
     }
 
-    pub fn is_array(&self) -> bool{
+    pub const fn is_array(&self) -> bool{
         match self.reference_type {
-            ReferenceType::Array(_, _, _) => true,
-            ReferenceType::Object(_) => false
+            ReferenceType::Array(..) => true,
+            ReferenceType::Object(..) => false
         }
     }
 
-    pub fn is_object(&self) -> bool{
+    pub const fn is_object(&self) -> bool{
         match self.reference_type {
-            ReferenceType::Array(_, _, _) => false,
-            ReferenceType::Object(_) => true
+            ReferenceType::Array(..) => false,
+            ReferenceType::Object(..) => true
         }
     }
 
@@ -265,17 +265,17 @@ impl ReferenceValue{
                     fields.read().iter().map(object).collect()
                 }
             },
-            ReferenceType::Array(_, field_type, content) => {
+            ReferenceType::Array(content) => {
                 //vec![String::from("<redacted>")]
-                if let FieldType::Primitive(PrimitiveType::Char) = field_type {
-                    let chars: Vec<char> = content.read().iter().map(|e| if let Value::Integer(val) = e {char::from_u32(*val as u32).unwrap()} else {'?'}).collect();
-                    vec![chars.iter().collect::<String>()]
-                } else if let FieldType::Primitive(PrimitiveType::Byte) = field_type {
-                    content.read().iter().map(|e| if let Value::Integer(val) = e {format!("{:02x}", val)} else {format!("{e:?}")}).collect()
+                let content = content.read();
+                if content.is_char() {
+                    vec![content.get_as_string().unwrap()]
+                } else if content.is_byte() {
+                    content.as_vec().iter().map(|e| if let Value::Integer(val) = e {format!("{:02x}", val)} else {format!("{e:?}")}).collect()
                 } else {
                     let mut vec = Vec::new();
                     let mut null_counter = 0;
-                    for value in content.read().iter(){
+                    for value in content.as_vec().iter(){
                         if value.is_null() {
                             null_counter += 1;
                         } else {
@@ -324,5 +324,5 @@ impl Debug for ReferenceValue {
 
 pub enum ReferenceType{
     Object(RwLock<Vec<Value>>),
-    Array(usize, FieldType, RwLock<Vec<Value>>)
+    Array(RwLock<ArrayContent>)
 }

@@ -856,18 +856,21 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                         11 => FieldType::Primitive(PrimitiveType::Long),
                         _ => unreachable!("Can not create an array of type {atype}")
                     };
-                    let array_field_type = primitive_type.to_array_field_type(1);
-                    let array = get_or_init_option!(execute_create_array(ctx, array_field_type, 1));
+                    let array = get_or_init_option!(execute_create_array(ctx, primitive_type, 1));
 
                     debug!("NEWARRAY {}", atype);
                     ctx.thread.call_stack.push_operand_value(array);
                 }
                 Instruction::ANEWARRAY(index) => {
-                    let class = class_and_method.get_constant_class_ref(&ctx, *index).unwrap();
-                    let array_field_type = FieldType::Object(class.name.clone()).to_array_field_type(1);
-                    let array = get_or_init_option!(execute_create_array(ctx, array_field_type, 1));
-                    
-                    debug!("ANEWARRAY {}", class.name);
+                    let clazz = class_and_method.get_constant_class_ref(&ctx, *index).unwrap();
+                    let component_type = if clazz.is_array() {
+                        FieldType::from_str(clazz.name.as_str()).unwrap()
+                    } else {
+                        FieldType::Object(clazz.name.clone())
+                    };
+                    let array = get_or_init_option!(execute_create_array(ctx, component_type, 1));
+
+                    debug!("ANEWARRAY {}", clazz.name);
                     ctx.thread.call_stack.push_operand_value(array);
                 }
                 Instruction::ARRAYLENGTH => {
@@ -969,10 +972,17 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                 }
                 Instruction::MULTIANEWARRAY(index, dimensions ) => {
                     if let Some(ConstantPoolEntry::Class(clazz)) = class_and_method.class.get_or_resolve_constant(&ctx, *index){
-                        let class_name = clazz.name.as_str();
-                        let array_field_type = FieldType::from_str(class_name).unwrap();
-                        let array = get_or_init_option!(execute_create_array(ctx, array_field_type, *dimensions as usize));
-                        debug!("MULTIANEWARRAY {}", class_name);
+                        let Some(info) = &clazz.array_info else { unreachable!() };
+                        let dimensions = *dimensions as usize;
+                        let component_type = if info.dims == dimensions {
+                            info.component_type.clone()
+                        } else if info.dims > dimensions {
+                            info.component_type.clone().to_array_field_type(info.dims - dimensions)
+                        } else {
+                            unreachable!("array class has less dimensions then requested")
+                        };
+                        let array = get_or_init_option!(execute_create_array(ctx, component_type, dimensions));
+                        debug!("MULTIANEWARRAY {}", clazz.name);
                         ctx.thread.call_stack.push_operand_value(array);
                     }
                 }
@@ -1430,36 +1440,29 @@ fn get_constant_as_value<'a>(ctx: Context<'a, '_>, index: u16) -> VMPartialResul
     Ok(VMResultType::Successful(value))
 }
 
-fn execute_create_array<'a>(ctx: Context<'a, '_>, array_field_type: FieldType, dims: usize) -> VMPartialResult<Value>{
-    if let FieldType::Array(_, component_type) = array_field_type{
-        //ensure that the array class get loaded before popping the count(s)
-        for i in 0..dims{
-            let _ = ctx.get_or_resolve_class(component_type.clone().to_array_field_type(i+1).to_class_name().as_str())?;
+fn execute_create_array<'a>(ctx: Context<'a, '_>, component_type: FieldType, dimensions: usize) -> VMPartialResult<Value> {
+    //ensure that the array class get loaded before popping the count(s)
+    let classes = (0..dimensions).map(|i| ctx.get_or_resolve_class(component_type.clone().to_array_field_type(i+1).to_class_name().as_str())).try_collect::<Vec<ClassRef>>()?;
+    let mut content = Vec::new();
+    for i in 0..dimensions {
+        let count_in_dim = ctx.thread.call_stack.pop_operand_value().unwrap().expect_int()?;
+        if count_in_dim == 0 {
+            break;
         }
-        let mut content = Vec::new();
-        for i in 0..dims{
-            let current_dim = ctx.thread.call_stack.pop_operand_value().unwrap().expect_int()?;
-            if current_dim == 0{
-                break;
-            }
-            let mut local_content = Vec::new();
-            if i == 0{
-                local_content = vec![component_type.get_default_value(ctx.vm.null()); current_dim as usize];
-                content = local_content;
-                continue
-            }
-            for _ in 0..current_dim{
-                let arr_ref = ctx.try_new_array(dims, component_type.clone().to_array_field_type(i), RwLock::new(content.clone()))?;
-                local_content.push(Value::Reference(arr_ref.id))
-            }
-            content = local_content;
+        if i == 0 {
+            content = vec![component_type.get_default_value(ctx.vm.null()); count_in_dim as usize];
+            continue
         }
-        //FIXME component_type.to_array_field_type(dims) is just array_field_type
-        let arr_ref = ctx.try_new_array(dims, component_type.to_array_field_type(dims), RwLock::new(content))?;
-        Ok(VMResultType::Successful(Value::Reference(arr_ref.id)))
-    } else {
-        Err(VmError::ValidationError(format!("Field type for creating an array must be FieldType::Array but is {:?}", array_field_type)))
+        let mut local_content = Vec::new();
+        for _ in 0..count_in_dim {
+            let arr_ref = ctx.try_new_array(classes[i-1], content.clone())?;
+            local_content.push(Value::Reference(arr_ref.id))
+        }
+        content = local_content;
     }
+    //FIXME component_type.to_array_field_type(dims) is just array_field_type
+    let arr_ref = ctx.try_new_array(classes[dimensions-1], content)?;
+    Ok(VMResultType::Successful(Value::Reference(arr_ref.id)))
 }
 
 #[derive(Debug, PartialEq)]

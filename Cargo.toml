@@ -4,3 +4,6 @@ members = [
     "rjvm-driver",
 ]
 resolver = "3"
+
+[profile.release]
+debug = true

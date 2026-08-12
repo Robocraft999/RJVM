@@ -64,8 +64,8 @@ gen_delegate!(delegate_native_lib_load, |ctx, obj_ref, _args| {
         obj_ref.set_field(CLASSLOADER_NATIVELIBRARY_handle_INDEX, Value::Long(1));
         let name_val = obj_ref.get_field(CLASSLOADER_NATIVELIBRARY_name_INDEX);//args.get(0).unwrap();
         let name = ctx.vm.extract_string_from_value(name_val)?;
-        println!("name: {name}");
-        println!("javavm: {:p}", &ctx.thread.java_vm);
+        debug!(target: "native", "native_lib: name: {name}");
+        debug!(target: "native", "native_lib: javavm: {:p}", &ctx.thread.java_vm);
 
         unsafe {
             use libffi::middle::{Arg, Cif, Type};
@@ -78,11 +78,11 @@ gen_delegate!(delegate_native_lib_load, |ctx, obj_ref, _args| {
             ctx.vm.native_method_registry.add_loaded_library(lib);
 
             let vm_ptr = ptr::from_ref(ctx.thread.java_vm.as_ref().get_ref()) as *const c_void;
-            println!("javavmp: {:p}", vm_ptr);
+            debug!(target: "native", "native_lib: javavmp: {:p}", vm_ptr);
             let reserved = std::ptr::null() as *const c_void;
             let cif = Cif::new(vec![Type::pointer(), Type::pointer()], Type::i32()); //JNI_OnLoad
             let res: i32 = cif.call(libffi::low::CodePtr::from_ptr(func_ptr), &[Arg::new(&vm_ptr), Arg::new(&reserved)]);
-            println!("res: {:x}", res);
+            debug!(target: "native", "native_lib: res: {:x}", res);
         }
         obj_ref.set_field(CLASSLOADER_NATIVELIBRARY_loaded_INDEX, Value::from(true));
 
@@ -103,8 +103,8 @@ gen_delegate!(delegate_define_class1, |ctx, obj_ref, args| {
         // seems to be nullable
         // let source = ctx.vm.extract_string_from_value(*source_val)?;
         let b_arr_ref = ctx.vm.resolve_object_by_id(*b_arr_ref_id)?;
-        let bytes = if let ReferenceType::Array(_, _, data) = &b_arr_ref.reference_type{
-            data.read().iter().map(|val| if let Value::Integer(byte) = val {*byte as u8} else {0}).collect()
+        let bytes = if let ReferenceType::Array(data) = &b_arr_ref.reference_type{
+            data.read().as_byte_vec().unwrap()
         } else {
             Vec::new()
         };

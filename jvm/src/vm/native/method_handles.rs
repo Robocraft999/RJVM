@@ -294,11 +294,11 @@ fn resolve_signature<'a>(ctx: Context<'a, '_>, sig: Reference<'a>) -> VMResult<S
     if sig.class_name == JAVA_LANG_INVOKE_METHOD_TYPE {
         let args_ref = ctx.vm.resolve_object_by_id(sig.get_ref_field(METHODTYPE_ptypes_INDEX)?)?;
         let rtype_ref_id = sig.get_ref_field(METHODTYPE_rtype_INDEX)?;
-        if let ReferenceType::Array(_, _, content) = &args_ref.reference_type{
+        if let ReferenceType::Array(content) = &args_ref.reference_type{
             let mut signature = String::from("(");
-            for class_obj in content.read().iter(){
-                let Value::Reference(class_ref_id) = *class_obj else { return invalidation!("Expected Reference") };
-                let class_ref = ctx.vm.resolve_object_by_id(class_ref_id)?;
+            let Some(content) = content.read().as_ref_vec() else { return invalidation!("Expected References") };
+            for class_ref_id in content.iter(){
+                let class_ref = ctx.vm.resolve_object_by_id(*class_ref_id)?;
                 let class_name = ctx.vm.extract_class_name_from_class_ref(&class_ref)?;
                 signature.push_str(get_class_descriptor(class_name.as_str()).as_str());
             }

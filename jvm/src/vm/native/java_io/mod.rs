@@ -1,6 +1,6 @@
 use std::ffi::CString;
-use crate::vm::constants::classes::{JAVA_IO_FILE_INPUT_STREAM, JAVA_IO_FILE_OUTPUT_STREAM, JAVA_IO_UNIX_FILE_SYSTEM, JAVA_IO_IOEXCEPTION, JAVA_LANG_STRING, JAVA_IO_RANDOM_ACCESS_FILE};
-use crate::vm::constants::{FILEDESCRIPTOR_fd_INDEX, FILEINPUTSTREAM_fd_INDEX, FILEINPUTSTREAM_path_INDEX, FILE_path_INDEX, RANDOMACCESSFILE_fd_INDEX};
+use crate::vm::constants::classes::{JAVA_IO_FILE_INPUT_STREAM, JAVA_IO_FILE_OUTPUT_STREAM, JAVA_IO_UNIX_FILE_SYSTEM, JAVA_IO_IOEXCEPTION, JAVA_LANG_STRING, JAVA_IO_RANDOM_ACCESS_FILE, JAVA_LANG_STRING_ARR};
+use crate::vm::constants::{FILEDESCRIPTOR_fd_INDEX, FILEINPUTSTREAM_fd_INDEX, FILEINPUTSTREAM_path_INDEX, FILEOUTPUTSTREAM_fd_INDEX, FILE_path_INDEX, RANDOMACCESSFILE_fd_INDEX};
 use crate::vm::java_thread::JavaThread;
 use crate::vm::native::{gen_delegate, invalidation, non_failing_none, non_failing_some, promote_exception, wrap_init, NativeMethodRegistry};
 use crate::vm::result::{VMPartialResult, VMResult, VMResultType};
@@ -15,6 +15,7 @@ use std::time::SystemTime;
 use libc::{c_int, stat64, FIONREAD};
 use parking_lot::RwLock;
 use crate::class_file::fields::field_type::FieldType;
+use crate::vm::heap::array::ArrayContent;
 
 mod util;
 
@@ -34,21 +35,28 @@ pub fn register_natives(registry: &mut NativeMethodRegistry) {
     registry.register(JAVA_IO_RANDOM_ACCESS_FILE, "close0", "()V", delegate_raf_close0);
 }
 
-gen_delegate!(delegate_write_bytes, |ctx, _obj_ref, args| {
+gen_delegate!(delegate_write_bytes, |ctx, obj_ref, args| {
     if let (
+        Some(fis_ref),
         Some(Value::Reference(bytes_ref_id)),
         Some(Value::Integer(offset)),
         Some(Value::Integer(amount)),
-        Some(Value::Integer(_should_append))
-    ) = (args.get(0), args.get(1), args.get(2), args.get(3)) {
+        Some(Value::Integer(should_append))
+    ) = (obj_ref, args.get(0), args.get(1), args.get(2), args.get(3)) {
         let bytes_ref = ctx.vm.resolve_object_by_id(*bytes_ref_id)?;
-        if let ReferenceType::Array(_, _, data) = &bytes_ref.reference_type{
-            let data = &data.read()[*offset as usize..(*offset + *amount) as usize];
-            let string: String = data.iter().map(|value| if let Value::Integer(int) = value { (*int as u8) as char} else { '?' }).collect();
-            print!("{}", string);
-            non_failing_none()
+        if let ReferenceType::Array(data) = &bytes_ref.reference_type {
+            if let ArrayContent::Byte(raw) = &*data.read() {
+                if offset + amount -1 < raw.len() as i32 {
+                    promote_exception!(util::write_bytes(ctx, fis_ref, raw.as_ptr(), *offset, *amount, *should_append, FILEOUTPUTSTREAM_fd_INDEX)?);
+                } else {
+                    error!(target: "native", "write_bytes: out of range")
+                }
+                non_failing_none()
+            } else {
+                invalidation!("Expected a byte array as first arg")
+            }
         } else {
-            invalidation!("Expected a byte array as first arg")
+            invalidation!("Expected an array as first arg")
         }
     } else {
         invalidation!("Expected a byte array, offset, amount and boolean")
@@ -56,68 +64,26 @@ gen_delegate!(delegate_write_bytes, |ctx, _obj_ref, args| {
 });
 
 gen_delegate!(delegate_read_bytes, |ctx, obj_ref, args| {
-    if let (Some(Value::Reference(data_ref_id)), Some(Value::Integer(offset)), Some(Value::Integer(length))) = (args.get(0), args.get(1), args.get(2)) {
-        let io_exception_clazz = wrap_init!(ctx, ctx.get_or_initialize_class(JAVA_IO_IOEXCEPTION)?);
+    if let (Some(Value::Reference(data_ref_id)), Some(Value::Integer(offset)), Some(Value::Integer(amount))) = (args.get(0), args.get(1), args.get(2)) {
+        // let io_exception_clazz = wrap_init!(ctx, ctx.get_or_initialize_class(JAVA_IO_IOEXCEPTION)?);
 
         if let Some(fis_ref) = obj_ref{
-            let path = ctx.vm.extract_string_from_value(fis_ref.get_field(FILEINPUTSTREAM_path_INDEX))?;
-
-            let existing_file = ctx.vm.currently_open_files.write().remove(&path);
-            if let Some((content, index)) = existing_file {
-                let data_ref = ctx.vm.resolve_object_by_id(*data_ref_id)?;
-                //file: len 20, i 5
-                //buffer: blen 30, o 10, length 20
-                //start = 10, end = 25 = 10 + min(30 - 10, 20 - 5)
-
-                let start = *offset as usize;
-                let end = start + std::cmp::min(*length as usize, content.len() - index);
-                //println!("XXX: {}", &path);
-                //println!("start={}, end={}, readable_bytes={}, reading={:X?}", start, end, content.len() - index, &content[index..(index+end-start)]);
-                (start..end).for_each(|i| data_ref.set_element(i, Value::Integer(content[i - start + index] as i32)));
-
-                let new_index = index + end - start;
-                if new_index > index{
-                    if new_index == content.len(){
-                        //read >0 bytes to end
-                        ctx.vm.currently_open_files.write().insert(path.clone(), (content, new_index));
-                        //println!("read >0 bytes to end");
-                        non_failing_some(Value::Integer((new_index - index) as i32))
-                    } else {
-                        //read >0 bytes
-                        ctx.vm.currently_open_files.write().insert(path.clone(), (content, new_index));
-                        //println!("read >0 bytes");
-                        non_failing_some(Value::Integer((end - start) as i32))
-                    }
+            let bytes_ref = ctx.vm.resolve_object_by_id(*data_ref_id)?;
+            if let ReferenceType::Array(data) = &bytes_ref.reference_type {
+            if let ArrayContent::Byte(raw) = &*data.write() {
+                if offset + amount -1 < raw.len() as i32 {
+                    let read_bytes = promote_exception!(util::read_bytes(ctx, fis_ref, raw.as_mut_ptr(), *offset, *amount, FILEINPUTSTREAM_fd_INDEX)?);
+                        non_failing_some(Value::Integer(read_bytes))
                 } else {
-                    if new_index == content.len(){
-                        //read 0 bytes from end to end
-                        ctx.vm.currently_open_files.write().insert(path.clone(), (content, new_index));
-                        //println!("read 0 bytes from end to end");
-                        non_failing_some(Value::Integer(-1))
-                    } else {
-                        //read 0 bytes
-                        ctx.vm.currently_open_files.write().insert(path.clone(), (content, new_index));
-                        //println!("read 0 bytes");
-                        non_failing_some(Value::Integer(0))
-                    }
+                    invalidation!("read_bytes: IndexOutOfBounds")
                 }
-
-                //println!("{:?}", &content[start..end]);
-                /*if *index == content.len()-1{
-                    vm.currently_open_files.remove(&path);
-                    Ok(Some(Value::Integer(-1)))
-                } else {
-                    *index += end - start;
-                    Ok(Some(Value::Integer((end - start) as i32)))
-                }*/
             } else {
-                JavaThread::throw(
-                    ctx,
-                    io_exception_clazz,
-                    format!("File {} was not found", path),
-                    String::from("java/io/FileInputStream.readBytes([BII)I")
-                )
+                invalidation!("Expected a byte array as first arg")
             }
+        } else {
+            invalidation!("Expected an array as first arg")
+        }
+
         } else {
             invalidation!("Expected an object reference")
         }
@@ -132,14 +98,6 @@ gen_delegate!(delegate_open0, |ctx, obj_ref, args| {
         return invalidation!("Expected this")
     };
     if let Some(path_val) = args.get(0) && !path_val.is_null(){
-        let path = ctx.vm.extract_string_from_value(*path_val)?;
-        if !ctx.vm.currently_open_files.read().contains_key(&path) {
-            let file_content = ctx.vm.class_manager.class_path.resolve_file(path.as_str())?;
-            if let Some(file_content) = file_content {
-                ctx.vm.currently_open_files.write().insert(path.clone(), (file_content, 0));
-            }
-        }
-
         promote_exception!(util::file_open(ctx, fis_ref, *path_val, FILEINPUTSTREAM_fd_INDEX, libc::O_RDONLY)?);
         non_failing_none()
     } else {
@@ -213,7 +171,7 @@ gen_delegate!(delegate_get_boolean_attribute, |ctx, _obj_ref, args| {
                 attributes |= BA_DIRECTORY;
             }
         }
-        println!("HILFE {:?} ({}), {}", path, attributes, attributes & BA_EXISTS);
+        debug!(target: "native", "HILFE {:?} ({}), {}", path, attributes, attributes & BA_EXISTS);
         non_failing_some(Value::Integer(attributes))
     } else {
         invalidation!("Expected file as parameter")
@@ -290,7 +248,8 @@ gen_delegate!(delegate_list, |ctx, _obj_ref, args| {
             .map(|s| ctx.try_new_string_object(&s).map(|r| Value::Reference(r.id)))
             .try_collect::<Vec<_>>()?;
 
-        let arr = ctx.try_new_array(1, FieldType::Object(JAVA_LANG_STRING.to_owned()).to_array_field_type(1), RwLock::new(strings))?;
+        let arr_clazz = ctx.get_or_resolve_class(JAVA_LANG_STRING_ARR)?;
+        let arr = ctx.try_new_array(arr_clazz, strings)?;
         non_failing_some(Value::Reference(arr.id))
     } else {
         invalidation!("Expected File Parameter")
