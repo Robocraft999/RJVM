@@ -109,11 +109,6 @@ gen_delegate!(delegate_close0, |ctx, obj_ref, _args| {
     let Some(fis_ref) = obj_ref else {
         return invalidation!("Expected this")
     };
-    let path_val = fis_ref.get_field(FILEINPUTSTREAM_path_INDEX);
-    let path = ctx.vm.extract_string_from_value(path_val)?;
-    if ctx.vm.currently_open_files.write().remove(&path).is_none() {
-        warn!("Closing non existent file: '{}'", path)
-    }
     promote_exception!(unsafe { util::file_close(ctx, fis_ref, FILEINPUTSTREAM_fd_INDEX)? });
     non_failing_none()
 });
