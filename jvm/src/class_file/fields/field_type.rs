@@ -22,7 +22,7 @@ pub fn extract_component_type_from_array_class(array_class_descriptor: &str) -> 
     if let FieldType::Array(_, component_type) = array_type {
         Ok((*component_type, array.unwrap_or("").len()))
     } else {
-        Err(VmError::ValidationError("Can't extract component type from non-array type".to_string()))
+        Err(VmError::ValidationError("Can't extract component type from non-array type".to_owned()))
     }
 }
 
@@ -56,16 +56,18 @@ impl FieldType {
         }
         let prefix = "[".repeat(dims);
         match self.clone() {
+            // Extends the primitive type to an n-dim array type
             FieldType::Primitive(primitive_type) => {
                 let name = prefix + primitive_type_to_descriptor(&primitive_type).as_str();
                 FieldType::Array(name, Box::new(self))
             }
+            // Extends the object type to an n-dim array type
             FieldType::Object(name) => {
                 let name = prefix + "L" + name.as_str() + ";";
                 FieldType::Array(name, Box::new(self))
             }
-            //FIXME should we allow this?
-            FieldType::Array(_, _) => panic!("Can't make {self:?} an array type, because it is already one"),
+            // Extends the m-dim array type to an (n+m)-dim array type
+            FieldType::Array(name, component_type) => FieldType::Array(prefix + name.as_str(), component_type),
         }
     }
 
@@ -122,10 +124,10 @@ impl FieldType {
             if let Some(prim) = primitive{
                 name.push_str(prim);
             }
-            let component_type = field_type.ok_or(VmError::ValidationError(format!("{} is neither object nor primitive field type", name)))?;
+            let component_type = field_type.ok_or_else(|| VmError::ValidationError(format!("{} is neither object nor primitive field type", name)))?;
             Ok(FieldType::Array(name, Box::from(component_type)))
         } else {
-            field_type.ok_or(VmError::ValidationError("Field type is neither object nor primitive".to_string()))
+            field_type.ok_or(VmError::ValidationError("Field type is neither object nor primitive".to_owned()))
         }
     }
     

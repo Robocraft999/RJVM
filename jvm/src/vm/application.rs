@@ -1,24 +1,26 @@
-use std::cell::{Cell, RefCell, SyncUnsafeCell, UnsafeCell};
-use std::fmt::Debug;
-use std::ops::DerefMut;
 use crate::vm::class::ClassId;
+use crate::vm::class_path::ClassPath;
+use crate::vm::constants::classes::{JAVA_LANG_CLASS, JAVA_LANG_CLASSLOADER, JAVA_LANG_ILLEGAL_ARGUMENT_EXCEPTION, JAVA_LANG_INVOKE_METHOD_HANDLE, JAVA_LANG_INVOKE_METHOD_TYPE, JAVA_LANG_INVOKE_MHN, JAVA_LANG_NULL_POINTER_EXCEPTION, JAVA_LANG_REFLECT_METHOD, JAVA_LANG_STRING, JAVA_LANG_STRING_ARR, JAVA_LANG_SYSTEM, JAVA_LANG_THREAD, JAVA_LANG_THREAD_GROUP};
+use crate::vm::constants::{THREAD_eetop_INDEX, THREAD_priority_INDEX, THREAD_threadStatus_INDEX};
+use crate::vm::java_thread::{JavaThread, NORM_PRIORITY, RUNNABLE};
 use crate::vm::jni::types::{JNIEnv, JavaVM};
 use crate::vm::result::{VMPartialResult, VMResultType};
 use crate::vm::value::{Reference, Value};
 use crate::vm::{jni, Context, VmError, VM};
-use log::error;
+use log::{error, trace};
+use std::cell::RefCell;
+use std::env;
 use std::pin::Pin;
-use crate::vm::class_path::ClassPath;
-use crate::vm::constants::classes::{JAVA_LANG_CLASS, JAVA_LANG_INVOKE_METHOD_HANDLE, JAVA_LANG_INVOKE_METHOD_TYPE, JAVA_LANG_INVOKE_MHN, JAVA_LANG_REFLECT_METHOD, JAVA_LANG_STRING, JAVA_LANG_SYSTEM, JAVA_LANG_THREAD, JAVA_LANG_THREAD_GROUP, SUN_MISC_VM};
-use crate::vm::constants::{THREAD_threadStatus_INDEX, THREAD_eetop_INDEX, THREAD_priority_INDEX};
-use crate::vm::java_thread::{JavaThread, NORM_PRIORITY, RUNNABLE};
+use std::time::Duration;
+use parking_lot::RwLock;
+use crate::class_file::fields::field_type::FieldType;
 
 thread_local! {
-    pub static JAVA_THREAD: RefCell<JavaThread> = RefCell::new(JavaThread::new(0));
+    pub static JAVA_THREAD: RefCell<JavaThread> = RefCell::new(JavaThread::new(0, false));
 }
 
 pub fn thread() -> &'static mut JavaThread {
-    JAVA_THREAD.with(|cell| unsafe { &mut*(&mut *cell.borrow_mut() as *mut JavaThread) })
+    JAVA_THREAD.with(|cell| unsafe { &mut *cell.as_ptr() })
 }
 
 pub fn with_thread<R>(f: impl FnOnce(&mut JavaThread) -> R) -> R {
@@ -34,7 +36,7 @@ pub struct Application<'a> {
 
 impl <'a> Application<'a> {
     pub fn new(class_path: ClassPath) -> Self {
-        let mut main_thread = JavaThread::new(0);
+        let mut main_thread = JavaThread::new(0, false);
 
         let vm = Box::pin(VM::new(class_path));
 
@@ -54,10 +56,10 @@ impl <'a> Application<'a> {
     }
 
     fn init_system(&self) -> Result<(), VmError>{
-        for (k,v) in self.vm.class_manager.class_loading_states.read()?.iter() {
-            println!("Class: {:?}, state: {:?}", self.vm.find_class_by_id(ClassId(k.0)).unwrap().name, v);
+        for (k,v) in self.vm.class_manager.class_loading_states.read().iter() {
+            trace!(target: "debug", "Class: {:?}, state: {:?}", self.vm.find_class_by_id(ClassId(k.0)).unwrap().name, v);
         }
-        let init = self.vm.resolve_class_method(JAVA_LANG_SYSTEM, "initializeSystemClass", "()V")?;
+        let init = self.context().resolve_class_method(JAVA_LANG_SYSTEM, "initializeSystemClass", "()V")?;
         JavaThread::invoke_subroutine(self.context(), init, None, vec![])?;
         Ok(())
     }
@@ -65,7 +67,7 @@ impl <'a> Application<'a> {
     fn handle_partial(&self, result: VMPartialResult<Option<Value>>) -> Option<Value> {
         match result {
             Ok(VMResultType::Successful(res)) => {
-                println!("result: {res:?}");
+                trace!(target: "debug", "result: {res:?}");
                 res
             }
             Ok(VMResultType::Interrupted(_, _)) => {
@@ -74,6 +76,8 @@ impl <'a> Application<'a> {
             Ok(VMResultType::ExceptionThrown) => {
                 error!("Exception thrown");
                 thread().debug_helper.print();
+
+                self.vm.mark_canceled();
                 panic!()
             }
             Err(error) => {
@@ -81,16 +85,11 @@ impl <'a> Application<'a> {
                 println!("Frames:");
                 thread().call_stack.print_call_stack(&self.vm);
                 thread().debug_helper.print();
+
+                self.vm.mark_canceled();
                 panic!()
             }
         }
-    }
-
-    pub fn run_and_catch_method(&self, class_name: &str, method_name: &str, method_descriptor: &str, args: Vec<Value>) {
-        self.init_class(class_name);
-        let main_method = self.vm.resolve_class_method(class_name, method_name, method_descriptor).unwrap();
-        let context = self.context();
-        let _result = self.handle_partial(JavaThread::invoke_subroutine(context, main_method, None, args));
     }
 
     fn init_class(&self, class_name: &str) {
@@ -104,15 +103,16 @@ impl <'a> Application<'a> {
             thread().debug_helper.print();
             panic!("Could not allocate system thread group");
         };
-        let system_init = self.vm.resolve_class_method(JAVA_LANG_THREAD_GROUP, "<init>", "()V").unwrap();
+        let ctx = self.context();
+        let system_init = ctx.resolve_class_method(JAVA_LANG_THREAD_GROUP, "<init>", "()V").unwrap();
         let _ = self.handle_partial(JavaThread::invoke_subroutine(self.context(), system_init, Some(system_group), Vec::new()));
 
         let Ok(VMResultType::Successful(main_group)) = self.context().new_object(JAVA_LANG_THREAD_GROUP) else {
             thread().debug_helper.print();
             panic!("Could not allocate system thread group");
         };
-        let name = self.vm.try_new_string_object("main").unwrap();
-        let main_init = self.vm.resolve_class_method(JAVA_LANG_THREAD_GROUP, "<init>", "(Ljava/lang/ThreadGroup;Ljava/lang/String;)V").unwrap();
+        let name = ctx.try_new_string_object("main").unwrap();
+        let main_init = ctx.resolve_class_method(JAVA_LANG_THREAD_GROUP, "<init>", "(Ljava/lang/ThreadGroup;Ljava/lang/String;)V").unwrap();
         let _ = self.handle_partial(JavaThread::invoke_subroutine(self.context(), main_init, Some(main_group), vec![Value::Reference(system_group.id), Value::Reference(name.id)]));
 
         main_group
@@ -126,14 +126,27 @@ impl <'a> Application<'a> {
         thread.set_field(THREAD_priority_INDEX, Value::Integer(NORM_PRIORITY));
         crate::vm::application::thread().thread_obj_id.replace(thread.id);
 
-        let name = self.vm.try_new_string_object("main").unwrap();
-        let init = self.vm.resolve_class_method(JAVA_LANG_THREAD, "<init>", "(Ljava/lang/ThreadGroup;Ljava/lang/String;)V").unwrap();
+        let ctx = self.context();
+        let name = ctx.try_new_string_object("main").unwrap();
+        let init = ctx.resolve_class_method(JAVA_LANG_THREAD, "<init>", "(Ljava/lang/ThreadGroup;Ljava/lang/String;)V").unwrap();
         let _ = self.handle_partial(JavaThread::invoke_subroutine(self.context(), init, Some(thread), vec![Value::Reference(thread_group.id), Value::Reference(name.id)]));
 
         thread
     }
 
+    fn compute_system_class_loader(&self) {
+        self.init_class(JAVA_LANG_CLASSLOADER);
+        let method = self.context().resolve_class_method(JAVA_LANG_CLASSLOADER, "getSystemClassLoader", "()Ljava/lang/ClassLoader;").unwrap();
+        let Some(Value::Reference(scl)) = self.handle_partial(JavaThread::invoke_subroutine(self.context(), method, None, Vec::new())) else {
+            thread().debug_helper.print();
+            panic!("Could not create system class loader");
+        };
+        let none = self.vm.system_class_loader.write().replace(scl);
+        assert_eq!(None, none);
+    }
+
     pub fn startup(&mut self){
+        thread().call_stack.class_loaders.borrow_mut().push(None);
         self.init_class(JAVA_LANG_STRING);
         self.init_class(JAVA_LANG_SYSTEM);
         self.init_class(JAVA_LANG_THREAD_GROUP);
@@ -141,7 +154,7 @@ impl <'a> Application<'a> {
         self.init_class(JAVA_LANG_THREAD);
         let thread_obj_ref = self.create_initial_thread(thread_group_ref);
         thread().thread_obj_id.replace(thread_obj_ref.id);
-        self.vm.thread_lookup.write().unwrap().insert(thread_obj_ref.id, thread().meta.clone());
+        self.vm.thread_lookup.write().insert(thread_obj_ref.id, thread().meta.clone());
         thread_obj_ref.set_field(THREAD_threadStatus_INDEX, Value::Integer(RUNNABLE));
 
         self.init_class(JAVA_LANG_CLASS);
@@ -157,6 +170,10 @@ impl <'a> Application<'a> {
                 panic!();
             }
         }
+        self.compute_system_class_loader();
+        self.init_class(JAVA_LANG_NULL_POINTER_EXCEPTION);
+        self.init_class(JAVA_LANG_ILLEGAL_ARGUMENT_EXCEPTION);
+
         self.init_class(JAVA_LANG_INVOKE_METHOD_TYPE);
         self.init_class(JAVA_LANG_INVOKE_METHOD_HANDLE);
         self.init_class(JAVA_LANG_INVOKE_MHN);
@@ -165,5 +182,31 @@ impl <'a> Application<'a> {
             self.vm.debug_helper.exception_helper.print();
         }*/
         println!("Init complete. Starting Main Program");
+    }
+
+    pub fn start_user_code(&self) {
+        let ctx = self.context();
+        let args = env::args().skip(1).map(|s| Value::Reference(ctx.try_new_string_object(&s).unwrap().id)).collect();
+        let string_arr_clazz = ctx.get_or_resolve_class(JAVA_LANG_STRING_ARR).unwrap();
+        let args_array = ctx.try_new_array(string_arr_clazz, args).unwrap();
+        let args = vec![Value::Reference(args_array.id)];
+        //run_and_catch_method(&mut vm, "de/klassenserver7b/k7bot/Main", "main", "([Ljava/lang/String;)V", p_args);
+        //app.run_and_catch_method("Main", "main", "([Ljava/lang/String;)V", p_args);
+
+        let main_class_name = "logicsim/App";
+        //let main_class_name = "Hello";
+        ctx.thread.call_stack.class_loaders.borrow_mut().push(*ctx.vm.system_class_loader.read());
+        let clazz = ctx.get_or_resolve_class(main_class_name).unwrap();
+        self.init_class(main_class_name);
+
+        let main_method = clazz.resolve_method_virtual("main", "([Ljava/lang/String;)V").unwrap();
+        let _result = self.handle_partial(JavaThread::invoke_subroutine(ctx, main_method, None, args));
+
+        loop {
+            if ctx.vm.thread_lookup.read().values().filter(|t| !t.daemon && !t.is_finished() && t != &&ctx.thread.meta).count() == 0 {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(1000))
+        }
     }
 }

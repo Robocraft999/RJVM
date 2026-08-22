@@ -1,8 +1,7 @@
-use crate::class_file::fields::field_type::FieldType;
 use crate::vm::class::{ClassId, ClassRef};
+use crate::vm::heap::array::ArrayContent;
 use crate::vm::value::{RefId, Reference, ReferenceType, ReferenceValue, Value};
-use std::cell::RefCell;
-use std::sync::{Mutex, RwLock};
+use parking_lot::{Mutex, RwLock};
 use typed_arena::Arena;
 
 pub struct ObjectAllocator<'a>{
@@ -30,42 +29,40 @@ impl<'a> ObjectAllocator<'a>{
     }
 
     pub fn allocate_object(&self, class: ClassRef<'a>, fields: Vec<Value>) -> Reference<'a>{
-        let Ok(mut current_id) = self.next_object_id.write() else { unreachable!("Could not acquire next object id lock") };
+        let mut current_id = self.next_object_id.write();
         let object = ReferenceValue{
             id: RefId(*current_id),
             class_id: class.id,
-            class_name: class.name.to_string(),
+            class_name: class.name.to_owned(),
             reference_type: ReferenceType::Object(RwLock::new(fields))
         };
 
-        if let Ok(arena) = self.arena.lock() {
-            let new_object = arena.alloc(object);
+        let arena = self.arena.lock();
+        let new_object = arena.alloc(object);
 
-            *current_id += 1;
-            unsafe {
-                let object_ptr: *const ReferenceValue = new_object;
-                &*object_ptr
-            }
-        } else { unreachable!("Could not acquire object lock") }
+        *current_id += 1;
+        unsafe {
+            let object_ptr: *const ReferenceValue = new_object;
+            &*object_ptr
+        }
     }
 
-    pub fn allocate_array(&self, class: ClassRef<'a>, dims: usize, component_type: FieldType, content: RwLock<Vec<Value>>) -> Reference<'a>{
-        let Ok(mut current_id) = self.next_object_id.write() else { unreachable!("Could not acquire next object id lock") };
+    pub fn allocate_array(&self, class: ClassRef<'a>, content: ArrayContent) -> Reference<'a>{
+        let mut current_id = self.next_object_id.write();
         let array = ReferenceValue{
             id: RefId(*current_id),
             class_id: class.id,
-            class_name: class.name.to_string(),
-            reference_type: ReferenceType::Array(dims, component_type, content),
+            class_name: class.name.to_owned(),
+            reference_type: ReferenceType::Array(RwLock::new(content)),
         };
 
-        if let Ok(arena) = self.arena.lock() {
-            let new_object = arena.alloc(array);
+        let arena = self.arena.lock();
+        let new_object = arena.alloc(array);
 
-            *current_id += 1;
-            unsafe {
-                let object_ptr: *const ReferenceValue = new_object;
-                &*object_ptr
-            }
-        } else { unreachable!("Could not acquire object lock") }
+        *current_id += 1;
+        unsafe {
+            let object_ptr: *const ReferenceValue = new_object;
+            &*object_ptr
+        }
     }
 }

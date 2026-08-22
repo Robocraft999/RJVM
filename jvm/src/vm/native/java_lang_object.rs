@@ -1,12 +1,11 @@
 use crate::vm::constants::classes::{JAVA_LANG_OBJECT, JAVA_LANG_OBJECT_ARR};
-use crate::vm::jni::types::JavaVM;
 use crate::vm::native::{gen_delegate, invalidation, non_failing_none, non_failing_some, wrap_init, NativeMethodRegistry};
 use crate::vm::result::VMPartialResult;
 use crate::vm::value::{Reference, ReferenceType, Value};
-use crate::vm::{VmError, VM};
+use crate::vm::VmError;
 use log::{debug, trace};
+use parking_lot::RwLock;
 use std::hash::{DefaultHasher, Hash, Hasher};
-use std::sync::RwLock;
 
 pub fn register_natives(registry: &mut NativeMethodRegistry) {
     let mut register = |method_name, sig, delegate| registry.register(JAVA_LANG_OBJECT, method_name, sig, delegate);
@@ -25,7 +24,7 @@ gen_delegate!(delegate_get_class, |ctx, obj_ref, _args| {
     debug!("getClass");
     if let Some(obj_ref) = obj_ref {
         debug!("obj: {:?}", obj_ref.class_name);
-        let class_ref = wrap_init!(ctx, ctx.vm.new_class_object_by_name(obj_ref.class_name.as_str())?);
+        let class_ref = wrap_init!(ctx, ctx.new_class_object_by_name(obj_ref.class_name.as_str())?);
         non_failing_some(Value::Reference(class_ref.id))
     } else {
         invalidation!("Object is Null")
@@ -48,19 +47,22 @@ gen_delegate!(delegate_clone, |ctx, obj_ref, _args| {
     debug!("clone");
     if let Some(obj_ref) = obj_ref{
         match &obj_ref.reference_type {
-            ReferenceType::Array(dims, component_type, content) => {
+            ReferenceType::Array(content) => {
                 debug!("Cloning array: {:?}", obj_ref);
-                let new_array_ref = wrap_init!(ctx, ctx.vm.new_array(*dims, component_type.clone().to_array_field_type(*dims), RwLock::new(content.read()?.clone()))?);
+                let arr_class = ctx.vm.find_class_by_id(obj_ref.class_id).unwrap();
+                let new_array_ref = wrap_init!(ctx, ctx.new_array(arr_class, content.read().as_vec())?);
+                #[cfg(feature = "debug")]
                 ctx.thread.debug_helper.tracker.push_object_event(new_array_ref.id, format!("Cloned from:\n    {:?}", obj_ref));
                 non_failing_some(Value::Reference(new_array_ref.id))
             }
             ReferenceType::Object(content) => {
                 debug!("Cloning object: {:?}", obj_ref);
                 let clazz = ctx.vm.find_class_by_id(obj_ref.class_id).unwrap();
-                let new_object_ref = ctx.vm.new_object_from_class(clazz);
+                let new_object_ref = ctx.new_object_from_class(clazz);
+                #[cfg(feature = "debug")]
                 ctx.thread.debug_helper.tracker.push_object_event(new_object_ref.id, format!("Cloned from:\n    {:?}", obj_ref));
                 if let ReferenceType::Object(new_content) = &new_object_ref.reference_type{
-                    *new_content.write()? = content.read()?.clone();
+                    *new_content.write() = content.read().clone();
                 }
                 non_failing_some(Value::Reference(new_object_ref.id))
             }
@@ -76,7 +78,7 @@ gen_delegate!(delegate_wait, |ctx, obj_ref, args| {
         if obj_ref.is_null() {
             return invalidation!("Cannot wait on null object");
         }
-        ctx.vm.monitor_handler.wait(ctx, obj_ref.id, *millies as u64);
+        ctx.vm.monitor_handler.wait(ctx, obj_ref.id, *millies as u64)?;
         non_failing_none()
     } else {
         invalidation!("Expected this and long param")
@@ -86,7 +88,7 @@ gen_delegate!(delegate_wait, |ctx, obj_ref, args| {
 gen_delegate!(delegate_notify, |ctx, obj_ref, _args| {
     debug!("notify");
     if let Some(obj_ref) = obj_ref{
-        ctx.vm.monitor_handler.notify(ctx, obj_ref.id);
+        ctx.vm.monitor_handler.notify(ctx, obj_ref.id)?;
         non_failing_none()
     } else {
         invalidation!("Expected object")
@@ -96,7 +98,7 @@ gen_delegate!(delegate_notify, |ctx, obj_ref, _args| {
 gen_delegate!(delegate_notify_all, |ctx, obj_ref, _args| {
     debug!("notify all");
     if let Some(obj_ref) = obj_ref{
-        ctx.vm.monitor_handler.notify_all(ctx, obj_ref.id);
+        ctx.vm.monitor_handler.notify_all(ctx, obj_ref.id)?;
         non_failing_none()
     } else {
         invalidation!("Expected object")

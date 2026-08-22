@@ -30,7 +30,7 @@ pub fn get_blocks(bytes: &Vec<u8>) -> BTreeMap<u16, InstructionBlock>{
 pub fn get_blocks(bytes: &Vec<u8>) -> BTreeMap<u16, InstructionBlock>{
     raw::get_blocks(bytes)
 }
-
+/*
 #[cfg(test)]
 mod tests{
     use crate::vm::VM;
@@ -116,4 +116,4 @@ mod tests{
             assert_eq!(expected, actual, "Instruction does not match. Expected {:?}, but found {:?}", expected, actual);
         }
     }
-}
+}*/

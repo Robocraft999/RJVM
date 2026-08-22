@@ -1,9 +1,4 @@
 use crate::class_file::fields::field_type::FieldType;
-use crate::class_file::fields::get_class_descriptor;
-use crate::vm::constants::{METHODTYPE_ptypes_INDEX, METHODTYPE_rtype_INDEX};
-use crate::vm::result::VMResult;
-use crate::vm::value::{Reference, ReferenceType};
-use crate::vm::VM;
 use lazy_regex::{lazy_regex, Lazy};
 use regex::Regex;
 use std::hash::{Hash, Hasher};

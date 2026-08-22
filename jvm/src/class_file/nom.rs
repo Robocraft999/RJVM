@@ -5,7 +5,7 @@ use cesu8::from_java_cesu8;
 use nom::error::ParseError;
 use nom::multi::length_count;
 use nom::number::{be_u16, be_u32, be_u8};
-use nom::{IResult, Input, OutputMode, Parser};
+use nom::{IResult, Parser};
 use nom_derive::{NomBE, Parse};
 use std::mem;
 

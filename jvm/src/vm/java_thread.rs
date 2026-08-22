@@ -1,32 +1,38 @@
+use crate::vm::callstack::CallStack;
+use crate::vm::class::{ClassAndMethod, ClassAndMethodId, ClassRef};
+use crate::vm::constants::THROWABLE_detailsMessage_INDEX;
+use crate::vm::debug::DebugHelper;
+use crate::vm::java_error::JavaError;
+use crate::vm::jni::types::{JNIEnv, JavaVM};
+use crate::vm::monitoring::MonitorAssociate;
+use crate::vm::native::NativeMethodRegistry;
+use crate::vm::result::{VMPartialResult, VMResult, VMResultType};
+use crate::vm::value::{RefId, Reference, Value};
+use crate::vm::{executor, Context, ProgramCounter, VmError};
+use log::{debug, warn};
+use parking_lot::{Mutex, RwLock};
 use std::cell::RefCell;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::thread::Thread;
-use log::{debug, warn};
-use parking_lot::{Mutex, RwLock};
-use crate::vm::callstack::CallStack;
-use crate::vm::class::{ClassAndMethod, ClassAndMethodId, ClassRef};
-use crate::vm::java_error::JavaError;
-use crate::vm::jni::types::{JNIEnv, JavaVM};
-use crate::vm::result::{VMPartialResult, VMResult, VMResultType};
-use crate::vm::value::{RefId, Reference, Value};
-use crate::vm::{executor, Context, ProgramCounter, VmError, VM};
-use crate::vm::constants::THROWABLE_detailsMessage_INDEX;
-use crate::vm::debug::DebugHelper;
-use crate::vm::monitoring::MonitorAssociate;
-use crate::vm::native::NativeMethodRegistry;
 
 pub type TID = u32;
 pub const NORM_PRIORITY: i32 = 5;
 pub const RUNNABLE: i32 = 1 + 4; //jvmti: alive + runnable
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum ThreadState {
     Running,
     Sleeping,
-    Waiting(MonitorAssociate),
+    
+    // remember the depth
+    Waiting(usize),
+    Notified(usize),
+    
     Blocked,
     Parked,
+
+    Finished,
 }
 
 #[derive(Debug)]
@@ -35,47 +41,58 @@ pub struct ThreadMeta {
     pub os_thread: Thread,
 
     pub interrupted: RwLock<bool>,
-    pub state: RwLock<ThreadState>,
+    pub daemon: bool,
+    pub thread_state: RwLock<ThreadState>,
     pub unsafe_unpark_count: Mutex<usize>,
 }
 
 impl ThreadMeta {
-    pub fn new(id: TID, os_thread: Thread) -> Self {
+    pub fn new(id: TID, os_thread: Thread, daemon: bool) -> Self {
         Self {
             id,
             os_thread,
             interrupted: RwLock::new(false),
-            state: RwLock::new(ThreadState::Running),
+            daemon,
+            thread_state: RwLock::new(ThreadState::Running),
             unsafe_unpark_count: Mutex::new(0),
         }
     }
 
     pub fn block(&self) {
-        *self.state.write() = ThreadState::Blocked
+        *self.thread_state.write() = ThreadState::Blocked
     }
     pub fn unblock(&self) {
-        *self.state.write() = ThreadState::Running
+        *self.thread_state.write() = ThreadState::Running
     }
 
     pub fn sleep(&self) {
-        *self.state.write() = ThreadState::Sleeping
+        *self.thread_state.write() = ThreadState::Sleeping
     }
     pub fn woken(&self) {
-        *self.state.write() = ThreadState::Running
+        *self.thread_state.write() = ThreadState::Running
     }
 
-    pub fn wait(&self, associate: MonitorAssociate) {
-        *self.state.write() = ThreadState::Waiting(associate)
+    pub fn wait(&self, count: usize) {
+        *self.thread_state.write() = ThreadState::Waiting(count)
     }
     pub fn notified(&self) {
-        *self.state.write() = ThreadState::Running
+        let mut state = self.thread_state.write();
+        let ThreadState::Waiting(count) = *state else { unreachable!("Illegal Thread State Transition") };
+        *state = ThreadState::Notified(count);
     }
 
     pub fn park(&self) {
-        *self.state.write() = ThreadState::Parked
+        *self.thread_state.write() = ThreadState::Parked
     }
     pub fn unpark(&self) {
-        *self.state.write() = ThreadState::Running
+        *self.thread_state.write() = ThreadState::Running
+    }
+
+    pub fn finish(&self) {
+        *self.thread_state.write() = ThreadState::Finished
+    }
+    pub fn is_finished(&self) -> bool {
+        *self.thread_state.read() == ThreadState::Finished
     }
 }
 
@@ -98,9 +115,9 @@ pub struct JavaThread {
 }
 
 impl JavaThread {
-    pub fn new(id: TID) -> Self {
+    pub fn new(id: TID, daemon: bool) -> Self {
         Self {
-            meta: Arc::new(ThreadMeta::new(id, std::thread::current())),
+            meta: Arc::new(ThreadMeta::new(id, std::thread::current(), daemon)),
             thread_obj_id: None,
             call_stack: CallStack::new(),
             debug_helper: DebugHelper::new(),
@@ -113,7 +130,7 @@ impl JavaThread {
 
     pub fn invoke_subroutine<'a>(ctx: Context<'a, '_>, class_and_method: ClassAndMethod<'a>, object: Option<Reference<'a>>, args: Vec<Value>) -> VMPartialResult<Option<Value>>{
         let current_index = ctx.thread.call_stack.len() as isize -1;
-        ctx.thread.call_stack.create_and_push_call_frame(class_and_method, object, args, false);
+        ctx.create_and_push_call_frame(class_and_method, object, args, false);
         Self::invoke_frames_until(ctx, current_index)
     }
 
@@ -121,8 +138,8 @@ impl JavaThread {
         let current_index = ctx.thread.call_stack.len() as isize -1;
         let class_and_method = ClassAndMethod::try_resolve(ctx.vm, &camid)?;
         let obj = ctx.vm.resolve_object_by_id(obj_id)?;
-        ctx.thread.call_stack.create_and_push_call_frame(class_and_method, Some(obj), args, false);
-        let VMResultType::Successful(None) = Self::invoke_frames_until(ctx, current_index)? else { return Err(VmError::Unspecified("Thread exited unsuccessfully".to_string())) };
+        ctx.create_and_push_call_frame(class_and_method, Some(obj), args, false);
+        let VMResultType::Successful(None) = Self::invoke_frames_until(ctx, current_index)? else { return Err(VmError::Unspecified("Thread exited unsuccessfully".to_owned())) };
         Ok(())
     }
 
@@ -136,6 +153,7 @@ impl JavaThread {
             if let Some((message, origin, Value::Reference(throwable_ref_id))) = ctx.thread.caught_exception.borrow().as_ref(){
                 let thrown_class_name = ctx.vm.resolve_object_by_id(*throwable_ref_id)?.class_name.clone();
                 if frame_amount as isize - 1 == stop_index {
+                    #[cfg(feature = "debug")]
                     ctx.thread.debug_helper.exception_helper.push(format!("Subroutine could not handle {} thrown by function {} with message: {}", thrown_class_name, origin, message));
                     return Err(VmError::JavaException(JavaError::JavaExceptionThrown(thrown_class_name, message.to_owned(), origin.to_owned())));
                 }
@@ -143,19 +161,53 @@ impl JavaThread {
                 let camid = ctx.thread.call_stack.get_class_and_method_id_cloned();
                 let class_and_method = ClassAndMethod::try_resolve(ctx.vm, &camid)?;
                 if class_and_method.method.is_native(){
+                    if class_and_method.method.is_synchronized() {
+                        let obj = if !class_and_method.method.is_static() { Some(ctx.thread.call_stack.load_local(0).unwrap()) } else { None };
+                        match obj {
+                            None => ctx.vm.monitor_handler.exit_method(ctx, camid)?,
+                            Some(Value::Reference(obj_id)) => ctx.vm.monitor_handler.exit_ref(ctx, obj_id)?,
+                            _ => unreachable!()
+                        }
+                        #[cfg(feature = "debug")]
+                        {
+                            match obj {
+                                None => ctx.thread.debug_helper.monitor_logger.push_event(MonitorAssociate::Method(camid), format!("EXIT Method {}, [native, on error]", class_and_method.format())),
+                                Some(Value::Reference(obj_id)) => ctx.thread.debug_helper.monitor_logger.push_event(MonitorAssociate::Ref(obj_id), format!("EXIT Method {} with {:?}, [native, on error]", class_and_method.format(), obj_id)),
+                                _ => unreachable!()
+                            }
+                        }
+                    }
                     ctx.thread.call_stack.pop_call_frame();
                     debug!("Exception handler not in this native function {}", class_and_method.format());
                     continue;
                 }
                 let current_pc = &ctx.thread.call_stack.get_pc();
                 //[unchecked] class already loaded by method
-                if let Some(handler_pc) = class_and_method.resolve_exception_handler(ctx.vm, current_pc, thrown_class_name.as_str()){
+                if let Some(handler_pc) = class_and_method.resolve_exception_handler(&ctx, current_pc, thrown_class_name.as_str()){
                     ctx.thread.call_stack.set_pc(handler_pc);
+                    ctx.thread.call_stack.clear_operand_stack();
                     ctx.thread.call_stack.push_operand_value(Value::Reference(*throwable_ref_id));
+                    #[cfg(feature = "debug")]
                     ctx.thread.debug_helper.exception_helper.push(format!("Handled {} by {}\n└-- thrown by {} with message: {}", thrown_class_name, class_and_method.format(), origin, message));
                     debug!("Exception thrown handled by {}", class_and_method.format());
                     clear_exception = true;
                 } else {
+                    if class_and_method.method.is_synchronized() {
+                        let obj = if !class_and_method.method.is_static() { Some(ctx.thread.call_stack.load_local(0).unwrap()) } else { None };
+                        match obj {
+                            None => ctx.vm.monitor_handler.exit_method(ctx, camid)?,
+                            Some(Value::Reference(obj_id)) => ctx.vm.monitor_handler.exit_ref(ctx, obj_id)?,
+                            _ => unreachable!()
+                        }
+                        #[cfg(feature = "debug")]
+                        {
+                            match obj {
+                                None => ctx.thread.debug_helper.monitor_logger.push_event(MonitorAssociate::Method(camid), format!("EXIT Method {}, [non-native, on error]", class_and_method.format())),
+                                Some(Value::Reference(obj_id)) => ctx.thread.debug_helper.monitor_logger.push_event(MonitorAssociate::Ref(obj_id), format!("EXIT Method {} with {:?}, [non-native, on error]", class_and_method.format(), obj_id)),
+                                _ => unreachable!()
+                            }
+                        }
+                    }
                     ctx.thread.call_stack.pop_call_frame();
                     debug!("Exception handler not in this function {}", class_and_method.format());
                     continue;
@@ -168,6 +220,28 @@ impl JavaThread {
                 ctx.thread.caught_exception.replace(None);
             }
 
+            let is_synchronized = class_and_method.method.is_synchronized();
+            let is_static = class_and_method.method.is_static();
+            let obj = if !is_static { Some(ctx.thread.call_stack.load_local(0).unwrap()) } else { None };
+            if ctx.thread.call_stack.get_pc().0 == 0 && is_synchronized {
+                match obj {
+                    None => ctx.vm.monitor_handler.enter_method_or_block(ctx, camid)?,
+                    Some(Value::Reference(obj_id)) => ctx.vm.monitor_handler.enter_ref_or_block(ctx, obj_id)?,
+                    _ => unreachable!()
+                }
+
+                #[cfg(feature = "debug")]
+                {
+                    match obj {
+                        None => ctx.thread.debug_helper.monitor_logger.push_event(MonitorAssociate::Method(camid), format!("ENTER Method {}, [pc 0]", class_and_method.format())),
+                        Some(Value::Reference(obj_id)) => ctx.thread.debug_helper.monitor_logger.push_event(MonitorAssociate::Ref(obj_id), format!("ENTER Method {} with {:?}, [pc 0]", class_and_method.format(), obj_id)),
+                        _ => unreachable!()
+                    }
+                }
+            }
+            #[cfg(feature = "debug")]
+            let debug_cam = class_and_method.clone();
+
             let call_result = if class_and_method.method.is_native(){
                 Self::execute_native(ctx, class_and_method)?
             } else {
@@ -178,6 +252,21 @@ impl JavaThread {
                 // borde alltid och bara vara på return av non-native och native funktioner
                 // så den här frame är alltid den översta
                 VMResultType::Successful(result) => {
+                    if is_synchronized {
+                        match obj {
+                            None => ctx.vm.monitor_handler.exit_method(ctx, camid)?,
+                            Some(Value::Reference(obj_id)) => ctx.vm.monitor_handler.exit_ref(ctx, obj_id)?,
+                            _ => unreachable!()
+                        }
+                        #[cfg(feature = "debug")]
+                        {
+                            match obj {
+                                None => ctx.thread.debug_helper.monitor_logger.push_event(MonitorAssociate::Method(camid), format!("EXIT Method {}, [successfully]", debug_cam.format())),
+                                Some(Value::Reference(obj_id)) => ctx.thread.debug_helper.monitor_logger.push_event(MonitorAssociate::Ref(obj_id), format!("EXIT Method {} with {:?}, [successfully]", debug_cam.format(), obj_id)),
+                                _ => unreachable!()
+                            }
+                        }
+                    }
                     let frame = ctx.thread.call_stack.pop_call_frame();
                     if frame_amount as isize -2 == stop_index{
                         return Ok(VMResultType::Successful(result));
@@ -225,7 +314,7 @@ impl JavaThread {
                     Some(local_ref)
                 },
                 None => None,
-                _ => return Err(VmError::ValidationError("Expected a reference".to_string()))
+                _ => return Err(VmError::ValidationError("Expected a reference".to_owned()))
             }
         };
         let args = ctx.thread.call_stack.locals_stack.borrow().last().unwrap()
@@ -255,9 +344,9 @@ impl JavaThread {
     ///
     pub fn throw<'a, T>(ctx: Context<'a, '_>, throwable_class: ClassRef<'a>, message: String, origin: String) -> VMPartialResult<T> {
         //let exception_class = self.get_or_initialize_class(&throwable_class_name)?;
-        let exception_object = ctx.vm.new_object_from_class(throwable_class);
+        let exception_object = ctx.new_object_from_class(throwable_class);
 
-        let details = ctx.vm.try_new_string_object(message.as_str())?;
+        let details = ctx.try_new_string_object(message.as_str())?;
         //detailsMessage
         exception_object.set_field(THROWABLE_detailsMessage_INDEX, Value::Reference(details.id));
 

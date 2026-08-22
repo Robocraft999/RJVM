@@ -1,23 +1,19 @@
 use super::call_frame::CallFrame;
-use crate::bytecode::Instruction;
-use crate::error;
-use crate::vm::class::{Class, ClassAndMethodId, ClassId, ClassRef};
-use crate::vm::info;
-use crate::vm::result::{VMPartialResult, VMResult, VMResultType};
-use crate::vm::value::Reference;
+use crate::vm::class::ClassAndMethodId;
 use crate::vm::ClassAndMethod;
 use crate::vm::ProgramCounter;
 use crate::Value;
-use crate::VmError;
 use crate::VM;
 use log::{trace, warn};
 use std::cell::RefCell;
+use crate::vm::value::RefId;
 
 pub struct CallStack{
     pub frames: RefCell<Vec<CallFrame>>,
     pub operand_stacks: RefCell<Vec<Vec<Value>>>,
     pub locals_stack: RefCell<Vec<Vec<Value>>>,
     pub pcs: RefCell<Vec<ProgramCounter>>,
+    pub class_loaders: RefCell<Vec<Option<RefId>>>,
 }
 
 impl CallStack {
@@ -27,45 +23,15 @@ impl CallStack {
             operand_stacks: RefCell::new(Vec::new()),
             locals_stack: RefCell::new(Vec::new()),
             pcs: RefCell::new(Vec::new()),
+            class_loaders: RefCell::new(Vec::new())
         }
-    }
-
-    pub fn create_and_push_call_frame<'a>(&self, class_and_method: ClassAndMethod<'a>, object: Option<Reference<'a>>, args: Vec<Value>, should_push_return: bool){
-        let mut locals = vec![Value::Uninitialized; class_and_method.get_max_locals()];
-        let mut offset = 0;
-        if !class_and_method.method.is_static(){
-            locals[0] = Value::Reference(object.unwrap().id);
-            offset = 1;
-        }
-        if !class_and_method.class.has_method_polymorphic_signature(class_and_method.method) {
-            for (i, provided_arg) in args.iter().filter(|a| if let Value::Dummy = a {false} else {true}).enumerate(){
-                if !(&class_and_method.method.descriptor.args[i] == provided_arg){
-                    //unreachable!("Expected arg type: {:?} but got value: {:?}", class_and_method.method.descriptor.args[i], provided_arg);
-                }
-            }
-        } else {
-            locals.resize(offset + args.len(), Value::Uninitialized);
-            println!("cam: {}, ({}), args:\n    {:?}", class_and_method.format(), locals.len(), args);
-        }
-
-        for (dest, src) in locals[offset..].iter_mut().zip(args) {
-            *dest = src;
-        }
-        self.locals_stack.borrow_mut().push(locals);
-        self.operand_stacks.borrow_mut().push(Vec::with_capacity(class_and_method.get_max_stack_size()));
-        self.pcs.borrow_mut().push(ProgramCounter(0));
-        trace!("Pushing frame for: {}", class_and_method.format());
-        let frame = CallFrame{
-            class_and_method: class_and_method.as_ids(),
-            should_push_return,
-        };
-        self.frames.borrow_mut().push(frame);
     }
 
     pub fn pop_call_frame(&self) -> CallFrame{
         self.locals_stack.borrow_mut().pop();
         self.operand_stacks.borrow_mut().pop();
         self.pcs.borrow_mut().pop();
+        self.class_loaders.borrow_mut().pop();
         trace!("Popping frame for: {:?}", self.frames.borrow().last().unwrap().class_and_method);
         self.frames.borrow_mut().pop().unwrap()
     }
@@ -77,6 +43,7 @@ impl CallStack {
             self.locals_stack.borrow_mut().remove(index);
             self.operand_stacks.borrow_mut().remove(index);
             self.pcs.borrow_mut().remove(index);
+            self.class_loaders.borrow_mut().remove(index);
             self.frames.borrow_mut().remove(index)
         }
     }
@@ -90,6 +57,10 @@ impl CallStack {
 
     pub fn pop_operand_value(&self) -> Option<Value>{
         self.operand_stacks.borrow_mut().last_mut().unwrap().pop() //TODO make it VMResult and add error type
+    }
+
+    pub fn clear_operand_stack(&self) {
+        self.operand_stacks.borrow_mut().last_mut().unwrap().clear();
     }
 
     pub fn store_local(&self, val: Value, index: usize){
@@ -106,6 +77,10 @@ impl CallStack {
 
     pub fn get_pc(&self) -> ProgramCounter{
         *self.pcs.borrow().last().unwrap()
+    }
+
+    pub fn get_context_class_loader(&self) -> Option<RefId> {
+        self.class_loaders.borrow().last().unwrap().clone()
     }
 
     pub fn get_class_and_method_id_cloned(&self) -> ClassAndMethodId {

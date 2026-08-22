@@ -1,5 +1,4 @@
 use crate::class_file::methods::descriptor::MethodDescriptor;
-use std::str::FromStr;
 
 pub fn native_escape(name: &str) -> String {
     let mut escaped = String::new();

@@ -1,11 +1,8 @@
-use crate::vm::Context;
-
 pub mod jvm;
 pub mod types;
 pub mod env_function_table;
 pub mod vm_function_table;
 
-#[macro_export]
 macro_rules! native_init_wrap {
     ($env:expr, $x:expr) => {
         {
@@ -33,3 +30,11 @@ macro_rules! native_init_wrap {
         }
     }
 }
+use native_init_wrap;
+
+macro_rules! ctx {
+    ($env:expr) => {
+        crate::vm::Context{ vm: unsafe{(*$env).vm()}, thread: crate::vm::application::thread() }
+    };
+}
+use ctx;

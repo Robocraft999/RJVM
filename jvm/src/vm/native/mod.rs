@@ -1,16 +1,14 @@
 use crate::class_file::fields::field_type::{FieldType, PrimitiveType};
 use crate::class_file::methods::descriptor::MethodDescriptor;
 use crate::vm::class::ClassAndMethod;
-use crate::vm::java_thread::JavaThread;
-use crate::vm::jni::types::{jvalue, JavaVM};
+use crate::vm::jni::types::jvalue;
 use crate::vm::native::external::ExternNativeMethod;
 use crate::vm::result::{VMPartialResult, VMResultType};
 use crate::vm::value::{RefId, Reference, Value};
-use crate::vm::{Context, VmError, VM};
+use crate::vm::{Context, VmError};
 use libffi::high::CodePtr;
 use libloading::Library;
-use log::{info, warn};
-use std::cell::RefCell;
+use log::{debug, info, warn};
 use std::collections::HashMap;
 use std::ffi::c_void;
 use std::sync::RwLock;
@@ -61,7 +59,16 @@ macro_rules! gen_delegate {
 }
 use gen_delegate;
 
-
+macro_rules! promote_exception {
+    ($x:expr) => {
+        match $x {
+            crate::vm::VMResultType::ExceptionThrown => return Ok(crate::vm::VMResultType::ExceptionThrown),
+            crate::vm::VMResultType::Successful(res) => res,
+            crate::vm::VMResultType::Interrupted(..) => unreachable!("[promote_error] This is not for interruptable only error throwing functions")
+        }
+    }
+}
+use promote_exception;
 
 pub struct NativeMethodRegistry<'a>{
     methods: Vec<NativeMethod<'a>>,
@@ -98,8 +105,8 @@ impl <'a> NativeMethodRegistry<'a> {
 
     fn try_resolve_extern_native(&self, class_and_method: &ClassAndMethod<'a>) -> bool {
         let (short, long) = class_and_method.native_escaped();
-        println!("{}", class_and_method.format());
-        println!("[try_resolve_extern_native]: {short} {long}");
+        debug!(target: "native", "{}", class_and_method.format());
+        debug!(target: "native", "[try_resolve_extern_native]: {short} {long}");
         if let Ok(res) = self.loaded_libraries.read() {
             for lib in res.iter(){
                 unsafe {
@@ -149,11 +156,11 @@ impl <'a> NativeMethodRegistry<'a> {
             };
             if let Some(extern_native) = optional_extern {
                 let class_object_or_this = if cam.method.is_static(){
-                    ctx.vm.try_new_class_object(cam.class).ok()?
+                    ctx.try_new_class_object(cam.class).ok()?
                 } else {
                     object.unwrap()
                 };
-                println!("[try_resolve_extern_native]: {} with args: \n{:?}", class_object_or_this.print(ctx.vm), args);
+                debug!(target: "native", "[try_resolve_extern_native]: {} with args: \n{:?}", class_object_or_this.print(ctx.vm), args);
                 info!("METHOD_NAME (extern native): {}", cam.format());
                 let jni_result = extern_native.call(cam, class_object_or_this, args);
                 let result = if let Some(val) = jni_result{

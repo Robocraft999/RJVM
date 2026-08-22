@@ -1,28 +1,62 @@
 #![allow(non_upper_case_globals)]
+#![allow(unused)]
 // FIELD INDICES
 
+// java.io.FileDescriptor
+pub const FILEDESCRIPTOR_fd_INDEX: usize = 0;
+
 // java.io.FileInputStream
+pub const FILEINPUTSTREAM_fd_INDEX: usize = 1;
 pub const FILEINPUTSTREAM_path_INDEX: usize = 2;
 
 // java.io.File
 pub const FILE_path_INDEX: usize = 1;
 
+// java.io.FileOutputStream
+pub const FILEOUTPUTSTREAM_fd_INDEX: usize = 0;
+
+// java.io.RandomAccessFile
+pub const RANDOMACCESSFILE_fd_INDEX: usize = 0;
+
+// java.lang.Boolean
+pub const BOOLEAN_value_INDEX: usize = 3;
+
+// java.lang.Byte
+pub const BYTE_value_INDEX: usize = 4;
+
+// java.lang.Character
+pub const CHARACTER_value_INDEX: usize = 65;
+
 // java.lang.Class
 pub const CLASS_name_INDEX: usize = 5;
+pub const CLASS_classloader_INDEX: usize = 6;
 
 // java.lang.ClassLoader$NativeLibrary
 pub const CLASSLOADER_NATIVELIBRARY_handle_INDEX: usize = 0;
 pub const CLASSLOADER_NATIVELIBRARY_name_INDEX: usize = 3;
 pub const CLASSLOADER_NATIVELIBRARY_loaded_INDEX: usize = 5;
 
+// java.lang.Double
+pub const DOUBLE_value_INDEX: usize = 12;
+
+// java.lang.Float
+pub const FLOAT_value_INDEX: usize = 12;
+
+// java.lang.Integer
+pub const INTEGER_value_INDEX: usize = 8;
+
 // java.lang.Long
 pub const LONG_value_INDEX: usize = 4;
+
+// java.lang.Short
+pub const SHORT_value_INDEX: usize = 4;
 
 // java.lang.String
 pub const STRING_value_INDEX: usize = 0;
 pub const STRING_hash_INDEX: usize = 1;
 
 // java.lang.System
+pub const SYSTEM_in_INDEX: usize = 0;
 pub const SYSTEM_out_INDEX: usize = 1;
 pub const SYSTEM_err_INDEX: usize = 2;
 
@@ -30,6 +64,7 @@ pub const SYSTEM_err_INDEX: usize = 2;
 pub const THREAD_name_INDEX: usize = 0;
 pub const THREAD_priority_INDEX: usize = 1;
 pub const THREAD_eetop_INDEX: usize = 3;
+pub const THREAD_daemon_INDEX: usize = 5;
 pub const THREAD_stillborn_INDEX: usize = 6;
 pub const THREAD_target_INDEX: usize = 7;
 pub const THREAD_group_INDEX: usize = 8;
@@ -86,24 +121,40 @@ pub const FIELD_modifiers_INDEX: usize = 8;
 // CLASS NAMES
 pub mod classes {
     pub const JAVA_IO_FILE_INPUT_STREAM: &str = "java/io/FileInputStream";
+    pub const JAVA_IO_FILE_NOT_FOUND_EXCEPTION: &str = "java/io/FileNotFoundException";
     pub const JAVA_IO_FILE_OUTPUT_STREAM: &str = "java/io/FileOutputStream";
+    pub const JAVA_IO_IOEXCEPTION: &str = "java/io/IOException";
+    pub const JAVA_IO_RANDOM_ACCESS_FILE: &str = "java/io/RandomAccessFile";
     pub const JAVA_IO_UNIX_FILE_SYSTEM: &str = "java/io/UnixFileSystem";
+    pub const JAVA_LANG_ARITHMETIC_EXCEPTION: &str = "java/lang/ArithmeticException";
+    pub const JAVA_LANG_BYTE_ARR_PRIM: &str = "[B";
+    pub const JAVA_LANG_BYTE_ARR_PRIM_2: &str = "[[B";
+    pub const JAVA_LANG_CHAR_ARR_PRIM: &str = "[C";
     pub const JAVA_LANG_CLASS: &str = "java/lang/Class";
+    pub const JAVA_LANG_CLASS_ARR: &str = "[Ljava/lang/Class;";
     pub const JAVA_LANG_CLASSLOADER: &str = "java/lang/ClassLoader";
     pub const JAVA_LANG_DOUBLE: &str = "java/lang/Double";
     pub const JAVA_LANG_FLOAT: &str = "java/lang/Float";
+    pub const JAVA_LANG_ILLEGAL_ARGUMENT_EXCEPTION: &str = "java/lang/IllegalArgumentException";
     pub const JAVA_LANG_INVOKE_METHOD_HANDLE: &str = "java/lang/invoke/MethodHandle";
     pub const JAVA_LANG_INVOKE_MHN: &str = "java/lang/invoke/MethodHandleNatives";
     pub const JAVA_LANG_INVOKE_METHOD_TYPE: &str = "java/lang/invoke/MethodType";
     pub const JAVA_LANG_LONG: &str = "java/lang/Long";
+    pub const JAVA_LANG_NULL_POINTER_EXCEPTION: &str = "java/lang/NullPointerException";
     pub const JAVA_LANG_OBJECT: &str = "java/lang/Object";
     pub const JAVA_LANG_OBJECT_ARR: &str = "[Ljava/lang/Object;";
+    pub const JAVA_LANG_PACKAGE: &str = "java/lang/Package";
     pub const JAVA_LANG_PROCESS_ENVIRONMENT: &str = "java/lang/ProcessEnvironment";
+    pub const JAVA_LANG_REFLECT_ARRAY: &str = "java/lang/reflect/Array";
     pub const JAVA_LANG_REFLECT_CONSTRUCTOR: &str = "java/lang/reflect/Constructor";
+    pub const JAVA_LANG_REFLECT_CONSTRUCTOR_ARR: &str = "[Ljava/lang/reflect/Constructor;";
     pub const JAVA_LANG_REFLECT_FIELD: &str = "java/lang/reflect/Field";
+    pub const JAVA_LANG_REFLECT_FIELD_ARR: &str = "[Ljava/lang/reflect/Field;";
     pub const JAVA_LANG_REFLECT_METHOD: &str = "java/lang/reflect/Method";
+    pub const JAVA_LANG_REFLECT_METHOD_ARR: &str = "[Ljava/lang/reflect/Method;";
     pub const JAVA_LANG_RUNTIME: &str = "java/lang/Runtime";
     pub const JAVA_LANG_STRING: &str = "java/lang/String";
+    pub const JAVA_LANG_STRING_ARR: &str = "[Ljava/lang/String;";
     pub const JAVA_LANG_SYSTEM: &str = "java/lang/System";
     pub const JAVA_LANG_THREAD: &str = "java/lang/Thread";
     pub const JAVA_LANG_THREAD_GROUP: &str = "java/lang/ThreadGroup";

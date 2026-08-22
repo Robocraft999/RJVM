@@ -1,12 +1,12 @@
 use crate::class_file::fields::field_type::{FieldType, PrimitiveType};
 use crate::class_file::methods::descriptor::MethodDescriptor;
+use crate::vm::application::thread;
 use crate::vm::class::ClassAndMethod;
-use crate::vm::jni::types::{jboolean, jbyte, jchar, jdouble, jfloat, jint, jlong, jobject, jshort, jvalue, JNIEnv, JavaVM};
+use crate::vm::jni::types::{jboolean, jbyte, jchar, jdouble, jfloat, jint, jlong, jobject, jshort, jvalue, JNIEnv};
 use crate::vm::value::{Reference, Value};
 use libffi::high::CodePtr;
 use libffi::middle::{Arg, Cif, Type};
 use std::ffi::c_void;
-use crate::vm::application::thread;
 
 fn primitive_type_to_native(primitive_type: &PrimitiveType) -> Type {
     match primitive_type {
@@ -43,10 +43,16 @@ fn descriptor_to_cif(method_descriptor: &MethodDescriptor) -> Cif {
     Cif::new(args, return_type)
 }
 
+const NULL: *const c_void = std::ptr::null();
+
 fn values_to_jni_args<'a>(args: &'a Vec<Value>) -> Vec<Arg<'a>> {
     args.iter().filter(|v| if let Value::Dummy = v {false} else {true}).map(|arg| {
         match arg{
-            Value::Reference(reference) => Arg::new(&reference.0),
+            Value::Reference(reference) => if reference.is_null() {
+                Arg::new(&NULL)
+            } else {
+                Arg::new(&reference.0)
+            },
             Value::Integer(integer) => Arg::new(integer),
             Value::Long(long) => Arg::new(long),
             Value::Float(float) => Arg::new(float),

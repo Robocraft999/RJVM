@@ -1,9 +1,8 @@
 use crate::vm::constants::classes::{JAVA_LANG_DOUBLE, JAVA_LANG_FLOAT};
-use crate::vm::jni::types::JavaVM;
 use crate::vm::native::{gen_delegate, invalidation, non_failing_some, NativeMethodRegistry};
 use crate::vm::result::VMPartialResult;
 use crate::vm::value::{Reference, Value};
-use crate::vm::{VmError, VM};
+use crate::vm::VmError;
 
 pub fn register_natives(registry: &mut NativeMethodRegistry) {
     registry.register(JAVA_LANG_FLOAT, "floatToRawIntBits", "(F)I", delegate_float_to_raw_bits);

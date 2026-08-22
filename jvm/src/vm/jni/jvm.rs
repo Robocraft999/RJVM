@@ -4,18 +4,18 @@
 #![allow(private_interfaces)]
 
 use crate::class_file::fields::field_type::FieldType;
-use crate::native_init_wrap;
 use crate::vm::jni::types::*;
 use crate::vm::value::ReferenceType;
 use crate::vm::{VMResultType, VM};
 use log::debug;
-use std::cell::RefCell;
+use parking_lot::RwLock;
 use std::ffi::{c_char, c_int, c_long, c_uchar, c_ushort, c_void, CStr, CString};
 use std::fs::{File, OpenOptions};
 use std::os::fd::{AsFd, AsRawFd, FromRawFd, IntoRawFd, OwnedFd, RawFd};
 use std::path::Path;
 use std::str::FromStr;
-use std::sync::RwLock;
+use libc::size_t;
+use crate::vm::jni::{ctx, native_init_wrap};
 
 pub const JVM_INTERFACE_VERSION: jint = 4;
 
@@ -207,8 +207,9 @@ pub unsafe extern "system-unwind" fn JVM_UnloadLibrary(handle: *const c_void) ->
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "system-unwind" fn JVM_FindLibraryEntry(handle: *const c_void, name: *const c_char) -> *const c_void {
-    unimplemented!();
+pub unsafe extern "system-unwind" fn JVM_FindLibraryEntry(handle: *mut c_void, name: *const c_char) -> *const c_void {
+    // FIXME Windows support
+    unsafe { libc::dlsym(handle, name) }
 }
 
 #[unsafe(no_mangle)]
@@ -441,18 +442,7 @@ pub unsafe extern "system-unwind" fn JVM_SetPrimitiveArrayElement(env: *mut JNIE
 
 #[unsafe(no_mangle)]
 pub unsafe extern "system-unwind" fn JVM_NewArray(env: *mut JNIEnv, eltClass: jclass, length: jint) -> jobject {
-    let vm = unsafe{(*env).vm()};
-    let clazz = vm.resolve_class_object_by_jclass(eltClass);
-    // FIXME check if we only have objects or primitives too (and if its always 1 dimensional)
-    // one could use FieldType::from_str to fix, but then the prefilled values are wrong
-    // maybe there is function somewhere which creates null values per fieldtype idk anymore
-    let content = vec![vm.null(); length as usize];
-    let arr = native_init_wrap!(env, vm.new_array(
-        1,
-        FieldType::Object(clazz.name.clone()).to_array_field_type(1),
-        RwLock::new(content.clone())
-    ));
-    arr.id.nid() as jobject
+    unimplemented!()
 }
 
 #[unsafe(no_mangle)]
@@ -967,22 +957,18 @@ pub unsafe extern "system-unwind" fn JVM_NativePath(path: *const c_char) -> *con
 
 #[unsafe(no_mangle)]
 pub unsafe extern "system-unwind" fn JVM_Open(fname: *const c_char, flags: jint, mode: jint) -> jint {
-    let file_name = unsafe{CStr::from_ptr(fname)};
-    let file_name = file_name.to_string_lossy();
-    let path = Path::new(file_name.as_ref());
-    if let Ok(file) = OpenOptions::new().read(true).open(path){
-        let fd = file.into_raw_fd() as jint;
-        fd
+    let result = unsafe { libc::open(fname, flags, mode) };
+    if result >= 0 {
+        result as jint
     } else {
-        unimplemented!("NATIVE: JVM_Open: {}", file_name);
+        -1
     }
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "system-unwind" fn JVM_Close(fd: jint) -> jint {
-    let fd = unsafe{OwnedFd::from_raw_fd(RawFd::from_raw_fd(fd))};
-    drop(fd);
-    0 as jint //success
+    let res = unsafe { libc::close(fd) };
+    res as jint //success
 }
 
 #[unsafe(no_mangle)]
@@ -1017,12 +1003,12 @@ pub unsafe extern "system-unwind" fn JVM_Sync(fd: jint) -> jint {
 
 #[unsafe(no_mangle)]
 pub unsafe extern "system-unwind" fn JVM_InitializeSocketLibrary() -> jint {
-    unimplemented!();
+    0
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "system-unwind" fn JVM_Socket(domain: jint, typ: jint, protocol: jint) -> jint {
-    unimplemented!();
+    unsafe { libc::socket(domain, typ, protocol) as jint }
 }
 
 #[unsafe(no_mangle)]
@@ -1101,8 +1087,8 @@ pub unsafe extern "system-unwind" fn JVM_SetSockOpt(fd: jint, level: i32, optnam
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "system-unwind" fn JVM_GetHostName(name: *const c_char, namelen: i32) -> i32 {
-    unimplemented!();
+pub unsafe extern "system-unwind" fn JVM_GetHostName(name: *mut c_char, namelen: c_int) -> c_int {
+    unsafe { libc::gethostname(name, namelen as size_t) }
 }
 
 #[unsafe(no_mangle)]

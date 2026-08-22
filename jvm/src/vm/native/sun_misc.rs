@@ -1,15 +1,13 @@
 use crate::class_file::fields::field_type::{FieldType, PrimitiveType};
-use crate::vm::constants::classes::{SUN_MISC_PERF, SUN_MISC_SIGNAL, SUN_MISC_URL_CLASSPATH, SUN_MISC_VM, SUN_NIO_FS_UND};
-use crate::vm::jni::types::JavaVM;
+use crate::vm::constants::classes::{JAVA_LANG_BYTE_ARR_PRIM, SUN_MISC_PERF, SUN_MISC_SIGNAL, SUN_MISC_URL_CLASSPATH, SUN_MISC_VM, SUN_NIO_FS_UND};
+use crate::vm::java_thread::JavaThread;
 use crate::vm::native::{gen_delegate, invalidation, non_failing_none, non_failing_some, wrap_init, NativeMethodRegistry};
 use crate::vm::result::{VMPartialResult, VMResultType};
 use crate::vm::value::{Reference, Value};
-use crate::vm::{VmError, VM};
+use crate::vm::VmError;
 use log::debug;
-use std::cell::RefCell;
+use parking_lot::RwLock;
 use std::env;
-use std::sync::RwLock;
-use crate::vm::java_thread::JavaThread;
 
 pub fn register_natives(registry: &mut NativeMethodRegistry) {
     registry.register(SUN_MISC_VM, "initialize", "()V", delegate_initialize);
@@ -66,7 +64,7 @@ gen_delegate!(delegate_lookup_cache_urls, |ctx, _obj_ref, _args| {
 gen_delegate!(delegate_create_long, |ctx, _obj_ref, _args| {
     let class_name = "java/nio/DirectByteBuffer";
     let byte_buffer_ref = wrap_init!(ctx, ctx.new_object(class_name)?);
-    let constructor = ctx.vm.resolve_class_method(class_name, "<init>", "(JI)V")?;
+    let constructor = ctx.resolve_class_method(class_name, "<init>", "(JI)V")?;
     let addr = ctx.vm.unsafe_allocator.allocate_memory(8);
     let res = JavaThread::invoke_subroutine(ctx, constructor, Some(byte_buffer_ref), vec![Value::Long(addr), Value::Dummy, Value::Integer(8)])?;
     if let VMResultType::Successful(None) = res{
@@ -84,6 +82,7 @@ gen_delegate!(delegate_und_getcwd, |ctx, _obj_ref, _args| {
     let current_working_dir = env::current_dir().unwrap();
     debug!("getcwd -> '{}'", current_working_dir.display());
     let bytes = current_working_dir.into_os_string().as_encoded_bytes().iter().map(|b| Value::Integer(*b as i32)).collect::<Vec<_>>();
-    let path_ref = wrap_init!(ctx, ctx.vm.new_array(1, FieldType::Primitive(PrimitiveType::Byte).to_array_field_type(1), RwLock::new(bytes.clone()))?);
+    let byte_arr_clazz = ctx.get_or_resolve_class(JAVA_LANG_BYTE_ARR_PRIM)?;
+    let path_ref = wrap_init!(ctx, ctx.new_array(byte_arr_clazz, bytes.clone())?);
     non_failing_some(Value::Reference(path_ref.id))
 });

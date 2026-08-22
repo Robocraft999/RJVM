@@ -1,15 +1,16 @@
 pub mod attributes;
 pub mod descriptor;
 
-use crate::access_flags::MethodFlag;
+use crate::access_flags::method_flags;
 use crate::class_file::methods::attributes::{ExceptionTableEntry, MethodInfoAttributes};
 use crate::class_file::methods::descriptor::MethodDescriptor;
 use crate::vm::bytecode::InstructionBlock;
 use crate::vm::ProgramCounter;
 use crate::vm::VmError;
 use std::collections::BTreeMap;
+use crate::vm::class::ClassId;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MethodInfo{
     pub flags: u16,
     pub name: String,
@@ -17,6 +18,7 @@ pub struct MethodInfo{
     pub slot: usize,
     pub vtable_index: isize,
     pub code_blocks: Option<BTreeMap<u16, InstructionBlock>>,
+    pub holder_id: ClassId,
     // FIXME store the entire holder instead.
     // This would require to store all methods including from superclass in a vtable to be useful
     // Although it would improve virtual resolving a lot
@@ -36,26 +38,29 @@ impl MethodInfo{
     }
 
     pub fn is_native(&self) -> bool {
-        self.flags & MethodFlag::Native as u16 > 0
+        self.flags & method_flags::NATIVE > 0
     }
 
     pub fn is_static(&self) -> bool{
-        self.flags & MethodFlag::Static as u16 > 0
+        self.flags & method_flags::STATIC > 0
     }
 
     pub fn is_abstract(&self) -> bool {
-        self.flags & MethodFlag::Abstract as u16 > 0
+        self.flags & method_flags::ABSTRACT > 0
     }
 
     pub fn is_final(&self) -> bool {
-        self.flags & MethodFlag::Final as u16 > 0
+        self.flags & method_flags::FINAL > 0
+    }
+    pub fn is_synchronized(&self) -> bool {
+        self.flags & method_flags::SYNCHRONIZED > 0
     }
 
-    pub fn is_public(&self) -> bool { self.flags & MethodFlag::Public as u16 > 0 }
+    pub fn is_public(&self) -> bool { self.flags & method_flags::PUBLIC > 0 }
     pub fn is_private(&self) -> bool {
-        self.flags & MethodFlag::Private as u16 > 0
+        self.flags & method_flags::PRIVATE > 0
     }
-    pub fn is_protected(&self) -> bool { self.flags & MethodFlag::Protected as u16 > 0 }
+    pub fn is_protected(&self) -> bool { self.flags & method_flags::PROTECTED > 0 }
     pub fn is_package_private(&self) -> bool { !self.is_private() && !self.is_public() && !self.is_protected() }
 
     pub fn is_initializer(&self) -> bool {
@@ -79,7 +84,14 @@ impl MethodInfo{
     }
 
     pub fn get_code_block_at(&self, pc: ProgramCounter) -> &InstructionBlock{
-        &self.code_blocks.as_ref().unwrap().get(&pc.0).ok_or(VmError::ValidationError(format!("Code block out of bounds: {}, {:?}", pc.0, self.code_blocks))).unwrap()
+        &self.code_blocks
+            .as_ref()
+            .unwrap()
+            .get(&pc.0)
+            .ok_or_else(|| VmError::ValidationError(
+                format!("Code block out of bounds: {}, {:?}", pc.0, self.code_blocks)
+            ))
+            .unwrap()
     }
 
     pub fn next_pc(&self, pc: ProgramCounter) -> Option<u16>{

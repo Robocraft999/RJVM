@@ -1,10 +1,8 @@
+use crate::vm::result::VMResult;
 use log::{debug, warn};
 use std::alloc::Layout;
 use std::fmt;
 use std::fmt::Formatter;
-use std::panic::catch_unwind;
-use crate::vm::result::VMResult;
-use crate::vm::VmError;
 
 pub struct MemoryChunk {
     start: u64,
@@ -45,23 +43,25 @@ impl MemoryChunk {
         }
 
         // We require all allocations to be aligned to 8 bytes!
-        assert_eq!(required_size % 8, 0);
+        let allocated_size = required_size + (8 - required_size % 8);
+        assert_eq!(allocated_size % 8, 0);
 
         let ptr = unsafe { self.memory.add(self.used) };
-        self.used += required_size;
+        self.used += allocated_size;
 
         Some(AllocEntry {
             ptr,
-            alloc_size: required_size,
+            alloc_size: allocated_size,
         })
     }
 
     pub fn put(&mut self, ptr: u64, bytes: usize, data: &[u8]) -> VMResult<()>{
         //assert!(offset + data.len() <= self.capacity);
         if ptr < self.start || ptr + bytes as u64 > self.start + self.capacity as u64 {
-            warn!("unsafe writing: Safe bounds are [{:#0x}-{:#0x}], ptr is: {:#0x}, writing {} bytes", self.start, self.start + self.capacity as u64, ptr, bytes)
+            debug!("unsafe writing: Safe bounds are [{:#0x}-{:#0x}], ptr is: {:#0x}, writing {} bytes", self.start, self.start + self.capacity as u64, ptr, bytes)
         }
         unsafe {
+            // std::ptr::copy(data.as_ptr(), ptr as *mut u8, bytes);
             for i in 0..bytes {
                 std::ptr::write((ptr + i as u64) as *mut u8, data[i]);
             }
@@ -71,11 +71,24 @@ impl MemoryChunk {
 
     pub fn get(&self, ptr: u64, bytes: usize) -> VMResult<Vec<u8>> {
         if ptr < self.start || ptr + bytes as u64 > self.start + self.capacity as u64 {
-            warn!("unsafe reading: Safe bounds are [{:#0x}-{:#0x}], ptr is: {:#0x}, reading {} bytes", self.start, self.start + self.capacity as u64, ptr, bytes)
+            debug!("unsafe reading: Safe bounds are [{:#0x}-{:#0x}], ptr is: {:#0x}, reading {} bytes", self.start, self.start + self.capacity as u64, ptr, bytes)
         }
         unsafe {
             Ok(std::slice::from_raw_parts(ptr as *const u8, bytes).to_vec())
         }
+    }
+
+    pub fn copy(&self, src: u64, dst: u64, bytes: usize) -> VMResult<()> {
+        if src < self.start || src + bytes as u64 > self.start + self.capacity as u64 {
+            debug!("unsafe reading: Safe bounds are [{:#0x}-{:#0x}], ptr is: {:#0x}, reading {} bytes", self.start, self.start + self.capacity as u64, src, bytes)
+        }
+        if dst < self.start || dst + bytes as u64 > self.start + self.capacity as u64 {
+            debug!("unsafe writing: Safe bounds are [{:#0x}-{:#0x}], ptr is: {:#0x}, writing {} bytes", self.start, self.start + self.capacity as u64, dst, bytes)
+        }
+        unsafe {
+            std::ptr::copy(src as *const u8, dst as *mut u8, bytes);
+        }
+        Ok(())
     }
 }
 

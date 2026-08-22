@@ -19,7 +19,6 @@ const TABLE: JNINativeInterface = [
 
     JNINativeInterface_::FromReflectedMethod as _,
     JNINativeInterface_::FromReflectedField as _,
-
     JNINativeInterface_::ToReflectedMethod as _,
 
     //10
@@ -61,64 +60,64 @@ const TABLE: JNINativeInterface = [
     JNINativeInterface_::CallObjectMethod as _,
     JNINativeInterface_::CallObjectMethodV as _,
     JNINativeInterface_::CallObjectMethodA as _,
-    not_implemented as _,
-    not_implemented as _,
+    JNINativeInterface_::CallBooleanMethod as _,
+    JNINativeInterface_::CallBooleanMethodV as _,
     JNINativeInterface_::CallBooleanMethodA as _,
-    not_implemented as _,
-    not_implemented as _,
+    JNINativeInterface_::CallByteMethod as _,
+    JNINativeInterface_::CallByteMethodV as _,
     JNINativeInterface_::CallByteMethodA as _,
-    not_implemented as _,
-    not_implemented as _,
+    JNINativeInterface_::CallCharMethod as _,
+    JNINativeInterface_::CallCharMethodV as _,
     JNINativeInterface_::CallCharMethodA as _,
-    not_implemented as _,
-    not_implemented as _,
+    JNINativeInterface_::CallShortMethod as _,
+    JNINativeInterface_::CallShortMethodV as _,
     JNINativeInterface_::CallShortMethodA as _,
-    not_implemented as _,
-    not_implemented as _,
+    JNINativeInterface_::CallIntMethod as _,
+    JNINativeInterface_::CallIntMethodV as _,
     JNINativeInterface_::CallIntMethodA as _,
-    not_implemented as _,
-    not_implemented as _,
+    JNINativeInterface_::CallLongMethod as _,
+    JNINativeInterface_::CallLongMethodV as _,
     JNINativeInterface_::CallLongMethodA as _,
-    not_implemented as _,
-    not_implemented as _,
+    JNINativeInterface_::CallFloatMethod as _,
+    JNINativeInterface_::CallFloatMethodV as _,
     JNINativeInterface_::CallFloatMethodA as _,
-    not_implemented as _,
-    not_implemented as _,
+    JNINativeInterface_::CallDoubleMethod as _,
+    JNINativeInterface_::CallDoubleMethodV as _,
     JNINativeInterface_::CallDoubleMethodA as _,
     JNINativeInterface_::CallVoidMethod as _,
     JNINativeInterface_::CallVoidMethodV as _,
     JNINativeInterface_::CallVoidMethodA as _,
 
     //64
-    not_implemented as _,
-    not_implemented as _,
+    JNINativeInterface_::CallNonvirtualObjectMethod as _,
+    JNINativeInterface_::CallNonvirtualObjectMethodV as _,
     JNINativeInterface_::CallNonvirtualObjectMethodA as _,
-    not_implemented as _,
-    not_implemented as _,
+    JNINativeInterface_::CallNonvirtualBooleanMethod as _,
+    JNINativeInterface_::CallNonvirtualBooleanMethodV as _,
     JNINativeInterface_::CallNonvirtualBooleanMethodA as _,
-    not_implemented as _,
-    not_implemented as _,
+    JNINativeInterface_::CallNonvirtualByteMethod as _,
+    JNINativeInterface_::CallNonvirtualByteMethodV as _,
     JNINativeInterface_::CallNonvirtualByteMethodA as _,
-    not_implemented as _,
-    not_implemented as _,
+    JNINativeInterface_::CallNonvirtualCharMethod as _,
+    JNINativeInterface_::CallNonvirtualCharMethodV as _,
     JNINativeInterface_::CallNonvirtualCharMethodA as _,
-    not_implemented as _,
-    not_implemented as _,
+    JNINativeInterface_::CallNonvirtualShortMethod as _,
+    JNINativeInterface_::CallNonvirtualShortMethodV as _,
     JNINativeInterface_::CallNonvirtualShortMethodA as _,
-    not_implemented as _,
-    not_implemented as _,
+    JNINativeInterface_::CallNonvirtualIntMethod as _,
+    JNINativeInterface_::CallNonvirtualIntMethodV as _,
     JNINativeInterface_::CallNonvirtualIntMethodA as _,
-    not_implemented as _,
-    not_implemented as _,
+    JNINativeInterface_::CallNonvirtualLongMethod as _,
+    JNINativeInterface_::CallNonvirtualLongMethodV as _,
     JNINativeInterface_::CallNonvirtualLongMethodA as _,
-    not_implemented as _,
-    not_implemented as _,
+    JNINativeInterface_::CallNonvirtualFloatMethod as _,
+    JNINativeInterface_::CallNonvirtualFloatMethodV as _,
     JNINativeInterface_::CallNonvirtualFloatMethodA as _,
-    not_implemented as _,
-    not_implemented as _,
+    JNINativeInterface_::CallNonvirtualDoubleMethod as _,
+    JNINativeInterface_::CallNonvirtualDoubleMethodV as _,
     JNINativeInterface_::CallNonvirtualDoubleMethodA as _,
-    not_implemented as _,
-    not_implemented as _,
+    JNINativeInterface_::CallNonvirtualVoidMethod as _,
+    JNINativeInterface_::CallNonvirtualVoidMethodV as _,
     JNINativeInterface_::CallNonvirtualVoidMethodA as _,
 
     //94
@@ -150,32 +149,32 @@ const TABLE: JNINativeInterface = [
     JNINativeInterface_::GetStaticMethodID as _,
 
     //114
-    JNINativeInterface_::CallStaticObjectMethodV as _,
+    JNINativeInterface_::CallStaticObjectMethod as _,
     JNINativeInterface_::CallStaticObjectMethodV as _,
     JNINativeInterface_::CallStaticObjectMethodA as _,
-    JNINativeInterface_::CallStaticBooleanMethodV as _,
+    JNINativeInterface_::CallStaticBooleanMethod as _,
     JNINativeInterface_::CallStaticBooleanMethodV as _,
     JNINativeInterface_::CallStaticBooleanMethodA as _,
-    not_implemented as _,
-    not_implemented as _,
+    JNINativeInterface_::CallStaticByteMethod as _,
+    JNINativeInterface_::CallStaticByteMethodV as _,
     JNINativeInterface_::CallStaticByteMethodA as _,
-    not_implemented as _,
-    not_implemented as _,
+    JNINativeInterface_::CallStaticCharMethod as _,
+    JNINativeInterface_::CallStaticCharMethodV as _,
     JNINativeInterface_::CallStaticCharMethodA as _,
-    not_implemented as _,
-    not_implemented as _,
+    JNINativeInterface_::CallStaticShortMethod as _,
+    JNINativeInterface_::CallStaticShortMethodV as _,
     JNINativeInterface_::CallStaticShortMethodA as _,
-    not_implemented as _,
-    not_implemented as _,
+    JNINativeInterface_::CallStaticIntMethod as _,
+    JNINativeInterface_::CallStaticIntMethodV as _,
     JNINativeInterface_::CallStaticIntMethodA as _,
-    not_implemented as _,
-    not_implemented as _,
+    JNINativeInterface_::CallStaticLongMethod as _,
+    JNINativeInterface_::CallStaticLongMethodV as _,
     JNINativeInterface_::CallStaticLongMethodA as _,
-    not_implemented as _,
-    not_implemented as _,
+    JNINativeInterface_::CallStaticFloatMethod as _,
+    JNINativeInterface_::CallStaticFloatMethodV as _,
     JNINativeInterface_::CallStaticFloatMethodA as _,
-    not_implemented as _,
-    not_implemented as _,
+    JNINativeInterface_::CallStaticDoubleMethod as _,
+    JNINativeInterface_::CallStaticDoubleMethodV as _,
     JNINativeInterface_::CallStaticDoubleMethodA as _,
     JNINativeInterface_::CallStaticVoidMethod as _,
     JNINativeInterface_::CallStaticVoidMethodV as _,
@@ -224,73 +223,73 @@ const TABLE: JNINativeInterface = [
     //172
     //object array stuff
     JNINativeInterface_::NewObjectArray as _,
-    not_implemented as _,
+    JNINativeInterface_::GetObjectArrayElement as _,
     JNINativeInterface_::SetObjectArrayElement as _,
 
     //175
     //NewPrimitiveArray
-    not_implemented as _,
+    JNINativeInterface_::NewBooleanArray as _,
     JNINativeInterface_::NewByteArray as _,
-    not_implemented as _,
-    not_implemented as _,
-    not_implemented as _,
-    not_implemented as _,
-    not_implemented as _,
-    not_implemented as _,
+    JNINativeInterface_::NewCharArray as _,
+    JNINativeInterface_::NewShortArray as _,
+    JNINativeInterface_::NewIntArray as _,
+    JNINativeInterface_::NewLongArray as _,
+    JNINativeInterface_::NewFloatArray as _,
+    JNINativeInterface_::NewDoubleArray as _,
 
     //183
     //GetPrimitiveArrayElements
-    not_implemented as _,
-    not_implemented as _,
-    not_implemented as _,
-    not_implemented as _,
-    not_implemented as _,
-    not_implemented as _,
-    not_implemented as _,
-    not_implemented as _,
+    JNINativeInterface_::GetBooleanArrayElements as _,
+    JNINativeInterface_::GetByteArrayElements as _,
+    JNINativeInterface_::GetCharArrayElements as _,
+    JNINativeInterface_::GetShortArrayElements as _,
+    JNINativeInterface_::GetIntArrayElements as _,
+    JNINativeInterface_::GetLongArrayElements as _,
+    JNINativeInterface_::GetFloatArrayElements as _,
+    JNINativeInterface_::GetDoubleArrayElements as _,
 
     //191
     //ReleasePrimitiveArrayElements
-    not_implemented as _,
-    not_implemented as _,
-    not_implemented as _,
-    not_implemented as _,
-    not_implemented as _,
-    not_implemented as _,
-    not_implemented as _,
-    not_implemented as _,
+    JNINativeInterface_::ReleaseBooleanArrayElements as _,
+    JNINativeInterface_::ReleaseByteArrayElements as _,
+    JNINativeInterface_::ReleaseCharArrayElements as _,
+    JNINativeInterface_::ReleaseShortArrayElements as _,
+    JNINativeInterface_::ReleaseIntArrayElements as _,
+    JNINativeInterface_::ReleaseLongArrayElements as _,
+    JNINativeInterface_::ReleaseFloatArrayElements as _,
+    JNINativeInterface_::ReleaseDoubleArrayElements as _,
 
     //199
     //GetPrimitiveArrayRegion
-    not_implemented as _,
+    JNINativeInterface_::GetBooleanArrayRegion as _,
     JNINativeInterface_::GetByteArrayRegion as _,
-    not_implemented as _,
-    not_implemented as _,
-    not_implemented as _,
+    JNINativeInterface_::GetCharArrayRegion as _,
+    JNINativeInterface_::GetShortArrayRegion as _,
+    JNINativeInterface_::GetIntArrayRegion as _,
     JNINativeInterface_::GetLongArrayRegion as _,
-    not_implemented as _,
-    not_implemented as _,
+    JNINativeInterface_::GetFloatArrayRegion as _,
+    JNINativeInterface_::GetDoubleArrayRegion as _,
 
     //207
     //SetPrimitiveArrayRegion
-    not_implemented as _,
+    JNINativeInterface_::SetBooleanArrayRegion as _,
     JNINativeInterface_::SetByteArrayRegion as _,
-    not_implemented as _,
-    not_implemented as _,
-    not_implemented as _,
-    not_implemented as _,
-    not_implemented as _,
-    not_implemented as _,
+    JNINativeInterface_::SetCharArrayRegion as _,
+    JNINativeInterface_::SetShortArrayRegion as _,
+    JNINativeInterface_::SetIntArrayRegion as _,
+    JNINativeInterface_::SetLongArrayRegion as _,
+    JNINativeInterface_::SetFloatArrayRegion as _,
+    JNINativeInterface_::SetDoubleArrayRegion as _,
 
     //215
     //reg / unreg natives
-    not_implemented as _,
-    not_implemented as _,
+    JNINativeInterface_::RegisterNatives as _,
+    JNINativeInterface_::UnregisterNatives as _,
 
     //217
     //monitor
-    not_implemented as _,
-    not_implemented as _,
+    JNINativeInterface_::MonitorEnter as _,
+    JNINativeInterface_::MonitorExit as _,
 
     //219
     //GetJavaVM
@@ -298,13 +297,13 @@ const TABLE: JNINativeInterface = [
 
     //220
     //get string region
-    not_implemented as _,
-    not_implemented as _,
+    JNINativeInterface_::GetStringRegion as _,
+    JNINativeInterface_::GetStringUTFRegion as _,
 
     //222
     //primitive array critical
-    not_implemented as _,
-    not_implemented as _,
+    JNINativeInterface_::GetPrimitiveArrayCritical as _,
+    JNINativeInterface_::ReleasePrimitiveArrayCritical as _,
 
     //224
     //string critical
@@ -313,8 +312,8 @@ const TABLE: JNINativeInterface = [
 
     //226
     //week global ref
-    not_implemented as _,
-    not_implemented as _,
+    JNINativeInterface_::NewWeakGlobalRef as _,
+    JNINativeInterface_::DeleteWeakGlobalRef as _,
 
     //228
     //exception check
@@ -323,18 +322,10 @@ const TABLE: JNINativeInterface = [
     //229
     //direct byte buffer
     JNINativeInterface_::NewDirectByteBuffer as _,
-    not_implemented as _,
-    not_implemented as _,
+    JNINativeInterface_::GetDirectBufferAddress as _,
+    JNINativeInterface_::GetDirectBufferCapacity as _,
 
     //232
     //get object ref type
-    not_implemented as _,
+    JNINativeInterface_::GetObjectRefType as _,
 ];
-
-unsafe fn not_implemented() {
-    unimplemented!();
-}
-
-unsafe fn test() {
-    unimplemented!("tester")
-}

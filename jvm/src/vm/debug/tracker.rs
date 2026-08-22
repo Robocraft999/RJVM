@@ -1,7 +1,7 @@
+use crate::vm::value::RefId;
 use log::{debug, info};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
-use crate::vm::value::RefId;
 
 pub struct Tracker{
     tracked_object_ids: HashSet<RefId>,

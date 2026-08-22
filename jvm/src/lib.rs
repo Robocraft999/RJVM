@@ -1,22 +1,19 @@
 #![feature(negative_impls)]
 #![feature(c_variadic)]
 #![feature(iterator_try_collect)]
-#![feature(sync_unsafe_cell)]
-#![feature(unsafe_cell_access)]
 extern crate core;
 
-use log::{error, LevelFilter};
-use std::cell::RefCell;
+use log::LevelFilter;
+use parking_lot::RwLock;
 use std::env;
-use std::sync::RwLock;
 use vm::class_path::ClassPath;
 
-use vm::application::Application;
 use crate::class_file::fields::field_type::FieldType;
 use crate::vm::value::Value;
-use crate::vm::{VmError, VM};
+use crate::vm::VM;
+use vm::application::Application;
+use crate::vm::constants::classes::JAVA_LANG_STRING;
 
-mod bytes;
 mod access_flags;
 mod vm;
 mod error;
@@ -68,14 +65,14 @@ macro_rules! get_or_init_special {
 
 pub fn run() {
     let mut class_path = ClassPath::default();
-    class_path.push("resources/rt.jar;resources/LogicSim.jar;resources/lib/unix;resources/lib").expect("TODO: panic message");
+    class_path.push("resources/rt.jar;resources/LogicSim.jar;resources/lib/unix;resources/lib;resources/test").expect("TODO: panic message");
 
     println!("Booting up VM");
 
     simple_logger::SimpleLogger::new()
         .with_level(LevelFilter::Info)
         .with_module_level("debug", LevelFilter::Debug)
-        .with_module_level("native", LevelFilter::Debug)
+        .with_module_level("native", LevelFilter::Info)
         .without_timestamps()
         .with_threads(true)
         .init()
@@ -112,12 +109,7 @@ pub fn run() {
     //vm.class_manager.get_or_resolve_class("Empty").expect("TODO: panic message");
     //run_and_catch_method(&mut vm, "Test", "main", "([Ljava/lang/String;)V");
 
-    let args = env::args().skip(1).map(|s| Value::Reference(app.vm.try_new_string_object(&s).unwrap().id)).collect();
-    let args_array = app.vm.try_new_array(1, FieldType::Object("java/lang/String".to_string()).to_array_field_type(1), RwLock::new(args)).unwrap();
-    let p_args = vec![Value::Reference(args_array.id)];
-    //run_and_catch_method(&mut vm, "de/klassenserver7b/k7bot/Main", "main", "([Ljava/lang/String;)V", p_args);
-    //app.run_and_catch_method("Main", "main", "([Ljava/lang/String;)V", p_args);
-    app.run_and_catch_method("logicsim/App", "main", "([Ljava/lang/String;)V", p_args);
+    app.start_user_code();
 
     //parse_class_file(&class_path, "java/lang/Exception");
 
