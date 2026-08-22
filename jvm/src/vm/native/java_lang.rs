@@ -13,6 +13,7 @@ use log::error;
 use parking_lot::RwLock;
 use std::thread;
 use std::thread::yield_now;
+use std::time::Duration;
 
 pub fn register_natives(registry: &mut NativeMethodRegistry) {
     registry.register(JAVA_LANG_THROWABLE, "fillInStackTrace", "(I)Ljava/lang/Throwable;", delegate_fill_in_stacktrace);
@@ -24,6 +25,7 @@ pub fn register_natives(registry: &mut NativeMethodRegistry) {
     registry.register(JAVA_LANG_THREAD, "setPriority0", "(I)V", delegate_set_priority0);
     registry.register(JAVA_LANG_THREAD, "start0", "()V", delegate_start0);
     registry.register(JAVA_LANG_THREAD, "yield", "()V", delegate_yield);
+    registry.register(JAVA_LANG_THREAD, "sleep", "(J)V", delegate_sleep);
     registry.register(JAVA_LANG_THREAD, "isInterrupted", "(Z)Z", delegate_is_interrupted);
     registry.register(JAVA_LANG_RUNTIME, "availableProcessors", "()I", delegate_available_processors);
     registry.register(JAVA_LANG_RUNTIME, "freeMemory", "()J", delegate_free_memory);
@@ -140,6 +142,14 @@ gen_delegate!(delegate_start0, |ctx, obj_ref, _args| {
 
 gen_delegate!(delegate_yield, |_ctx, _obj_ref, _args| {
     yield_now();
+    non_failing_none()
+});
+
+gen_delegate!(delegate_sleep, |ctx, _obj_ref, args| {
+    let Some(Value::Long(millis)) = args.get(0) else { return invalidation!("Expected millis argument") };
+    ctx.thread.meta.sleep();
+    thread::sleep(Duration::from_millis(*millis as u64));
+    ctx.thread.meta.woken();
     non_failing_none()
 });
 
