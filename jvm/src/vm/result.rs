@@ -7,7 +7,7 @@ pub type VMResult<T> = Result<T, VmError>;
 pub enum VMResultType<T> {
     Successful(T),
     ExceptionThrown,
-    Interrupted(usize, bool)
+    Interrupted(usize)
 }
 
 impl <T> VMResultType<T>{
@@ -18,7 +18,7 @@ impl <T> VMResultType<T>{
         match self {
             VMResultType::Successful(t) => VMResultType::Successful(f(t)),
             VMResultType::ExceptionThrown => VMResultType::ExceptionThrown,
-            VMResultType::Interrupted(t, r) => VMResultType::Interrupted(t, r)
+            VMResultType::Interrupted(t) => VMResultType::Interrupted(t)
         }
     }
     

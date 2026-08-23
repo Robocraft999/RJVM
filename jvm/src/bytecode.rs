@@ -3,6 +3,8 @@ use crate::bytecode::Instruction::*;
 use crate::error::ClassParseError;
 use crate::vm::VmError;
 use strum_macros::FromRepr;
+use crate::class_file::methods::code::PC;
+use crate::vm::result::VMResult;
 
 pub fn printable_instructions(code_bytes: &Vec<u8>) -> Vec<Instruction>{
     let mut instructions = Vec::new();
@@ -19,43 +21,43 @@ pub fn printable_instructions(code_bytes: &Vec<u8>) -> Vec<Instruction>{
     instructions
 }
 
-fn parse_u1(code_bytes: &Vec<u8>, pc: &mut usize) -> Result<u8, VmError>{
+fn parse_u1(code_bytes: &[u8], pc: &mut usize) -> VMResult<u8>{
     let res = *code_bytes.get(*pc).ok_or(VmError::ParseError(ClassParseError::ReadError))?;
     *pc += 1;
     Ok(res)
 }
 
-fn parse_i1(code_bytes: &Vec<u8>, pc: &mut usize) -> Result<i8, VmError>{
+fn parse_i1(code_bytes: &[u8], pc: &mut usize) -> VMResult<i8>{
     Ok(parse_u1(code_bytes, pc)? as i8)
 }
 
-fn parse_u2(code_bytes: &Vec<u8>, pc: &mut usize) -> Result<u16, VmError>{
+fn parse_u2(code_bytes: &[u8], pc: &mut usize) -> VMResult<u16>{
     let res = u16::from_be_bytes([parse_u1(code_bytes, pc)?, parse_u1(code_bytes, pc)?]);
     Ok(res)
 }
 
-fn parse_i2(code_bytes: &Vec<u8>, pc: &mut usize) -> Result<i16, VmError>{
+fn parse_i2(code_bytes: &[u8], pc: &mut usize) -> VMResult<i16>{
     let res = i16::from_be_bytes([parse_u1(code_bytes, pc)?, parse_u1(code_bytes, pc)?]);
     Ok(res)
 }
 
-fn parse_i4(code_bytes: &Vec<u8>, pc: &mut usize) -> Result<i32, VmError>{
+fn parse_i4(code_bytes: &[u8], pc: &mut usize) -> VMResult<i32>{
     let res = i32::from_be_bytes([parse_u1(code_bytes, pc)?, parse_u1(code_bytes, pc)?, parse_u1(code_bytes, pc)?, parse_u1(code_bytes, pc)?]);
     Ok(res)
 }
 
-fn parse_offset(code_bytes: &Vec<u8>, pc: &mut usize) -> Result<u16, VmError>{
+fn parse_offset(code_bytes: &[u8], pc: &mut usize) -> VMResult<u16>{
     let instruction_pc = *pc - 1;
-    let offset = parse_u2(code_bytes, pc)? as i16;
+    let offset = parse_i2(code_bytes, pc)?;
     Ok(((instruction_pc as i16) + offset) as u16)
 }
 
-pub fn parse_instruction(code_bytes: &Vec<u8>, mut pc: usize) -> Result<(Instruction, usize), VmError>{
+pub fn parse_instruction(code_bytes: &[u8], mut pc: usize) -> Result<(Instruction, usize), VmError> {
+    let instruction_pc = pc;
     let opcode = parse_u1(code_bytes, &mut pc)?;
-    let result = if let Some(instruction) = Instruction::from_repr(opcode){
+    let result = if let Some(instruction) = BytecodeInstruction::from_repr(opcode){
         match instruction{
-            TABLESWITCH(_, _, _, _) => {
-                let _instruction_pc = pc - 1;
+            BytecodeInstruction::TABLESWITCH => {
                 //let padding = pc % 4;
                 //ti: 4 -> pc = 5 -> padding = 1 -> dbi = 5+1=6  X
                 //ti: 5 -> pc = 6 -> padding = 2 -> dbi = 6+2=8  J
@@ -73,32 +75,35 @@ pub fn parse_instruction(code_bytes: &Vec<u8>, mut pc: usize) -> Result<(Instruc
                 let default = parse_i4(code_bytes, &mut pc)?;
                 let low     = parse_i4(code_bytes, &mut pc)?;
                 let high    = parse_i4(code_bytes, &mut pc)?;
-                let mut offsets = Vec::new();
+                let mut targets = Vec::new();
                 for _ in 0..(high-low +1){
-                    offsets.push(parse_i4(code_bytes, &mut pc)?);
+                    let offset = parse_i4(code_bytes, &mut pc)?;
+                    let target_pc = (instruction_pc as i32 + offset) as PC;
+                    targets.push(target_pc);
                 }
 
-                TABLESWITCH(default, low, high, offsets)
+                let default_pc = (instruction_pc as i32 + default) as PC;
+                TABLESWITCH(low, high, default_pc, targets)
             }
-            LOOKUPSWITCH(_, _) => {
+            BytecodeInstruction::LOOKUPSWITCH => {
                 let padding = (4 - (pc % 4)) % 4;
-                let instruction_pc = pc - 1;
                 for _ in 0..padding{
                     parse_u1(code_bytes, &mut pc)?;
                 }
 
-                let default = instruction_pc as i32 + parse_i4(code_bytes, &mut pc)?;
+                let default = parse_i4(code_bytes, &mut pc)?;
                 let npairs = parse_i4(code_bytes, &mut pc)?;
 
-                let mut offsets = Vec::new();
+                let mut targets = Vec::new();
                 for _ in 0..npairs{
-                    offsets.push(parse_i4(code_bytes, &mut pc)?);
-                    //TODO check if this could overflow
-                    offsets.push(instruction_pc as i32 + parse_i4(code_bytes, &mut pc)?) ;
+                    let value = parse_i4(code_bytes, &mut pc)?;
+                    let target_pc = (instruction_pc as i32 + parse_i4(code_bytes, &mut pc)?) as PC;
+                    targets.push((value, target_pc));
                 }
-                LOOKUPSWITCH(default, offsets)
+                let default_pc = (instruction_pc as i32 + default) as PC;
+                LOOKUPSWITCH(default_pc, targets)
             }
-            WIDE(..) => {
+            BytecodeInstruction::WIDE => {
                 let ins = parse_u1(code_bytes, &mut pc)?;
                 let index = parse_u2(code_bytes, &mut pc)?;
                 //IINC
@@ -109,78 +114,244 @@ pub fn parse_instruction(code_bytes: &Vec<u8>, mut pc: usize) -> Result<(Instruc
                 };
                 WIDE(ins, index, value)
             }
-            INVOKEVIRTUAL(_) => INVOKEVIRTUAL(parse_u2(code_bytes, &mut pc)?),
-            INVOKESPECIAL(_) => INVOKESPECIAL(parse_u2(code_bytes, &mut pc)?),
-            INVOKESTATIC(_) => INVOKESTATIC(parse_u2(code_bytes, &mut pc)?),
-            INVOKEINTERFACE(_, _, _) => INVOKEINTERFACE(parse_u2(code_bytes, &mut pc)?, parse_u1(code_bytes, &mut pc)?, parse_u1(code_bytes, &mut pc)?),
-            INVOKEDYNAMIC(_, _, _) => INVOKEDYNAMIC(parse_u2(code_bytes, &mut pc)?, parse_u1(code_bytes, &mut pc)?, parse_u1(code_bytes, &mut pc)?),
-            GETSTATIC(_) => GETSTATIC(parse_u2(code_bytes, &mut pc)?),
-            PUTSTATIC(_) => PUTSTATIC(parse_u2(code_bytes, &mut pc)?),
-            IF_ACMPNE(_) => IF_ACMPNE(parse_offset(code_bytes, &mut pc)?),
-            IF_ACMPEQ(_) => IF_ACMPEQ(parse_offset(code_bytes, &mut pc)?),
-            IF_ICMPLE(_) => IF_ICMPLE(parse_offset(code_bytes, &mut pc)?),
-            IF_ICMPGE(_) => IF_ICMPGE(parse_offset(code_bytes, &mut pc)?),
-            IF_ICMPGT(_) => IF_ICMPGT(parse_offset(code_bytes, &mut pc)?),
-            IF_ICMPEQ(_) => IF_ICMPEQ(parse_offset(code_bytes, &mut pc)?),
-            IF_ICMPLT(_) => IF_ICMPLT(parse_offset(code_bytes, &mut pc)?),
-            IF_ICMPNE(_) => IF_ICMPNE(parse_offset(code_bytes, &mut pc)?),
-            IFNONNULL(_) => IFNONNULL(parse_offset(code_bytes, &mut pc)?),
-            IFNULL(_) => IFNULL(parse_offset(code_bytes, &mut pc)?),
-            IFEQ(_) => IFEQ(parse_offset(code_bytes, &mut pc)?),
-            IFNE(_) => IFNE(parse_offset(code_bytes, &mut pc)?),
-            IFGE(_) => IFGE(parse_offset(code_bytes, &mut pc)?),
-            IFGT(_) => IFGT(parse_offset(code_bytes, &mut pc)?),
-            IFLT(_) => IFLT(parse_offset(code_bytes, &mut pc)?),
-            IFLE(_) => IFLE(parse_offset(code_bytes, &mut pc)?),
-            GOTO(_) => GOTO(parse_offset(code_bytes, &mut pc)?),
-            LDC(_) => LDC(parse_u1(code_bytes, &mut pc)?),
-            LDCW(_) => LDCW(parse_u2(code_bytes, &mut pc)?),
-            LDC2W(_) => LDC2W(parse_u2(code_bytes, &mut pc)?),
-            BIPUSH(_) => BIPUSH(parse_i1(code_bytes, &mut pc)?),
-            SIPUSH(_) => SIPUSH(parse_i2(code_bytes, &mut pc)?),
-            GETFIELD(_) => GETFIELD(parse_u2(code_bytes, &mut pc)?),
-            PUTFIELD(_) => PUTFIELD(parse_u2(code_bytes, &mut pc)?),
-            ISTORE(_) => ISTORE(parse_u1(code_bytes, &mut pc)?),
-            ILOAD(_) => ILOAD(parse_u1(code_bytes, &mut pc)?),
-            LSTORE(_) => LSTORE(parse_u1(code_bytes, &mut pc)?),
-            LLOAD(_) => LLOAD(parse_u1(code_bytes, &mut pc)?),
-            FSTORE(_) => FSTORE(parse_u1(code_bytes, &mut pc)?),
-            FLOAD(_) => FLOAD(parse_u1(code_bytes, &mut pc)?),
-            DSTORE(_) => DSTORE(parse_u1(code_bytes, &mut pc)?),
-            DLOAD(_) => DLOAD(parse_u1(code_bytes, &mut pc)?),
-            ASTORE(_) => ASTORE(parse_u1(code_bytes, &mut pc)?),
-            ALOAD(_) => ALOAD(parse_u1(code_bytes, &mut pc)?),
-            NEW(_) => NEW(parse_u2(code_bytes, &mut pc)?),
-            ANEWARRAY(_) => ANEWARRAY(parse_u2(code_bytes, &mut pc)?),
-            MULTIANEWARRAY(_, _) => MULTIANEWARRAY(parse_u2(code_bytes, &mut pc)?, parse_u1(code_bytes, &mut pc)?),
-            NEWARRAY(_) => NEWARRAY(parse_u1(code_bytes, &mut pc)?),
-            IINC(_, _) => IINC(parse_u1(code_bytes, &mut pc)?, parse_i1(code_bytes, &mut pc)?),
-            CHECKCAST(_) => CHECKCAST(parse_u2(code_bytes, &mut pc)?),
-            INSTANCEOF(_) => INSTANCEOF(parse_u2(code_bytes, &mut pc)?),
-            RETURN | IRETURN | ARETURN | DRETURN | LRETURN | FRETURN |
-            ALOAD0 | ALOAD1 | ALOAD2 | ALOAD3 | IALOAD | BALOAD | CALOAD | SALOAD | LALOAD | FALOAD | DALOAD | AALOAD |
-            LLOAD0 | LLOAD1 | LLOAD2 | LLOAD3 |
-            ILOAD0 | ILOAD1 | ILOAD2 | ILOAD3 |
-            FLOAD0 | FLOAD1 | FLOAD2 | FLOAD3 |
-            DLOAD0 | DLOAD1 | DLOAD2 | DLOAD3 |
-            ACONST_NULL |
-            ICONST0 | ICONST1 | ICONST2 | ICONST3 | ICONST4 | ICONST5 | ICONSTM1 |
-            LCONST0 | LCONST1 |
-            FCONST0 | FCONST1 | FCONST2 |
-            DCONST0 | DCONST1 |
-            ISTORE0 | ISTORE1 | ISTORE2 | ISTORE3 |
-            ASTORE0 | ASTORE1 | ASTORE2 | ASTORE3 | IASTORE | BASTORE | CASTORE | SASTORE | LASTORE | FASTORE | DASTORE | AASTORE |
-            LSTORE0 | LSTORE1 | LSTORE2 | LSTORE3 |
-            FSTORE0 | FSTORE1 | FSTORE2 | FSTORE3 |
-            DSTORE0 | DSTORE1 | DSTORE2 | DSTORE3 |
-            DUP | DUPX1 | DUPX2 | DUP2 | DUP2X1 | DUP2X2 | LCMP | ATHROW |
-            IADD | LADD | DADD | FADD | ISUB | LSUB | FSUB | DSUB | IMUL | LMUL | FMUL | DMUL | IDIV | LDIV | FDIV | DDIV |
-            ARRAYLENGTH | POP | NOP | POP2 | SWAP |
-            LUSHR | LSHR | LSHL | ISHL | ISHR | IUSHR | IOR | LOR | IXOR | LXOR | IAND | LAND | INEG | LNEG | FNEG | DNEG | IREM | LREM |
-            MONITORENTER | MONITOREXIT |
-            I2L | I2F | I2D | I2B | I2C | I2S | L2I | L2F | L2D | F2I | F2L | F2D | D2I | D2L | D2F |
-            FCMPG | FCMPL | DCMPL | DCMPG => instruction,
-            _ => unreachable!("Instruction {:?} not initializable", instruction)
+            BytecodeInstruction::INVOKEVIRTUAL => INVOKEVIRTUAL(parse_u2(code_bytes, &mut pc)?),
+            BytecodeInstruction::INVOKESPECIAL => INVOKESPECIAL(parse_u2(code_bytes, &mut pc)?),
+            BytecodeInstruction::INVOKESTATIC => INVOKESTATIC(parse_u2(code_bytes, &mut pc)?),
+            BytecodeInstruction::INVOKEINTERFACE => {
+                let index = parse_u2(code_bytes, &mut pc)?;
+                let arg_count = parse_u1(code_bytes, &mut pc)?;
+                let _ = parse_u1(code_bytes, &mut pc)?;
+                INVOKEINTERFACE(index, arg_count)
+            }
+            BytecodeInstruction::INVOKEDYNAMIC => {
+                let index = parse_u2(code_bytes, &mut pc)?;
+                let _ = parse_u1(code_bytes, &mut pc)?;
+                let _ = parse_u1(code_bytes, &mut pc)?;
+                INVOKEDYNAMIC(index)
+            }
+            BytecodeInstruction::GETSTATIC => GETSTATIC(parse_u2(code_bytes, &mut pc)?),
+            BytecodeInstruction::PUTSTATIC => PUTSTATIC(parse_u2(code_bytes, &mut pc)?),
+            BytecodeInstruction::IF_ACMPNE => IF_ACMPNE(parse_offset(code_bytes, &mut pc)?),
+            BytecodeInstruction::IF_ACMPEQ => IF_ACMPEQ(parse_offset(code_bytes, &mut pc)?),
+            BytecodeInstruction::IF_ICMPLE => IF_ICMPLE(parse_offset(code_bytes, &mut pc)?),
+            BytecodeInstruction::IF_ICMPGE => IF_ICMPGE(parse_offset(code_bytes, &mut pc)?),
+            BytecodeInstruction::IF_ICMPGT => IF_ICMPGT(parse_offset(code_bytes, &mut pc)?),
+            BytecodeInstruction::IF_ICMPEQ => IF_ICMPEQ(parse_offset(code_bytes, &mut pc)?),
+            BytecodeInstruction::IF_ICMPLT => IF_ICMPLT(parse_offset(code_bytes, &mut pc)?),
+            BytecodeInstruction::IF_ICMPNE => IF_ICMPNE(parse_offset(code_bytes, &mut pc)?),
+            BytecodeInstruction::IFNONNULL => IFNONNULL(parse_offset(code_bytes, &mut pc)?),
+            BytecodeInstruction::IFNULL => IFNULL(parse_offset(code_bytes, &mut pc)?),
+            BytecodeInstruction::IFEQ => IFEQ(parse_offset(code_bytes, &mut pc)?),
+            BytecodeInstruction::IFNE => IFNE(parse_offset(code_bytes, &mut pc)?),
+            BytecodeInstruction::IFGE => IFGE(parse_offset(code_bytes, &mut pc)?),
+            BytecodeInstruction::IFGT => IFGT(parse_offset(code_bytes, &mut pc)?),
+            BytecodeInstruction::IFLT => IFLT(parse_offset(code_bytes, &mut pc)?),
+            BytecodeInstruction::IFLE => IFLE(parse_offset(code_bytes, &mut pc)?),
+            BytecodeInstruction::GOTO => GOTO(parse_offset(code_bytes, &mut pc)?),
+            BytecodeInstruction::LDC => LDC(parse_u1(code_bytes, &mut pc)? as u16),
+            BytecodeInstruction::LDCW => LDC(parse_u2(code_bytes, &mut pc)?),
+            BytecodeInstruction::LDC2W => LDC2(parse_u2(code_bytes, &mut pc)?),
+            BytecodeInstruction::BIPUSH => ICONST(parse_i1(code_bytes, &mut pc)? as i32),
+            BytecodeInstruction::SIPUSH => ICONST(parse_i2(code_bytes, &mut pc)? as i32),
+            BytecodeInstruction::GETFIELD => GETFIELD(parse_u2(code_bytes, &mut pc)?),
+            BytecodeInstruction::PUTFIELD => PUTFIELD(parse_u2(code_bytes, &mut pc)?),
+            BytecodeInstruction::NEW => NEW(parse_u2(code_bytes, &mut pc)?),
+            BytecodeInstruction::ANEWARRAY => ANEWARRAY(parse_u2(code_bytes, &mut pc)?),
+            BytecodeInstruction::MULTIANEWARRAY => MULTIANEWARRAY(parse_u2(code_bytes, &mut pc)?, parse_u1(code_bytes, &mut pc)?),
+            BytecodeInstruction::NEWARRAY => NEWARRAY(parse_u1(code_bytes, &mut pc)?),
+            BytecodeInstruction::IINC => IINC(parse_u1(code_bytes, &mut pc)?, parse_i1(code_bytes, &mut pc)?),
+            BytecodeInstruction::CHECKCAST => CHECKCAST(parse_u2(code_bytes, &mut pc)?),
+            BytecodeInstruction::INSTANCEOF => INSTANCEOF(parse_u2(code_bytes, &mut pc)?),
+
+            BytecodeInstruction::IRETURN => IRETURN,
+            BytecodeInstruction::LRETURN => LRETURN,
+            BytecodeInstruction::FRETURN => FRETURN,
+            BytecodeInstruction::DRETURN => DRETURN,
+            BytecodeInstruction::ARETURN => ARETURN,
+            BytecodeInstruction::RETURN => RETURN,
+
+            BytecodeInstruction::ALOAD =>  ALOAD(parse_u1(code_bytes, &mut pc)?),
+            BytecodeInstruction::ALOAD0 => ALOAD(0),
+            BytecodeInstruction::ALOAD1 => ALOAD(1),
+            BytecodeInstruction::ALOAD2 => ALOAD(2),
+            BytecodeInstruction::ALOAD3 => ALOAD(3),
+            BytecodeInstruction::IALOAD => IALOAD,
+            BytecodeInstruction::LALOAD => LALOAD,
+            BytecodeInstruction::FALOAD => FALOAD,
+            BytecodeInstruction::DALOAD => DALOAD,
+            BytecodeInstruction::AALOAD => AALOAD,
+            BytecodeInstruction::BALOAD => BALOAD,
+            BytecodeInstruction::CALOAD => CALOAD,
+            BytecodeInstruction::SALOAD => SALOAD,
+
+            BytecodeInstruction::ILOAD => ILOAD(parse_u1(code_bytes, &mut pc)?),
+            BytecodeInstruction::ILOAD0 => ILOAD(0),
+            BytecodeInstruction::ILOAD1 => ILOAD(1),
+            BytecodeInstruction::ILOAD2 => ILOAD(2),
+            BytecodeInstruction::ILOAD3 => ILOAD(3),
+
+            BytecodeInstruction::LLOAD =>  LLOAD(parse_u1(code_bytes, &mut pc)?),
+            BytecodeInstruction::LLOAD0 => LLOAD(0),
+            BytecodeInstruction::LLOAD1 => LLOAD(1),
+            BytecodeInstruction::LLOAD2 => LLOAD(2),
+            BytecodeInstruction::LLOAD3 => LLOAD(3),
+
+            BytecodeInstruction::FLOAD =>  FLOAD(parse_u1(code_bytes, &mut pc)?),
+            BytecodeInstruction::FLOAD0 => FLOAD(0),
+            BytecodeInstruction::FLOAD1 => FLOAD(1),
+            BytecodeInstruction::FLOAD2 => FLOAD(2),
+            BytecodeInstruction::FLOAD3 => FLOAD(3),
+
+            BytecodeInstruction::DLOAD =>  DLOAD(parse_u1(code_bytes, &mut pc)?),
+            BytecodeInstruction::DLOAD0 => DLOAD(0),
+            BytecodeInstruction::DLOAD1 => DLOAD(1),
+            BytecodeInstruction::DLOAD2 => DLOAD(2),
+            BytecodeInstruction::DLOAD3 => DLOAD(3),
+
+            BytecodeInstruction::ACONST_NULL => ACONST_NULL,
+            BytecodeInstruction::ICONSTM1 => ICONST(-1),
+            BytecodeInstruction::ICONST0 => ICONST(0),
+            BytecodeInstruction::ICONST1 => ICONST(1),
+            BytecodeInstruction::ICONST2 => ICONST(2),
+            BytecodeInstruction::ICONST3 => ICONST(3),
+            BytecodeInstruction::ICONST4 => ICONST(4),
+            BytecodeInstruction::ICONST5 => ICONST(5),
+            BytecodeInstruction::LCONST0 => LCONST(0),
+            BytecodeInstruction::LCONST1 => LCONST(1),
+            BytecodeInstruction::FCONST0 => FCONST(0.0),
+            BytecodeInstruction::FCONST1 => FCONST(1.0),
+            BytecodeInstruction::FCONST2 => FCONST(2.0),
+            BytecodeInstruction::DCONST0 => DCONST(0.0),
+            BytecodeInstruction::DCONST1 => DCONST(1.0),
+
+            BytecodeInstruction::ASTORE =>  ASTORE(parse_u1(code_bytes, &mut pc)?),
+            BytecodeInstruction::ASTORE0 => ASTORE(0),
+            BytecodeInstruction::ASTORE1 => ASTORE(1),
+            BytecodeInstruction::ASTORE2 => ASTORE(2),
+            BytecodeInstruction::ASTORE3 => ASTORE(3),
+            BytecodeInstruction::IASTORE => IASTORE,
+            BytecodeInstruction::LASTORE => LASTORE,
+            BytecodeInstruction::FASTORE => FASTORE,
+            BytecodeInstruction::DASTORE => DASTORE,
+            BytecodeInstruction::AASTORE => AASTORE,
+            BytecodeInstruction::BASTORE => BASTORE,
+            BytecodeInstruction::CASTORE => CASTORE,
+            BytecodeInstruction::SASTORE => SASTORE,
+
+            BytecodeInstruction::ISTORE =>  ISTORE(parse_u1(code_bytes, &mut pc)?),
+            BytecodeInstruction::ISTORE0 => ISTORE(0),
+            BytecodeInstruction::ISTORE1 => ISTORE(1),
+            BytecodeInstruction::ISTORE2 => ISTORE(2),
+            BytecodeInstruction::ISTORE3 => ISTORE(3),
+
+            BytecodeInstruction::LSTORE =>  LSTORE(parse_u1(code_bytes, &mut pc)?),
+            BytecodeInstruction::LSTORE0 => LSTORE(0),
+            BytecodeInstruction::LSTORE1 => LSTORE(1),
+            BytecodeInstruction::LSTORE2 => LSTORE(2),
+            BytecodeInstruction::LSTORE3 => LSTORE(3),
+
+            BytecodeInstruction::FSTORE =>  FSTORE(parse_u1(code_bytes, &mut pc)?),
+            BytecodeInstruction::FSTORE0 => FSTORE(0),
+            BytecodeInstruction::FSTORE1 => FSTORE(1),
+            BytecodeInstruction::FSTORE2 => FSTORE(2),
+            BytecodeInstruction::FSTORE3 => FSTORE(3),
+
+            BytecodeInstruction::DSTORE =>  DSTORE(parse_u1(code_bytes, &mut pc)?),
+            BytecodeInstruction::DSTORE0 => DSTORE(0),
+            BytecodeInstruction::DSTORE1 => DSTORE(1),
+            BytecodeInstruction::DSTORE2 => DSTORE(2),
+            BytecodeInstruction::DSTORE3 => DSTORE(3),
+
+            BytecodeInstruction::DUP => DUP,
+            BytecodeInstruction::DUPX1 => DUPX1,
+            BytecodeInstruction::DUPX2 => DUPX2,
+            BytecodeInstruction::DUP2 => DUP2,
+            BytecodeInstruction::DUP2X1 => DUP2X1,
+            BytecodeInstruction::DUP2X2 => DUP2X2,
+
+            BytecodeInstruction::NOP => NOP,
+            BytecodeInstruction::POP => POP,
+            BytecodeInstruction::POP2 => POP2,
+            BytecodeInstruction::SWAP => SWAP,
+
+            BytecodeInstruction::IADD => IADD,
+            BytecodeInstruction::LADD => LADD,
+            BytecodeInstruction::FADD => FADD,
+            BytecodeInstruction::DADD => DADD,
+
+            BytecodeInstruction::ISUB => ISUB,
+            BytecodeInstruction::LSUB => LSUB,
+            BytecodeInstruction::FSUB => FSUB,
+            BytecodeInstruction::DSUB => DSUB,
+
+            BytecodeInstruction::IMUL => IMUL,
+            BytecodeInstruction::LMUL => LMUL,
+            BytecodeInstruction::FMUL => FMUL,
+            BytecodeInstruction::DMUL => DMUL,
+
+            BytecodeInstruction::IDIV => IDIV,
+            BytecodeInstruction::LDIV => LDIV,
+            BytecodeInstruction::FDIV => FDIV,
+            BytecodeInstruction::DDIV => DDIV,
+
+            BytecodeInstruction::IREM => IREM,
+            BytecodeInstruction::LREM => LREM,
+            BytecodeInstruction::FREM => FREM,
+            BytecodeInstruction::DREM => DREM,
+
+            BytecodeInstruction::INEG => INEG,
+            BytecodeInstruction::LNEG => LNEG,
+            BytecodeInstruction::FNEG => FNEG,
+            BytecodeInstruction::DNEG => DNEG,
+
+            BytecodeInstruction::ISHL => ISHL,
+            BytecodeInstruction::LSHL => LSHL,
+            BytecodeInstruction::ISHR => ISHR,
+            BytecodeInstruction::LSHR => LSHR,
+            BytecodeInstruction::IUSHR => IUSHR,
+            BytecodeInstruction::LUSHR => LUSHR,
+
+            BytecodeInstruction::IAND => IAND,
+            BytecodeInstruction::LAND => LAND,
+            BytecodeInstruction::IOR => IOR,
+            BytecodeInstruction::LOR => LOR,
+            BytecodeInstruction::IXOR => IXOR,
+            BytecodeInstruction::LXOR => LXOR,
+
+            BytecodeInstruction::I2L => I2L,
+            BytecodeInstruction::I2F => I2F,
+            BytecodeInstruction::I2D => I2D,
+            BytecodeInstruction::L2I => L2I,
+            BytecodeInstruction::L2F => L2F,
+            BytecodeInstruction::L2D => L2D,
+            BytecodeInstruction::F2I => F2I,
+            BytecodeInstruction::F2L => F2L,
+            BytecodeInstruction::F2D => F2D,
+            BytecodeInstruction::D2I => D2I,
+            BytecodeInstruction::D2L => D2L,
+            BytecodeInstruction::D2F => D2F,
+            BytecodeInstruction::I2B => I2B,
+            BytecodeInstruction::I2C => I2C,
+            BytecodeInstruction::I2S => I2S,
+
+            BytecodeInstruction::LCMP => LCMP,
+            BytecodeInstruction::FCMPL => FCMPL,
+            BytecodeInstruction::FCMPG => FCMPG,
+            BytecodeInstruction::DCMPL => DCMPL,
+            BytecodeInstruction::DCMPG => DCMPG,
+
+            BytecodeInstruction::JSR => JSR(parse_i2(code_bytes, &mut pc)?),
+            BytecodeInstruction::RET => RET(parse_u1(code_bytes, &mut pc)?),
+
+            BytecodeInstruction::ARRAYLENGTH => ARRAYLENGTH,
+            BytecodeInstruction::ATHROW => ATHROW,
+            BytecodeInstruction::MONITORENTER => MONITORENTER,
+            BytecodeInstruction::MONITOREXIT => MONITOREXIT,
+            BytecodeInstruction::GOTO_W => {
+                let offset = parse_i4(code_bytes, &mut pc)?;
+                GOTO_W((instruction_pc as i32 + offset) as u32)
+            }
+            BytecodeInstruction::JSR_w => JSR_W(parse_i4(code_bytes, &mut pc)?),
         }
     } else {
         unimplemented!("Instruction '0x{:x}' not supported yet", opcode);
@@ -188,9 +359,193 @@ pub fn parse_instruction(code_bytes: &Vec<u8>, mut pc: usize) -> Result<(Instruc
     Ok((result, pc))
 }
 
+#[derive(Debug, PartialEq, Clone)]
+pub enum Instruction{
+    NOP,
+    ACONST_NULL,
+    ICONST(i32),
+    LCONST(i64),
+    FCONST(f32),
+    DCONST(f64),
+
+    LDC(u16),
+    LDC2(u16),
+
+    ILOAD(u8),
+    LLOAD(u8),
+    FLOAD(u8),
+    DLOAD(u8),
+    ALOAD(u8),
+
+    IALOAD,
+    LALOAD,
+    FALOAD,
+    DALOAD,
+    AALOAD,
+    BALOAD,
+    CALOAD,
+    SALOAD,
+
+    ISTORE(u8),
+    LSTORE(u8),
+    FSTORE(u8),
+    DSTORE(u8),
+    ASTORE(u8),
+
+    IASTORE,
+    LASTORE,
+    FASTORE,
+    DASTORE,
+    AASTORE,
+    BASTORE,
+    CASTORE,
+    SASTORE,
+
+    POP,
+    POP2,
+    DUP,
+    DUPX1,
+    DUPX2,
+    DUP2,
+    DUP2X1,
+    DUP2X2,
+    SWAP,
+
+    IADD,
+    LADD,
+    FADD,
+    DADD,
+
+    ISUB,
+    LSUB,
+    FSUB,
+    DSUB,
+
+    IMUL,
+    LMUL,
+    FMUL,
+    DMUL,
+
+    IDIV,
+    LDIV,
+    FDIV,
+    DDIV,
+
+    IREM,
+    LREM,
+    FREM,
+    DREM,
+
+    INEG,
+    LNEG,
+    FNEG,
+    DNEG,
+
+    ISHL,
+    LSHL,
+    ISHR,
+    LSHR,
+    IUSHR,
+    LUSHR,
+
+    IAND,
+    LAND,
+    IOR,
+    LOR,
+    IXOR,
+    LXOR,
+    IINC(u8, i8),
+
+    I2L,
+    I2F,
+    I2D,
+    L2I,
+    L2F,
+    L2D,
+    F2I,
+    F2L,
+    F2D,
+    D2I,
+    D2L,
+    D2F,
+    I2B,
+    I2C,
+    I2S,
+
+    LCMP,
+    FCMPL,
+    FCMPG,
+    DCMPL,
+    DCMPG,
+
+    IFEQ(PC),
+    IFNE(PC),
+    IFLT(PC),
+    IFGE(PC),
+    IFGT(PC),
+    IFLE(PC),
+
+    IF_ICMPEQ(PC),
+    IF_ICMPNE(PC),
+    IF_ICMPLT(PC),
+    IF_ICMPGE(PC),
+    IF_ICMPGT(PC),
+    IF_ICMPLE(PC),
+
+    IF_ACMPEQ(PC),
+    IF_ACMPNE(PC),
+
+    GOTO(PC),
+    JSR(i16),
+    RET(u8),
+
+    TABLESWITCH(i32, i32, PC, Vec<PC>),
+    LOOKUPSWITCH(PC, Vec<(i32, PC)>),
+
+    IRETURN,
+    LRETURN,
+    FRETURN,
+    DRETURN,
+    ARETURN,
+    RETURN,
+
+    GETSTATIC(u16),
+    PUTSTATIC(u16),
+    GETFIELD(u16),
+    PUTFIELD(u16),
+
+    INVOKEVIRTUAL(u16),
+    INVOKESPECIAL(u16),
+    INVOKESTATIC(u16),
+    INVOKEINTERFACE(u16, u8),
+    INVOKEDYNAMIC(u16),
+
+    NEW(u16),
+    NEWARRAY(u8),
+    ANEWARRAY(u16),
+
+    ARRAYLENGTH,
+
+    ATHROW,
+
+    CHECKCAST(u16),
+    INSTANCEOF(u16),
+    MONITORENTER,
+    MONITOREXIT,
+
+    WIDE(u8, u16, Option<u16>),
+    MULTIANEWARRAY(u16, u8),
+
+    IFNULL(PC),
+    IFNONNULL(PC),
+
+    GOTO_W(u32),
+    JSR_W(i32),
+}
+
 #[derive(Debug, PartialEq, FromRepr, Clone)]
 #[repr(u8)]
-pub enum Instruction{
+pub enum BytecodeInstruction {
     NOP         = 0x0,
     ACONST_NULL = 0x1,
     ICONSTM1 = 0x2,
@@ -208,17 +563,17 @@ pub enum Instruction{
     DCONST0  = 0xe,
     DCONST1  = 0xf,
 
-    BIPUSH(i8)  = 0x10,
-    SIPUSH(i16) = 0x11,
-    LDC(u8)     = 0x12,
-    LDCW(u16)   = 0x13,
-    LDC2W(u16)  = 0x14,
+    BIPUSH  = 0x10,
+    SIPUSH  = 0x11,
+    LDC     = 0x12,
+    LDCW    = 0x13,
+    LDC2W   = 0x14,
 
-    ILOAD(u8) = 0x15,
-    LLOAD(u8) = 0x16,
-    FLOAD(u8) = 0x17,
-    DLOAD(u8) = 0x18,
-    ALOAD(u8)  = 0x19,
+    ILOAD = 0x15,
+    LLOAD = 0x16,
+    FLOAD = 0x17,
+    DLOAD = 0x18,
+    ALOAD = 0x19,
 
     ILOAD0 = 0x1a,
     ILOAD1 = 0x1b,
@@ -240,24 +595,24 @@ pub enum Instruction{
     DLOAD2 = 0x28,
     DLOAD3 = 0x29,
 
-    ALOAD0     = 0x2a,
-    ALOAD1     = 0x2b,
-    ALOAD2     = 0x2c,
-    ALOAD3     = 0x2d,
-    IALOAD     = 0x2e,
-    LALOAD     = 0x2f,
-    FALOAD     = 0x30,
-    DALOAD     = 0x31,
-    AALOAD     = 0x32,
-    BALOAD     = 0x33,
-    CALOAD     = 0x34,
-    SALOAD     = 0x35,
+    ALOAD0 = 0x2a,
+    ALOAD1 = 0x2b,
+    ALOAD2 = 0x2c,
+    ALOAD3 = 0x2d,
+    IALOAD = 0x2e,
+    LALOAD = 0x2f,
+    FALOAD = 0x30,
+    DALOAD = 0x31,
+    AALOAD = 0x32,
+    BALOAD = 0x33,
+    CALOAD = 0x34,
+    SALOAD = 0x35,
 
-    ISTORE(u8) = 0x36,
-    LSTORE(u8) = 0x37,
-    FSTORE(u8) = 0x38,
-    DSTORE(u8) = 0x39,
-    ASTORE(u8) = 0x3a,
+    ISTORE = 0x36,
+    LSTORE = 0x37,
+    FSTORE = 0x38,
+    DSTORE = 0x39,
+    ASTORE = 0x3a,
 
     ISTORE0    = 0x3b,
     ISTORE1    = 0x3c,
@@ -333,20 +688,20 @@ pub enum Instruction{
     FNEG = 0x76,
     DNEG = 0x77,
 
-    ISHL         = 0x78,
-    LSHL         = 0x79,
-    ISHR         = 0x7a,
-    LSHR         = 0x7b,
-    IUSHR        = 0x7c,
-    LUSHR        = 0x7d,
+    ISHL  = 0x78,
+    LSHL  = 0x79,
+    ISHR  = 0x7a,
+    LSHR  = 0x7b,
+    IUSHR = 0x7c,
+    LUSHR = 0x7d,
 
-    IAND         = 0x7e,
-    LAND         = 0x7f,
-    IOR          = 0x80,
-    LOR          = 0x81,
-    IXOR         = 0x82,
-    LXOR         = 0x83,
-    IINC(u8, i8) = 0x84,
+    IAND  = 0x7e,
+    LAND  = 0x7f,
+    IOR   = 0x80,
+    LOR   = 0x81,
+    IXOR  = 0x82,
+    LXOR  = 0x83,
+    IINC  = 0x84,
 
     I2L = 0x85,
     I2F = 0x86,
@@ -370,30 +725,29 @@ pub enum Instruction{
     DCMPL = 0x97,
     DCMPG = 0x98,
 
-    IFEQ(u16) = 0x99,
-    IFNE(u16) = 0x9a,
-    IFLT(u16) = 0x9b,
-    IFGE(u16) = 0x9c,
-    IFGT(u16) = 0x9d,
-    IFLE(u16) = 0x9e,
+    IFEQ = 0x99,
+    IFNE = 0x9a,
+    IFLT = 0x9b,
+    IFGE = 0x9c,
+    IFGT = 0x9d,
+    IFLE = 0x9e,
 
-    IF_ICMPEQ(u16) = 0x9f,
-    IF_ICMPNE(u16) = 0xa0,
-    IF_ICMPLT(u16) = 0xa1,
-    IF_ICMPGE(u16) = 0xa2,
-    IF_ICMPGT(u16) = 0xa3,
-    IF_ICMPLE(u16) = 0xa4,
+    IF_ICMPEQ = 0x9f,
+    IF_ICMPNE = 0xa0,
+    IF_ICMPLT = 0xa1,
+    IF_ICMPGE = 0xa2,
+    IF_ICMPGT = 0xa3,
+    IF_ICMPLE = 0xa4,
 
-    IF_ACMPEQ(u16) = 0xa5,
-    IF_ACMPNE(u16) = 0xa6,
+    IF_ACMPEQ = 0xa5,
+    IF_ACMPNE = 0xa6,
 
-    GOTO(u16)      = 0xa7,
-    JSR(u16)       = 0xa8,
-    RET(u8)        = 0xa9,
+    GOTO      = 0xa7,
+    JSR       = 0xa8,
+    RET       = 0xa9,
 
-    TABLESWITCH(i32, i32, i32, Vec<i32>) = 0xaa,
-    //TODO use vector of (i32, u16)
-    LOOKUPSWITCH(i32, Vec<i32>)          = 0xab,
+    TABLESWITCH  = 0xaa,
+    LOOKUPSWITCH = 0xab,
 
     IRETURN  = 0xac,
     LRETURN  = 0xad,
@@ -402,40 +756,39 @@ pub enum Instruction{
     ARETURN  = 0xb0,
     RETURN   = 0xb1,
 
-    GETSTATIC(u16) = 0xb2,
-    PUTSTATIC(u16) = 0xb3,
-    GETFIELD(u16)  = 0xb4,
-    PUTFIELD(u16)  = 0xb5,
+    GETSTATIC = 0xb2,
+    PUTSTATIC = 0xb3,
+    GETFIELD  = 0xb4,
+    PUTFIELD  = 0xb5,
 
-    INVOKEVIRTUAL(u16) = 0xb6,
-    INVOKESPECIAL(u16) = 0xb7,
-    INVOKESTATIC(u16)  = 0xb8,
-    INVOKEINTERFACE(u16, u8, u8) = 0xb9,
-    INVOKEDYNAMIC(u16, u8, u8) = 0xba,
+    INVOKEVIRTUAL = 0xb6,
+    INVOKESPECIAL = 0xb7,
+    INVOKESTATIC  = 0xb8,
+    INVOKEINTERFACE = 0xb9,
+    INVOKEDYNAMIC = 0xba,
 
-    NEW(u16)       = 0xbb,
-    NEWARRAY(u8)   = 0xbc,
-    ANEWARRAY(u16) = 0xbd,
+    NEW       = 0xbb,
+    NEWARRAY   = 0xbc,
+    ANEWARRAY = 0xbd,
 
     ARRAYLENGTH    = 0xbe,
 
     ATHROW         = 0xbf,
 
-    CHECKCAST(u16) = 0xc0,
-    INSTANCEOF(u16)= 0xc1,
+    CHECKCAST  = 0xc0,
+    INSTANCEOF = 0xc1,
     MONITORENTER   = 0xc2,
     MONITOREXIT    = 0xc3,
 
-    WIDE(u8, u16, Option<u16>) = 0xc4,
-    MULTIANEWARRAY(u16, u8) = 0xc5,
+    WIDE = 0xc4,
+    MULTIANEWARRAY = 0xc5,
 
-    IFNULL(u16)    = 0xc6,
-    IFNONNULL(u16) = 0xc7,
+    IFNULL    = 0xc6,
+    IFNONNULL = 0xc7,
 
-    GOTO_W(u32)    = 0xc8,
-    JSR_w(u32)     = 0xc9,
+    GOTO_W    = 0xc8,
+    JSR_w     = 0xc9,
 
     // 0xca = mnemonic breakpoint
     // 0xfd and 0xff = mnemonics impdep1 and impdep2
-
 }

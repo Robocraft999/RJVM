@@ -4,15 +4,11 @@
 extern crate core;
 
 use log::LevelFilter;
-use parking_lot::RwLock;
-use std::env;
 use vm::class_path::ClassPath;
 
-use crate::class_file::fields::field_type::FieldType;
 use crate::vm::value::Value;
 use crate::vm::VM;
 use vm::application::Application;
-use crate::vm::constants::classes::JAVA_LANG_STRING;
 
 mod access_flags;
 mod vm;
@@ -27,7 +23,7 @@ macro_rules! get_or_init {
             let res = $x;
             match res{
                 VMResultType::Successful(value) => value,
-                VMResultType::Interrupted(amount, reset_pc) => {return Ok(VMResultType::Interrupted(amount, reset_pc))}
+                VMResultType::Interrupted(amount) => {return Ok(VMResultType::Interrupted(amount))}
                 _ => unreachable!("[get_after_init] got unexpected result {:?}", res)
             }
         }
@@ -41,7 +37,7 @@ macro_rules! get_or_init_option {
             let res = $x;
             match res{
                 Ok(VMResultType::Successful(value)) => value,
-                Ok(VMResultType::Interrupted(amount, reset_pc)) => {return Some(Ok(VMResultType::Interrupted(amount, reset_pc)))}
+                Ok(VMResultType::Interrupted(amount)) => {return Some(Ok(VMResultType::Interrupted(amount)))}
                 Err(e) => {return Some(Err(e))}
                 Ok(_) => unreachable!("[get_after_init] got unexpected result {:?}", res)
             }
@@ -56,7 +52,7 @@ macro_rules! get_or_init_special {
             let res = $x;
             match res{
                 VMResultType::Successful(value) => ($wrapper)(value),
-                VMResultType::Interrupted(amount, reset_pc) => {return Ok(VMResultType::Interrupted(amount, reset_pc))}
+                VMResultType::Interrupted(amount) => {return Ok(VMResultType::Interrupted(amount))}
                 _ => unreachable!("[get_after_init] got unexpected result {:?}", res)
             }
         }

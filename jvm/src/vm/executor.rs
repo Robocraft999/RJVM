@@ -7,10 +7,12 @@ use crate::vm::debug::validation::FieldTypeExt;
 use crate::vm::java_thread::JavaThread;
 use crate::vm::result::{VMPartialResult, VMResultType};
 use crate::vm::Context;
-use crate::{bytecode::Instruction, get_or_init, get_or_init_option, vm::{bytecode::InstructionBlock, class::{ClassAndMethod, ClassRef}, java_error::JavaError, result::VMResult, value::{ReferenceType, Value}, VmError, VM}};
+use crate::{bytecode::Instruction, get_or_init, get_or_init_option, vm::{bytecode::IrInstruction, class::{ClassAndMethod, ClassRef}, java_error::JavaError, result::VMResult, value::{ReferenceType, Value}, VmError, VM}};
 use log::{debug, error, info, trace, warn};
 use parking_lot::RwLock;
 use std::{str::FromStr};
+use crate::bytecode::BytecodeInstruction;
+use crate::class_file::methods::code::PC;
 use crate::vm::constants::classes::{JAVA_LANG_ARITHMETIC_EXCEPTION, JAVA_LANG_OBJECT};
 use crate::vm::monitoring::MonitorAssociate;
 
@@ -23,29 +25,27 @@ macro_rules! wrap_error {
     };
 }
 
-pub fn execute<'a>(ctx: Context<'a, '_>) -> VMPartialResult<Option<Value>>{
-    let camid = &ctx.thread.call_stack.get_class_and_method_id_cloned();
-    let class_and_method = ClassAndMethod::try_resolve(ctx.vm, camid)?;
+pub fn execute<'a>(ctx: Context<'a, '_>, class_and_method: ClassAndMethod<'a>) -> VMPartialResult<Option<Value>> {
     if ctx.vm.class_manager.expect_class_state(class_and_method.class.id, ClassLoadingState::LOADED){
         unreachable!("Class {} has to be initialized to call {} upon", class_and_method.class.name, class_and_method.format());
     }
     info!("");
     info!("METHOD_NAME: {} at {}", class_and_method.format(), ctx.thread.call_stack.get_pc().0);
-    trace!("{:?}", class_and_method.method.code_blocks);
+    trace!("{:?}", class_and_method.method.ir_code);
     if let Some(_) = &class_and_method.method.attributes.code{
-        let mut result = execute_current_block(ctx);
+        let mut result = execute_current_block(ctx, &class_and_method);
         while let None = result{
-            result = execute_current_block(ctx);
+            result = execute_current_block(ctx, &class_and_method);
         }
         return result.unwrap();
     }
     Err(VmError::MethodCallError(format!("Method: {} is not executeable, because it has no code", class_and_method.format())))
 }
 
-pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult<Option<Value>>>{
-    let camid = &ctx.thread.call_stack.get_class_and_method_id_cloned();
-    let class_and_method = wrap_error!(ClassAndMethod::try_resolve(ctx.vm, camid));
-    let block = class_and_method.method.get_code_block_at(ctx.thread.call_stack.get_pc());
+pub fn execute_current_block<'a>(ctx: Context<'a, '_>, class_and_method: &ClassAndMethod<'a>) -> Option<VMPartialResult<Option<Value>>> {
+    let Some(block) = class_and_method.method.get_code_block_at(ctx.thread.call_stack.get_pc()) else {
+        return Some(Err(VmError::ValidationError(format!("No Instruction at {:?}", ctx.thread.call_stack.get_pc()))))
+    };
     let current_pc = ctx.thread.call_stack.get_pc();
     trace!(">{:03} {:?}", current_pc.0, block);
     trace!("stack[{}]=", class_and_method.get_max_stack_size());
@@ -56,49 +56,23 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
     for (index, value) in ctx.thread.call_stack.locals_stack.borrow().last().unwrap().iter().enumerate(){
         trace!("    [{}] {:?}", index, value);
     }
-    if let Some(next_pc) = class_and_method.method.next_pc(current_pc){
-        ctx.thread.call_stack.set_pc(next_pc);
-    }
     
-    match block{
-        InstructionBlock::Single(instruction) => {
+    match &block.instruction{
+        IrInstruction::Single(instruction) => {
             match instruction{
                 Instruction::ACONST_NULL => x_const(ctx.thread, ctx.vm.null()),
-                Instruction::ICONSTM1 => x_const(ctx.thread, Value::Integer(-1)),
-                Instruction::ICONST0 => x_const(ctx.thread, Value::Integer(0)),
-                Instruction::ICONST1 => x_const(ctx.thread, Value::Integer(1)),
-                Instruction::ICONST2 => x_const(ctx.thread, Value::Integer(2)),
-                Instruction::ICONST3 => x_const(ctx.thread, Value::Integer(3)),
-                Instruction::ICONST4 => x_const(ctx.thread, Value::Integer(4)),
-                Instruction::ICONST5 => x_const(ctx.thread, Value::Integer(5)),
-                Instruction::LCONST0 => x_const(ctx.thread, Value::Long(0)),
-                Instruction::LCONST1 => x_const(ctx.thread, Value::Long(1)),
-                Instruction::FCONST0 => x_const(ctx.thread, Value::Float(0.0)),
-                Instruction::FCONST1 => x_const(ctx.thread, Value::Float(1.0)),
-                Instruction::FCONST2 => x_const(ctx.thread, Value::Float(2.0)),
-                Instruction::DCONST0 => x_const(ctx.thread, Value::Double(0.0)),
-                Instruction::DCONST1 => x_const(ctx.thread, Value::Double(1.0)),
-                Instruction::BIPUSH(value) => {
-                    debug!("BIPUSH {:?}", value);
-                    ctx.thread.call_stack.push_operand_value(Value::Integer(*value as i32))
-                }
-                Instruction::SIPUSH(value) => {
-                    debug!("SIPUSH {:?}", value);
-                    ctx.thread.call_stack.push_operand_value(Value::Integer(*value as i32))
-                }
+                Instruction::ICONST(val) => x_const(ctx.thread, Value::Integer(*val)),
+                Instruction::LCONST(val) => x_const(ctx.thread, Value::Long(*val)),
+                Instruction::FCONST(val) => x_const(ctx.thread, Value::Float(*val)),
+                Instruction::DCONST(val) => x_const(ctx.thread, Value::Double(*val)),
 
                 Instruction::LDC(index) => {
-                    let value = get_or_init_option!(get_constant_as_value(ctx, (*index) as u16));
+                    let value = get_or_init_option!(get_constant_as_value(ctx, class_and_method, *index));
                     debug!("LDC: {}", value.print(ctx.vm));
                     ctx.thread.call_stack.push_operand_value(value);
                 }
-                Instruction::LDCW(index) => {
-                    let value = get_or_init_option!(get_constant_as_value(ctx, *index));
-                    debug!("LDCW: {}", value.print(ctx.vm));
-                    ctx.thread.call_stack.push_operand_value(value);
-                }
-                Instruction::LDC2W(index) => {
-                    let value = get_or_init_option!(get_constant_as_value(ctx, *index));
+                Instruction::LDC2(index) => {
+                    let value = get_or_init_option!(get_constant_as_value(ctx, class_and_method, *index));
                     debug!("LDC2W: {}", value.print(ctx.vm));
                     ctx.thread.call_stack.push_operand_value(value);
                 }
@@ -108,31 +82,6 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                 Instruction::FLOAD(index) => wrap_error!(fload(ctx.thread, *index as usize)),
                 Instruction::DLOAD(index) => wrap_error!(dload(ctx.thread, *index as usize)),
                 Instruction::ALOAD(index) => wrap_error!(aload(ctx.thread, *index as usize)),
-
-                Instruction::ILOAD0 => wrap_error!(iload(ctx.thread, 0)),
-                Instruction::ILOAD1 => wrap_error!(iload(ctx.thread, 1)),
-                Instruction::ILOAD2 => wrap_error!(iload(ctx.thread, 2)),
-                Instruction::ILOAD3 => wrap_error!(iload(ctx.thread, 3)),
-
-                Instruction::LLOAD0 => wrap_error!(lload(ctx.thread, 0)),
-                Instruction::LLOAD1 => wrap_error!(lload(ctx.thread, 1)),
-                Instruction::LLOAD2 => wrap_error!(lload(ctx.thread, 2)),
-                Instruction::LLOAD3 => wrap_error!(lload(ctx.thread, 3)),
-
-                Instruction::FLOAD0 => wrap_error!(fload(ctx.thread, 0)),
-                Instruction::FLOAD1 => wrap_error!(fload(ctx.thread, 1)),
-                Instruction::FLOAD2 => wrap_error!(fload(ctx.thread, 2)),
-                Instruction::FLOAD3 => wrap_error!(fload(ctx.thread, 3)),
-
-                Instruction::DLOAD0 => wrap_error!(dload(ctx.thread, 0)),
-                Instruction::DLOAD1 => wrap_error!(dload(ctx.thread, 1)),
-                Instruction::DLOAD2 => wrap_error!(dload(ctx.thread, 2)),
-                Instruction::DLOAD3 => wrap_error!(dload(ctx.thread, 3)),
-
-                Instruction::ALOAD0 => wrap_error!(aload(ctx.thread, 0)),
-                Instruction::ALOAD1 => wrap_error!(aload(ctx.thread, 1)),
-                Instruction::ALOAD2 => wrap_error!(aload(ctx.thread, 2)),
-                Instruction::ALOAD3 => wrap_error!(aload(ctx.thread, 3)),
 
                 Instruction::IALOAD | Instruction::LALOAD | Instruction::FALOAD | Instruction::DALOAD | Instruction::AALOAD | Instruction::BALOAD | Instruction::CALOAD | Instruction::SALOAD => {
                     let index = ctx.thread.call_stack.pop_operand_value().unwrap().expect_int().unwrap();
@@ -149,31 +98,6 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                 Instruction::FSTORE(index) => wrap_error!(fstore(ctx.thread, *index as usize)),
                 Instruction::DSTORE(index) => wrap_error!(dstore(ctx.thread, *index as usize)),
                 Instruction::ASTORE(index) => wrap_error!(astore(ctx.thread, *index as usize)),
-
-                Instruction::ISTORE0 => wrap_error!(istore(ctx.thread, 0)),
-                Instruction::ISTORE1 => wrap_error!(istore(ctx.thread, 1)),
-                Instruction::ISTORE2 => wrap_error!(istore(ctx.thread, 2)),
-                Instruction::ISTORE3 => wrap_error!(istore(ctx.thread, 3)),
-
-                Instruction::LSTORE0 => wrap_error!(lstore(ctx.thread, 0)),
-                Instruction::LSTORE1 => wrap_error!(lstore(ctx.thread, 1)),
-                Instruction::LSTORE2 => wrap_error!(lstore(ctx.thread, 2)),
-                Instruction::LSTORE3 => wrap_error!(lstore(ctx.thread, 3)),
-
-                Instruction::FSTORE0 => wrap_error!(fstore(ctx.thread, 0)),
-                Instruction::FSTORE1 => wrap_error!(fstore(ctx.thread, 1)),
-                Instruction::FSTORE2 => wrap_error!(fstore(ctx.thread, 2)),
-                Instruction::FSTORE3 => wrap_error!(fstore(ctx.thread, 3)),
-
-                Instruction::DSTORE0 => wrap_error!(dstore(ctx.thread, 0)),
-                Instruction::DSTORE1 => wrap_error!(dstore(ctx.thread, 1)),
-                Instruction::DSTORE2 => wrap_error!(dstore(ctx.thread, 2)),
-                Instruction::DSTORE3 => wrap_error!(dstore(ctx.thread, 3)),
-
-                Instruction::ASTORE0 => wrap_error!(astore(ctx.thread, 0)),
-                Instruction::ASTORE1 => wrap_error!(astore(ctx.thread, 1)),
-                Instruction::ASTORE2 => wrap_error!(astore(ctx.thread, 2)),
-                Instruction::ASTORE3 => wrap_error!(astore(ctx.thread, 3)),
 
                 Instruction::IASTORE | Instruction::LASTORE | Instruction::FASTORE | Instruction::DASTORE | Instruction::AASTORE | Instruction::BASTORE | Instruction::CASTORE | Instruction::SASTORE => {
                     //TODO validate type of value to fit instruction
@@ -580,19 +504,19 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                     }
                 }
 
-                Instruction::IFEQ(target) => { execute_cmp(ctx.thread, *target, |value| value == 0) }
-                Instruction::IFNE(target) => { execute_cmp(ctx.thread, *target, |value| value != 0) }
-                Instruction::IFLT(target) => { execute_cmp(ctx.thread, *target, |value| value <  0) }
-                Instruction::IFGE(target) => { execute_cmp(ctx.thread, *target, |value| value >= 0) }
-                Instruction::IFGT(target) => { execute_cmp(ctx.thread, *target, |value| value >  0) }
-                Instruction::IFLE(target) => { execute_cmp(ctx.thread, *target, |value| value <= 0) }
+                Instruction::IFEQ(target) => { if execute_cmp(ctx.thread, *target, |value| value == 0) { return None; } }
+                Instruction::IFNE(target) => { if execute_cmp(ctx.thread, *target, |value| value != 0) { return None; } }
+                Instruction::IFLT(target) => { if execute_cmp(ctx.thread, *target, |value| value <  0) { return None; } }
+                Instruction::IFGE(target) => { if execute_cmp(ctx.thread, *target, |value| value >= 0) { return None; } }
+                Instruction::IFGT(target) => { if execute_cmp(ctx.thread, *target, |value| value >  0) { return None; } }
+                Instruction::IFLE(target) => { if execute_cmp(ctx.thread, *target, |value| value <= 0) { return None; } }
 
-                Instruction::IF_ICMPNE(target) => execute_i_cmp(ctx.thread, *target, |val1, val2| val1 != val2),
-                Instruction::IF_ICMPGT(target) => execute_i_cmp(ctx.thread, *target, |val1, val2| val1 >  val2),
-                Instruction::IF_ICMPGE(target) => execute_i_cmp(ctx.thread, *target, |val1, val2| val1 >= val2),
-                Instruction::IF_ICMPEQ(target) => execute_i_cmp(ctx.thread, *target, |val1, val2| val1 == val2),
-                Instruction::IF_ICMPLT(target) => execute_i_cmp(ctx.thread, *target, |val1, val2| val1 <  val2),
-                Instruction::IF_ICMPLE(target) => execute_i_cmp(ctx.thread, *target, |val1, val2| val1 <= val2),
+                Instruction::IF_ICMPNE(target) => { if execute_i_cmp(ctx.thread, *target, |val1, val2| val1 != val2) { return None; } }
+                Instruction::IF_ICMPGT(target) => { if execute_i_cmp(ctx.thread, *target, |val1, val2| val1 >  val2) { return None; } }
+                Instruction::IF_ICMPGE(target) => { if execute_i_cmp(ctx.thread, *target, |val1, val2| val1 >= val2) { return None; } }
+                Instruction::IF_ICMPEQ(target) => { if execute_i_cmp(ctx.thread, *target, |val1, val2| val1 == val2) { return None; } }
+                Instruction::IF_ICMPLT(target) => { if execute_i_cmp(ctx.thread, *target, |val1, val2| val1 <  val2) { return None; } }
+                Instruction::IF_ICMPLE(target) => { if execute_i_cmp(ctx.thread, *target, |val1, val2| val1 <= val2) { return None; } }
 
                 Instruction::IF_ACMPEQ(target) => {
                     let o1 = ctx.thread.call_stack.pop_operand_value().unwrap();
@@ -602,6 +526,7 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                             debug!("IF_ACMPEQ {:?} == {:?}?", obj1, obj2);
                             if obj1 == obj2 {
                                 ctx.thread.call_stack.set_pc(*target);
+                                return None;
                             }
                         }
                         _ => {}
@@ -615,40 +540,42 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                             debug!("IF_ACMPNE {:?} != {:?}?", obj1, obj2);
                             if obj1 != obj2 {
                                 ctx.thread.call_stack.set_pc(*target);
+                                return None;
                             }
                         }
                         _ => {}
                     };
                 }
 
-                Instruction::GOTO(target) => ctx.thread.call_stack.set_pc(*target),
+                Instruction::GOTO(target) => {
+                    ctx.thread.call_stack.set_pc(*target);
+                    return None;
+                }
 
-                Instruction::TABLESWITCH(default, low, high, offsets) => {
+                Instruction::TABLESWITCH(low, high, default, offsets) => {
                     let index = ctx.thread.call_stack.pop_operand_value().unwrap().expect_int().unwrap();
                     if index < *low || index > *high{
                         debug!("TABLESWITCH default {}", default);
-                        ctx.thread.call_stack.set_pc((current_pc.0 as i32 + default) as u16);
+                        ctx.thread.call_stack.set_pc(*default);
+                        return None;
                     } else {
                         let offset = offsets[(index - low) as usize];
                         debug!("TABLESWITCH[{}]: {}", index, offset);
-                        ctx.thread.call_stack.set_pc((current_pc.0 as i32 + offset) as u16);
+                        ctx.thread.call_stack.set_pc(offset);
+                        return None;
                     }
                 }
-                Instruction::LOOKUPSWITCH(default, pair_stream) => {
+                Instruction::LOOKUPSWITCH(default, targets) => {
                     let popped = ctx.thread.call_stack.pop_operand_value().unwrap().expect_int().unwrap();
                     debug!("LOOKUPSWITCH: {}", popped);
-                    let mut use_default = true;
-                    for chunk in pair_stream.chunks(2){
-                        let (int_match, target) = (chunk[0], chunk[1]);
-                        if int_match == popped{
-                            ctx.thread.call_stack.set_pc(target as u16);
-                            use_default = false;
-                            break;
+                    for (int_match, target) in targets {
+                        if *int_match == popped{
+                            ctx.thread.call_stack.set_pc(*target);
+                            return None;
                         }
                     }
-                    if use_default{
-                        ctx.thread.call_stack.set_pc(*default as u16);
-                    }
+                    ctx.thread.call_stack.set_pc(*default as u16);
+                    return None;
                 }
 
                 Instruction::IRETURN | Instruction::LRETURN | Instruction::FRETURN | Instruction::DRETURN | Instruction::ARETURN => {
@@ -757,11 +684,11 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                     }
                 }
 
-                Instruction::INVOKEVIRTUAL(index) => { return Some(execute_invoke(ctx, *index, InvokeKind::VIRTUAL)) }
-                Instruction::INVOKESPECIAL(index) => { return Some(execute_invoke(ctx, *index, InvokeKind::SPECIAL)) }
-                Instruction::INVOKESTATIC(index) => { return Some(execute_invoke(ctx, *index, InvokeKind::STATIC)) }
-                Instruction::INVOKEINTERFACE(index, _, _) => { return Some(execute_invoke(ctx, *index, InvokeKind::INTERFACE)) }
-                Instruction::INVOKEDYNAMIC(index, _, _) => {
+                Instruction::INVOKEVIRTUAL(index) => { return Some(execute_invoke(ctx, block.next_pc, *index, InvokeKind::VIRTUAL, class_and_method)) }
+                Instruction::INVOKESPECIAL(index) => { return Some(execute_invoke(ctx, block.next_pc, *index, InvokeKind::SPECIAL, class_and_method)) }
+                Instruction::INVOKESTATIC(index) => { return Some(execute_invoke(ctx, block.next_pc, *index, InvokeKind::STATIC, class_and_method)) }
+                Instruction::INVOKEINTERFACE(index, _) => { return Some(execute_invoke(ctx, block.next_pc, *index, InvokeKind::INTERFACE, class_and_method)) }
+                Instruction::INVOKEDYNAMIC(index) => {
                     debug!("INVOKEDYNAMIC");
                     let Some(ConstantPoolEntry::InvokeDynamic(bm, name, typ)) = class_and_method.class.get_or_resolve_constant(&ctx, *index) else { unreachable!("Do Errors") };
                     let caller_obj = Value::Reference(get_or_init_option!(ctx.new_class_object_by_class(class_and_method.class)).id);
@@ -828,6 +755,8 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                         args.insert(0, popped);
                     }
                     args.push(appendix_ref.get_element(0));
+
+                    // pc does not need to be increased just yet, because it gets increased implicitly after subroutine finishes
                     if let Some(res) = get_or_init_option!(JavaThread::invoke_subroutine(ctx, cam, None, args)) {
                         ctx.thread.call_stack.push_operand_value(res);
                     }
@@ -919,16 +848,16 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                     let object = ctx.thread.call_stack.pop_operand_value().unwrap();
                     if object.is_null(){
                         ctx.thread.call_stack.push_operand_value(Value::from(false));
-                        return None;
+                    } else {
+                        let Value::Reference(object_id) = object else { return Some(Err(VmError::ValidationError("INSTANCEOF: expected object to be a reference".to_string()))) };
+                        let object = wrap_error!(ctx.vm.resolve_object_by_id(object_id));
+                        let object_class = ctx.vm.find_class_by_id(object.class_id).unwrap();
+                        let instance_of = ctx.vm.is_instance_of(object_class, of_class);
+
+                        debug!("INSTANCEOF {:?} = {}", &class_and_method.class.get_or_resolve_constant(&ctx, *constant_index), instance_of);
+
+                        ctx.thread.call_stack.push_operand_value(Value::from(instance_of));
                     }
-                    let Value::Reference(object_id) = object else { return Some(Err(VmError::ValidationError("INSTANCEOF: expected object to be a reference".to_string()))) };
-                    let object = wrap_error!(ctx.vm.resolve_object_by_id(object_id));
-                    let object_class = ctx.vm.find_class_by_id(object.class_id).unwrap();
-                    let instance_of = ctx.vm.is_instance_of(object_class, of_class);
-
-                    debug!("INSTANCEOF {:?} = {}", &class_and_method.class.get_or_resolve_constant(&ctx, *constant_index), instance_of);
-
-                    ctx.thread.call_stack.push_operand_value(Value::from(instance_of));
                 }
 
                 Instruction::MONITORENTER => {
@@ -959,8 +888,8 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                 }
 
                 Instruction::WIDE(op, index, const_option) => {
-                    match Instruction::from_repr(*op).unwrap(){
-                        Instruction::IINC(..) => {
+                    match BytecodeInstruction::from_repr(*op).unwrap(){
+                        BytecodeInstruction::IINC => {
                             if let (Some(Value::Integer(value)), Some(amount)) = (ctx.thread.call_stack.load_local(*index as usize), const_option) {
                                 ctx.thread.call_stack.store_local(Value::Integer(value + *amount as i32), *index as usize);
                             } else {
@@ -994,6 +923,7 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                             if r.is_null(){
                                 debug!("+IFNULL is NULL");
                                 ctx.thread.call_stack.set_pc(*target);
+                                return None;
                             } else {
                                 debug!("-IFNULL is reference");
                             }
@@ -1010,6 +940,7 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                             } else {
                                 debug!("+IFNONNULL is reference");
                                 ctx.thread.call_stack.set_pc(*target);
+                                return None;
                             }
                         }
                         _ => {warn!("?IFNONNULL {:?} is this valid?", reference.clone())}
@@ -1020,16 +951,16 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
                 }
             }
         }
-        InstructionBlock::AStoreWithoutPop(index) => {
+        IrInstruction::AStoreWithoutPop(index) => {
             let top = ctx.thread.call_stack.operand_stacks.borrow().last().unwrap().last().unwrap().clone();
             ctx.thread.call_stack.store_local(top, *index);
         }
-        InstructionBlock::IConstReturn(val) => {
+        IrInstruction::IConstReturn(val) => {
             #[cfg(feature = "debug")]
             ctx.thread.debug_helper.tracker.push_method_event(class_and_method.format(), format!("returning int: {}", val));
             return Some(Ok(VMResultType::Successful(Some(Value::Integer(*val)))))
         }
-        InstructionBlock::LConstReturn(val) => {
+        IrInstruction::LConstReturn(val) => {
             #[cfg(feature = "debug")]
             ctx.thread.debug_helper.tracker.push_method_event(class_and_method.format(), format!("returning long: {}", val));
             return Some(Ok(VMResultType::Successful(Some(Value::Long(*val)))))
@@ -1038,6 +969,8 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>) -> Option<VMPartialResult
             return Some(Err(VmError::Unspecified(format!("Block of type {:?} not executable", other))))
         }
     }
+    // increase pc here implicitly for all non-invoking op-codes
+    ctx.thread.call_stack.set_pc(block.next_pc);
     debug!("");
     None
 }
@@ -1146,14 +1079,16 @@ fn aload<'a>(thread: &JavaThread, index: usize) -> VMResult<()>{
     Ok(())
 }
 
-fn execute_cmp<F: FnOnce(i32) -> bool>(thread: &JavaThread, target: u16, cmp: F){
+fn execute_cmp<F: FnOnce(i32) -> bool>(thread: &JavaThread, target: u16, cmp: F) -> bool{
     let value = thread.call_stack.pop_operand_value().unwrap().expect_int().unwrap();
-    if cmp(value){
+    let jump = cmp(value);
+    if jump {
         thread.call_stack.set_pc(target);
     }
+    jump
 }
 
-fn execute_i_cmp<F: FnOnce(i32, i32) -> bool>(thread: &JavaThread, offset: u16, f: F){
+fn execute_i_cmp<F: FnOnce(i32, i32) -> bool>(thread: &JavaThread, offset: u16, f: F) -> bool{
     let val2 = thread.call_stack.pop_operand_value().unwrap().expect_int().unwrap();
     let val1 = thread.call_stack.pop_operand_value().unwrap().expect_int().unwrap();
     let jump = f(val1, val2);
@@ -1161,6 +1096,7 @@ fn execute_i_cmp<F: FnOnce(i32, i32) -> bool>(thread: &JavaThread, offset: u16, 
     if jump{
         thread.call_stack.set_pc(offset);
     }
+    jump
 }
 
 fn execute_i_arithmetic<F: FnOnce(i32, i32) -> VMResult<i32>>(thread: &JavaThread, f: F) -> VMResult<()> {
@@ -1233,9 +1169,8 @@ fn execute_ji_arithmetic<F: FnOnce(i64, i32) -> Result<i64, VmError>>(thread: &J
     }
 }
 
-fn execute_invoke<'a>(ctx: Context<'a, '_>, index: u16, kind: InvokeKind) -> VMPartialResult<Option<Value>> {
-    let calling_class_and_method_id = &ctx.thread.call_stack.get_class_and_method_id_cloned();
-    let calling_class_and_method = &ClassAndMethod::try_resolve(ctx.vm, calling_class_and_method_id)?;
+fn execute_invoke<'a>(ctx: Context<'a, '_>, next_pc: PC, index: u16, kind: InvokeKind, cam: &ClassAndMethod<'a>) -> VMPartialResult<Option<Value>> {
+    let calling_class_and_method = cam;
 
     let (cam, args_count) = get_constant_method_ref_and_args_count(calling_class_and_method, &ctx, index).expect("GIB MICH DIE METHODE");
     trace!("loading class to execute on: '{}'", cam.class.name.as_str());
@@ -1339,14 +1274,12 @@ fn execute_invoke<'a>(ctx: Context<'a, '_>, index: u16, kind: InvokeKind) -> VMP
             }
         }
     }
+
+    // Explicitly increase the pc here because we exit early
+    ctx.thread.call_stack.set_pc(next_pc);
+
     ctx.create_and_push_call_frame(class_and_method, receiver, args, true);
-    Ok(VMResultType::Interrupted(1, false))
-    //Ok(VMResultType::Ok(Some(Value::Null)))
-    /*let res = vm.invoke(class_and_method, receiver, args)?.to_option();
-    if res.is_some(){
-        self.stack.push(res.unwrap())
-    }
-    Ok(())*/
+    Ok(VMResultType::Interrupted(1))
 }
 
 fn get_method_virtual<'a>(class: ClassRef<'a>, method_name: &str, descriptor: &str) -> Result<ClassAndMethod<'a>, VmError>{
@@ -1418,10 +1351,8 @@ fn get_constant_method_ref_and_args_count<'a>(calling: &ClassAndMethod<'a>, ctx:
 }
 
 //FIXME: Deprecated
-fn get_constant_as_value<'a>(ctx: Context<'a, '_>, index: u16) -> VMPartialResult<Value>{
-    let camid = &ctx.thread.call_stack.get_class_and_method_id_cloned();
-    let class_and_method = ClassAndMethod::try_resolve(ctx.vm, camid)?;
-    let constant_value = class_and_method.class.get_or_resolve_constant(&ctx, index).unwrap();
+fn get_constant_as_value<'a>(ctx: Context<'a, '_>, cam: &ClassAndMethod<'a>, index: u16) -> VMPartialResult<Value>{
+    let constant_value = cam.class.get_or_resolve_constant(&ctx, index).unwrap();
     let value = match constant_value {
         ConstantPoolEntry::Integer(value) => Value::Integer(value),
         ConstantPoolEntry::Long(value) => Value::Long(value),

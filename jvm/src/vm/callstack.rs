@@ -72,6 +72,7 @@ impl CallStack {
     }
 
     pub fn set_pc(&self, val: u16){
+        trace!("Setting PC to: {}", val);
         *self.pcs.borrow_mut().last_mut().unwrap() = ProgramCounter(val);
     }
 
@@ -108,7 +109,7 @@ impl CallStack {
         let pc = self.pcs.borrow()[index].0;
         let cam = ClassAndMethod::try_resolve(vm, cam).unwrap();
         if let Some(code) = &cam.method.attributes.code{
-            instruction = cam.method.code_blocks.as_ref().map(|blocks| blocks.get(&pc).unwrap());
+            instruction = cam.method.ir_code.as_ref().map(|blocks| blocks.get(pc).unwrap());
             // TODO check all tables not only the first
             if let Some(line_number_table) = &code.attributes.line_number_tables.get(0){
                 for entry in line_number_table.line_number_table.iter().rev(){

@@ -1,12 +1,11 @@
-use std::collections::BTreeMap;
-
 use crate::bytecode::Instruction;
+use crate::class_file::methods::attributes::Code;
 
 mod il;
 mod raw;
 
 #[derive(Debug, PartialEq, Clone)]
-pub enum InstructionBlock{
+pub enum IrInstruction {
     Single(Instruction),
     AStoreWithoutPop(usize),
     IStoreWithoutPop(usize),
@@ -22,13 +21,11 @@ pub enum InstructionBlock{
 }
 
 #[cfg(feature = "il")]
-pub fn get_blocks(bytes: &Vec<u8>) -> BTreeMap<u16, InstructionBlock>{
-    il::get_blocks(bytes)
-}
+pub use il::as_ir_code as as_ir_code;
 
 #[cfg(not(feature = "il"))]
-pub fn get_blocks(bytes: &Vec<u8>) -> BTreeMap<u16, InstructionBlock>{
-    raw::get_blocks(bytes)
+pub fn as_ir_code(code_attr: &Code) -> BTreeMap<u16, IrInstruction>{
+    raw::get_blocks(code_attr.code)
 }
 /*
 #[cfg(test)]

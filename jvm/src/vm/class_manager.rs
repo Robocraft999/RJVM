@@ -242,7 +242,7 @@ impl<'a> ClassManager<'a>{
                         code.attributes = code_attributes;
                     }
                     let descriptor = MethodDescriptor::new(descriptor);
-                    let code_blocks = method_attributes.code.clone().map(|c| bytecode::get_blocks(&c.code));
+                    let ir_code = method_attributes.code.clone().map(|c| bytecode::as_ir_code(&c));
                     Some(MethodInfo{
                         name,
                         descriptor,
@@ -251,7 +251,7 @@ impl<'a> ClassManager<'a>{
                         attributes: method_attributes,
                         holder_id: class.id,
                         is_holder_interface: class.is_interface(),
-                        code_blocks,
+                        ir_code,
                         flags: raw_field.access_flags,
                     })
                 }
