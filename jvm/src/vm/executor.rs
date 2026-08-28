@@ -1,20 +1,20 @@
+use crate::bytecode::BytecodeInstruction;
 use crate::class_file::constant_pool::ConstantPoolEntry;
 use crate::class_file::fields::field_type::{FieldType, PrimitiveType};
+use crate::class_file::methods::code::PC;
 use crate::class_file::methods::descriptor::MethodDescriptor;
 use crate::vm::class_manager::ClassLoadingState;
+use crate::vm::constants::classes::{JAVA_LANG_ARITHMETIC_EXCEPTION, JAVA_LANG_OBJECT};
 use crate::vm::constants::{MEMBERNAME_clazz_INDEX, MEMBERNAME_name_INDEX, MEMBERNAME_type_INDEX, THROWABLE_detailsMessage_INDEX};
 use crate::vm::debug::validation::FieldTypeExt;
 use crate::vm::java_thread::JavaThread;
+use crate::vm::monitoring::MonitorAssociate;
 use crate::vm::result::{VMPartialResult, VMResultType};
 use crate::vm::Context;
 use crate::{bytecode::Instruction, get_or_init, get_or_init_option, vm::{bytecode::IrInstruction, class::{ClassAndMethod, ClassRef}, java_error::JavaError, result::VMResult, value::{ReferenceType, Value}, VmError, VM}};
 use log::{debug, error, info, trace, warn};
 use parking_lot::RwLock;
-use std::{str::FromStr};
-use crate::bytecode::BytecodeInstruction;
-use crate::class_file::methods::code::PC;
-use crate::vm::constants::classes::{JAVA_LANG_ARITHMETIC_EXCEPTION, JAVA_LANG_OBJECT};
-use crate::vm::monitoring::MonitorAssociate;
+use std::str::FromStr;
 
 macro_rules! wrap_error {
     ($res:expr) => {
@@ -951,9 +951,17 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>, class_and_method: &ClassA
                 }
             }
         }
-        IrInstruction::AStoreWithoutPop(index) => {
+        IrInstruction::AStoreWithoutPop(index) |
+        IrInstruction::IStoreWithoutPop(index) |
+        IrInstruction::FStoreWithoutPop(index) => {
             let top = ctx.thread.call_stack.operand_stacks.borrow().last().unwrap().last().unwrap().clone();
             ctx.thread.call_stack.store_local(top, *index);
+        }
+        IrInstruction::LStoreWithoutPop(index) |
+        IrInstruction::DStoreWithoutPop(index) => {
+            let top = ctx.thread.call_stack.operand_stacks.borrow().last().unwrap().last().unwrap().clone();
+            ctx.thread.call_stack.store_local(top, *index);
+            ctx.thread.call_stack.store_local(Value::Dummy, *index + 1);
         }
         IrInstruction::IConstReturn(val) => {
             #[cfg(feature = "debug")]
@@ -965,7 +973,24 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>, class_and_method: &ClassA
             ctx.thread.debug_helper.tracker.push_method_event(class_and_method.format(), format!("returning long: {}", val));
             return Some(Ok(VMResultType::Successful(Some(Value::Long(*val)))))
         }
+        IrInstruction::ObjectInstantiation(class_idx, method_idx) => {
+            let clazz = class_and_method.get_constant_class_ref(&ctx, *class_idx).unwrap();
+            get_or_init_option!(ctx.ensure_initialized(clazz));
+            if ctx.vm.class_manager.expect_class_state(clazz.id, ClassLoadingState::LOADED){
+                unimplemented!("Cannot create instance of {:?} if not initializ-ed/-ing", clazz.name);
+            }
+            let new_object = ctx.new_object_from_class(clazz);
+
+            debug!("New Object: {} {} {:?}", class_idx, clazz.name, &new_object.print(ctx.vm));
+
+            // TODO: this is where the optimization should hit
+            ctx.thread.call_stack.push_operand_value(Value::Reference(new_object.id));
+            ctx.thread.call_stack.push_operand_value(Value::Reference(new_object.id));
+
+            return Some(execute_invoke(ctx, block.next_pc, *method_idx, InvokeKind::SPECIAL, class_and_method));
+        }
         other => {
+            println!("{:?}", class_and_method.method.ir_code);
             return Some(Err(VmError::Unspecified(format!("Block of type {:?} not executable", other))))
         }
     }
