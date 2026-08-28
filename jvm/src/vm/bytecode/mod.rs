@@ -42,10 +42,10 @@ fn decode(code: &[u8]) -> VMResult<Vec<LocatedInstruction>> {
     Ok(result)
 }
 
-#[cfg(feature = "il")]
+#[cfg(feature = "o1")]
 pub use il::as_ir_code as as_ir_code;
 
-#[cfg(not(feature = "il"))]
+#[cfg(not(feature = "o1"))]
 pub use raw::as_ir_code as as_ir_code;
 /*
 #[cfg(test)]
