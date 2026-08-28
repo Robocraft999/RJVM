@@ -7,7 +7,10 @@ mod raw;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum IrInstruction {
+    // not optimized
     Single(Instruction),
+
+    // optimization level 1
     AStoreWithoutPop(usize),
     IStoreWithoutPop(usize),
     LStoreWithoutPop(usize),
@@ -17,8 +20,9 @@ pub enum IrInstruction {
     LConstReturn(i64),
     FConstReturn(f32),
     DConstReturn(f64),
-    JumpLabel,
-    Jump(usize, Instruction)
+
+    // optimization level 2
+    ObjectInstantiation(u16, u16),
 }
 
 fn decode(code: &[u8]) -> VMResult<Vec<LocatedInstruction>> {

@@ -83,22 +83,31 @@ fn optimize(instructions: &[LocatedInstruction], ctx: &OptimizationContext) -> V
     result
 }
 
-fn try_optimize(
-    input: &[LocatedInstruction],
-    ctx: &OptimizationContext,
-) -> Option<(LocatedIrInstruction, usize)> {
-    try_store_load(input, ctx)
-        .or_else(|| try_const_return(input, ctx))
+fn try_optimize(input: &[LocatedInstruction], ctx: &OptimizationContext) -> Option<(LocatedIrInstruction, usize)> {
+    try_o1_optimizations(input, ctx)
+        .or_else(|| try_o2_optimizations(input, ctx))
 }
 
 pub struct OptimizationContext {
     pub barriers: HashSet<u16>,
 }
 
-fn try_store_load(
-    input: &[LocatedInstruction],
-    ctx: &OptimizationContext,
-) -> Option<(LocatedIrInstruction, usize)> {
+fn try_o1_optimizations(input: &[LocatedInstruction], ctx: &OptimizationContext) -> Option<(LocatedIrInstruction, usize)> {
+    try_store_load(input, ctx)
+        .or_else(|| try_const_return(input, ctx))
+}
+
+#[cfg(feature = "o2")]
+fn try_o2_optimizations(input: &[LocatedInstruction], ctx: &OptimizationContext) -> Option<(LocatedIrInstruction, usize)> {
+    try_object_instantiation(input, ctx)
+}
+
+#[cfg(not(feature = "o2"))]
+fn try_o2_optimizations(input: &[LocatedInstruction], ctx: &OptimizationContext) -> Option<(LocatedIrInstruction, usize)> {
+    None
+}
+
+fn try_store_load(input: &[LocatedInstruction], ctx: &OptimizationContext) -> Option<(LocatedIrInstruction, usize)> {
     if input.len() < 2 {
         return None;
     }
@@ -139,10 +148,7 @@ fn try_store_load(
     }
 }
 
-fn try_const_return(
-    input: &[LocatedInstruction],
-    ctx: &OptimizationContext,
-) -> Option<(LocatedIrInstruction, usize)> {
+fn try_const_return(input: &[LocatedInstruction], ctx: &OptimizationContext) -> Option<(LocatedIrInstruction, usize)> {
     if input.len() < 2 {
         return None;
     }
@@ -159,8 +165,32 @@ fn try_const_return(
     match (&first.instruction, &second.instruction) {
         (Instruction::ICONST(amt), Instruction::IRETURN) => Some((LocatedIrInstruction { start_pc: first.pc, next_pc: second.next_pc, instruction: IrInstruction::IConstReturn(*amt), }, 2)),
         (Instruction::LCONST(amt), Instruction::LRETURN) => Some((LocatedIrInstruction { start_pc: first.pc, next_pc: second.next_pc, instruction: IrInstruction::LConstReturn(*amt), }, 2)),
+        (Instruction::FCONST(amt), Instruction::FRETURN) => Some((LocatedIrInstruction { start_pc: first.pc, next_pc: second.next_pc, instruction: IrInstruction::FConstReturn(*amt), }, 2)),
+        (Instruction::DCONST(amt), Instruction::DRETURN) => Some((LocatedIrInstruction { start_pc: first.pc, next_pc: second.next_pc, instruction: IrInstruction::DConstReturn(*amt), }, 2)),
 
         // ...
+        _ => None,
+    }
+}
+
+fn try_object_instantiation(input: &[LocatedInstruction], ctx: &OptimizationContext) -> Option<(LocatedIrInstruction, usize)> {
+    if input.len() < 3 {
+        return None;
+    }
+
+    let op_new = &input[0];
+    let op_dup = &input[1];
+    let op_constructor = &input[2];
+
+    if ctx.barriers.contains(&op_dup.pc) || ctx.barriers.contains(&op_constructor.pc) {
+        return None;
+    }
+
+    match (&op_new.instruction, &op_dup.instruction, &op_constructor.instruction) {
+        (Instruction::NEW(class_idx), Instruction::DUP, Instruction::INVOKESPECIAL(method_idx)) => Some((
+            LocatedIrInstruction { start_pc: op_new.pc, next_pc: op_constructor.next_pc, instruction: IrInstruction::ObjectInstantiation(*class_idx, *method_idx) },
+            3,
+        )),
         _ => None,
     }
 }
