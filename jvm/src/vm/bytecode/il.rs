@@ -115,11 +115,23 @@ fn try_store_load(
     match (&first.instruction, &second.instruction) {
         (Instruction::ASTORE(str), Instruction::ALOAD(ld)) => {
             if str != ld { return None }
-            Some((LocatedIrInstruction { start_pc: first.pc, next_pc: second.next_pc,
-                    instruction: IrInstruction::AStoreWithoutPop(*str as usize),
-                },
-                2,
-            ))
+            Some((LocatedIrInstruction { start_pc: first.pc, next_pc: second.next_pc, instruction: IrInstruction::AStoreWithoutPop(*str as usize), }, 2))
+        }
+        (Instruction::ISTORE(str), Instruction::ILOAD(ld)) => {
+            if str != ld { return None }
+            Some((LocatedIrInstruction { start_pc: first.pc, next_pc: second.next_pc, instruction: IrInstruction::IStoreWithoutPop(*str as usize), }, 2))
+        }
+        (Instruction::LSTORE(str), Instruction::LLOAD(ld)) => {
+            if str != ld { return None }
+            Some((LocatedIrInstruction { start_pc: first.pc, next_pc: second.next_pc, instruction: IrInstruction::LStoreWithoutPop(*str as usize), }, 2))
+        }
+        (Instruction::FSTORE(str), Instruction::FLOAD(ld)) => {
+            if str != ld { return None }
+            Some((LocatedIrInstruction { start_pc: first.pc, next_pc: second.next_pc, instruction: IrInstruction::FStoreWithoutPop(*str as usize), }, 2))
+        }
+        (Instruction::DSTORE(str), Instruction::DLOAD(ld)) => {
+            if str != ld { return None }
+            Some((LocatedIrInstruction { start_pc: first.pc, next_pc: second.next_pc, instruction: IrInstruction::DStoreWithoutPop(*str as usize), }, 2))
         }
 
         // ...
@@ -145,13 +157,8 @@ fn try_const_return(
     }
 
     match (&first.instruction, &second.instruction) {
-        (Instruction::ICONST(amt), Instruction::IRETURN) => {
-            Some((LocatedIrInstruction { start_pc: first.pc, next_pc: second.next_pc,
-                    instruction: IrInstruction::IConstReturn(*amt),
-                },
-                2,
-            ))
-        }
+        (Instruction::ICONST(amt), Instruction::IRETURN) => Some((LocatedIrInstruction { start_pc: first.pc, next_pc: second.next_pc, instruction: IrInstruction::IConstReturn(*amt), }, 2)),
+        (Instruction::LCONST(amt), Instruction::LRETURN) => Some((LocatedIrInstruction { start_pc: first.pc, next_pc: second.next_pc, instruction: IrInstruction::LConstReturn(*amt), }, 2)),
 
         // ...
         _ => None,
