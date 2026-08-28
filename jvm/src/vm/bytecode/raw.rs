@@ -1,16 +1,26 @@
-use std::collections::BTreeMap;
+use crate::class_file::methods::attributes::Code;
+use crate::class_file::methods::code::{IrCode, LocatedIrInstruction};
+use crate::vm::bytecode::decode;
+use crate::vm::bytecode::IrInstruction;
 
-use crate::{bytecode::parse_instruction, vm::bytecode::IrInstruction};
+pub fn as_ir_code(code_attr: &Code) -> IrCode {
+    let decoded = decode(&code_attr.code).unwrap();
 
-pub fn get_blocks(bytes: &Vec<u8>) -> BTreeMap<u16, IrInstruction>{
-    let mut blocks = BTreeMap::new();
-    let mut parse_pc = 0;
+    let ir_instructions = decoded
+        .into_iter()
+        .map(|inst| LocatedIrInstruction {
+            start_pc: inst.pc,
+            next_pc: inst.next_pc,
+            instruction: IrInstruction::Single(inst.instruction),
+        })
+        .collect::<Vec<_>>();
 
-    while parse_pc < bytes.len() {
-        if let Ok((instruction, new_parse_pc)) = parse_instruction(bytes, parse_pc) {
-            blocks.insert(parse_pc as u16, IrInstruction::Single(instruction));
-            parse_pc = new_parse_pc;
-        }
+    let mut pc_to_instruction_map = vec![None; code_attr.code.len()];
+    for (index, inst) in ir_instructions.iter().enumerate() {
+        pc_to_instruction_map[inst.start_pc as usize] = Some(index);
     }
-    blocks
+    IrCode {
+        ir_instructions,
+        pc_to_instruction_map,
+    }
 }

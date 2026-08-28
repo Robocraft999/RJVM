@@ -1,8 +1,8 @@
-use std::collections::HashSet;
 use crate::class_file::methods::attributes::{Code, ExceptionTableEntry};
 use crate::class_file::methods::code::{IrCode, LocatedInstruction, LocatedIrInstruction};
-use crate::vm::result::VMResult;
-use crate::{bytecode::{parse_instruction, Instruction}, vm::bytecode::IrInstruction};
+use crate::vm::bytecode::decode;
+use crate::{bytecode::Instruction, vm::bytecode::IrInstruction};
+use std::collections::HashSet;
 
 pub fn as_ir_code(code_attr: &Code) -> IrCode {
     let decoded = decode(&code_attr.code).unwrap();
@@ -16,27 +16,6 @@ pub fn as_ir_code(code_attr: &Code) -> IrCode {
         ir_instructions,
         pc_to_instruction_map,
     }
-}
-
-fn decode(code: &[u8]) -> VMResult<Vec<LocatedInstruction>> {
-    let mut pc = 0;
-    let mut result = Vec::new();
-
-    while pc < code.len() {
-        let start_pc = pc;
-
-        let (instruction, next_pc) = parse_instruction(code, pc)?;
-
-        result.push(LocatedInstruction {
-            pc: start_pc as u16,
-            next_pc: next_pc as u16,
-            instruction,
-        });
-
-        pc = next_pc;
-    }
-
-    Ok(result)
 }
 
 fn build_optimization_context(instructions: &[LocatedInstruction], exception_table: &[ExceptionTableEntry]) -> OptimizationContext {
