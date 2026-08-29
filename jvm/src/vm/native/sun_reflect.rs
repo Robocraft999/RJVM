@@ -1,5 +1,6 @@
+use crate::class_file::fields::field_type::{FieldType, PrimitiveType};
 use crate::class_file::fields::get_class_descriptor;
-use crate::vm::class::ClassAndMethod;
+use crate::vm::class::class_and_member::ClassAndMethod;
 use crate::vm::constants::classes::{SUN_REFLECT_NCAI, SUN_REFLECT_NMAI, SUN_REFLECT_REFLECTION};
 use crate::vm::constants::{CONSTRUCTOR_clazz_INDEX, CONSTRUCTOR_parameterTypes_INDEX, METHOD_clazz_INDEX, METHOD_name_INDEX, METHOD_parameterTypes_INDEX, METHOD_returnType_INDEX};
 use crate::vm::java_error::JavaError;
@@ -9,7 +10,6 @@ use crate::vm::result::{VMPartialResult, VMResult, VMResultType};
 use crate::vm::value::{Reference, ReferenceType, Value};
 use crate::vm::{Context, VmError};
 use log::debug;
-use crate::class_file::fields::field_type::{FieldType, PrimitiveType};
 
 pub fn register_natives(registry: &mut NativeMethodRegistry) {
     registry.register(SUN_REFLECT_REFLECTION, "getCallerClass", "()Ljava/lang/Class;", delegate_get_caller_class);

@@ -1,14 +1,14 @@
-use crate::vm::class::ClassAndMethodId;
+use crate::vm::class::class_and_member::ClassAndMethodId;
 use crate::vm::java_thread::{ThreadMeta, ThreadState};
 use crate::vm::result::VMResult;
 use crate::vm::value::RefId;
 use crate::vm::{Context, VmError};
+use parking_lot::lock_api::MutexGuard;
 use parking_lot::{Mutex, RawMutex};
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::thread::{park, park_timeout};
 use std::time::Duration;
-use parking_lot::lock_api::{MutexGuard};
 
 #[derive(Debug, PartialEq, Copy, Clone, Hash, Eq)]
 pub enum MonitorAssociate {

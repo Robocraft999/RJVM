@@ -1,7 +1,7 @@
 use crate::class_file::fields::field_type::{FieldType, PrimitiveType};
 use crate::class_file::methods::descriptor::MethodDescriptor;
 use crate::vm::application::thread;
-use crate::vm::class::ClassAndMethod;
+use crate::vm::class::class_and_member::ClassAndMethod;
 use crate::vm::jni::types::{jboolean, jbyte, jchar, jdouble, jfloat, jint, jlong, jobject, jshort, jvalue, JNIEnv};
 use crate::vm::value::{Reference, Value};
 use libffi::high::CodePtr;

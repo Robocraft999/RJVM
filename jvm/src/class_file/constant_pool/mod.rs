@@ -1,7 +1,8 @@
 use crate::class_file::attributes::BootstrapMethod;
 use crate::class_file::methods::descriptor::MethodDescriptor;
 use crate::class_file::nom::parse_cesu_string;
-use crate::vm::class::{ClassAndField, ClassAndMethod, ClassRef};
+use crate::vm::class::class_and_member::{ClassAndField, ClassAndMethod};
+use crate::vm::class::ClassRef;
 use nom::combinator::map;
 use nom::error::Error;
 use nom::number::{be_f32, be_f64, be_i32, be_i64, be_u16, be_u8};

@@ -6,10 +6,13 @@
 
 use crate::class_file::fields::field_type::{FieldType, PrimitiveType};
 use crate::vm::application::thread;
-use crate::vm::class::{ClassAndMethod, ClassId};
+use crate::vm::class::class_and_member::ClassAndMethod;
+use crate::vm::class::ClassId;
 use crate::vm::constants::THROWABLE_detailsMessage_INDEX;
 use crate::vm::debug::validation::FieldTypeExt;
+use crate::vm::heap::array::ArrayContent;
 use crate::vm::java_thread::JavaThread;
+use crate::vm::jni::{ctx, native_init_wrap};
 use crate::vm::result::{VMPartialResult, VMResult, VMResultType};
 use crate::vm::value::{RefId, ReferenceType, Value};
 use crate::vm::{jni, jni::{env_function_table::JNINativeInterface, vm_function_table::JNIInvokeInterface}, Context, VmError, VM};
@@ -17,11 +20,9 @@ use log::{debug, error, warn};
 use parking_lot::RwLock;
 use std::ffi::{c_char, c_double, c_float, c_int, c_long, c_schar, c_short, c_uchar, c_ushort, c_void, CStr, CString, OsStr, VaList};
 use std::fmt::Debug;
+use std::ops::{Deref, DerefMut};
 use std::os::unix::ffi::OsStrExt;
 use std::{ptr, slice};
-use std::ops::{Deref, DerefMut};
-use crate::vm::heap::array::ArrayContent;
-use crate::vm::jni::{ctx, native_init_wrap};
 
 //Platform dependent
 pub type jint = c_int;

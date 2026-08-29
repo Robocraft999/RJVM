@@ -1,6 +1,6 @@
 use crate::class_file::fields::field_type::{FieldType, PrimitiveType};
 use crate::class_file::methods::descriptor::MethodDescriptor;
-use crate::vm::class::ClassAndMethod;
+use crate::vm::class::class_and_member::ClassAndMethod;
 use crate::vm::jni::types::jvalue;
 use crate::vm::native::external::ExternNativeMethod;
 use crate::vm::result::{VMPartialResult, VMResultType};

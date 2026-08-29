@@ -1,4 +1,4 @@
-use crate::vm::class::ClassAndMethodId;
+use crate::vm::class::class_and_member::ClassAndMethodId;
 
 #[derive(Clone)]
 pub struct CallFrame {

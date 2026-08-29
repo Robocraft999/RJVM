@@ -1,12 +1,11 @@
 #![allow(non_upper_case_globals)]
 
-use log::debug;
 use crate::access_flags::{field_flags, method_flags};
 use crate::class_file::fields::{get_class_descriptor, FieldInfo};
 use crate::class_file::methods::descriptor::MethodDescriptor;
 use crate::class_file::methods::{INVALID_VTABLE_INDEX, NONVIRTUAL_VTABLE_INDEX};
 use crate::vm::call_info::{resolve_special_call, resolve_virtual_call, CallInfo, CallInfoKind};
-use crate::vm::class::ClassAndMethod;
+use crate::vm::class::class_and_member::ClassAndMethod;
 use crate::vm::constants::classes::{JAVA_LANG_CLASS, JAVA_LANG_INVOKE_METHOD_HANDLE, JAVA_LANG_INVOKE_METHOD_TYPE, JAVA_LANG_INVOKE_MHN, JAVA_LANG_REFLECT_CONSTRUCTOR, JAVA_LANG_REFLECT_FIELD, JAVA_LANG_REFLECT_METHOD, JAVA_LANG_STRING};
 use crate::vm::constants::{LAMBDAFORM_vmentry_INDEX, MEMBERNAME_clazz_INDEX, MEMBERNAME_flags_INDEX, MEMBERNAME_name_INDEX, MEMBERNAME_type_INDEX, METHODHANDLE_form_INDEX, METHODTYPE_ptypes_INDEX, METHODTYPE_rtype_INDEX, METHOD_clazz_INDEX, METHOD_slot_INDEX};
 use crate::vm::java_error::JavaError;
@@ -15,6 +14,7 @@ use crate::vm::native::{gen_delegate, invalidation, non_failing_none, non_failin
 use crate::vm::result::{VMPartialResult, VMResult, VMResultType};
 use crate::vm::value::{Reference, ReferenceType, Value};
 use crate::vm::{Context, VmError};
+use log::debug;
 
 pub fn register_natives(registry: &mut NativeMethodRegistry) {
     registry.register(JAVA_LANG_INVOKE_METHOD_HANDLE, "invoke", "([Ljava/lang/Object;)Ljava/lang/Object;", delegate_invoke);

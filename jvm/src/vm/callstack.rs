@@ -1,12 +1,12 @@
 use super::call_frame::CallFrame;
-use crate::vm::class::ClassAndMethodId;
-use crate::vm::ClassAndMethod;
+use crate::vm::class::class_and_member::ClassAndMethod;
+use crate::vm::class::class_and_member::ClassAndMethodId;
+use crate::vm::value::RefId;
 use crate::vm::ProgramCounter;
 use crate::Value;
 use crate::VM;
 use log::{trace, warn};
 use std::cell::RefCell;
-use crate::vm::value::RefId;
 
 pub struct CallStack{
     pub frames: RefCell<Vec<CallFrame>>,

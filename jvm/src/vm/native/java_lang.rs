@@ -1,6 +1,6 @@
 use crate::class_file::fields::field_type::{FieldType, PrimitiveType};
 use crate::vm::application::{thread, JAVA_THREAD};
-use crate::vm::class::ClassAndMethod;
+use crate::vm::class::class_and_member::ClassAndMethod;
 use crate::vm::constants::classes::{JAVA_LANG_BYTE_ARR_PRIM, JAVA_LANG_BYTE_ARR_PRIM_2, JAVA_LANG_PACKAGE, JAVA_LANG_PROCESS_ENVIRONMENT, JAVA_LANG_REFLECT_ARRAY, JAVA_LANG_RUNTIME, JAVA_LANG_STRING, JAVA_LANG_THREAD, JAVA_LANG_THROWABLE};
 use crate::vm::constants::{THREADGROUP_maxPriority_INDEX, THREADGROUP_nUnstartedThreads_INDEX, THREADGROUP_name_INDEX, THREADGROUP_parent_INDEX, THREAD_daemon_INDEX, THREAD_group_INDEX, THREAD_name_INDEX, THREAD_priority_INDEX, THREAD_target_INDEX};
 use crate::vm::java_thread::JavaThread;

@@ -1,5 +1,6 @@
 use crate::vm::callstack::CallStack;
-use crate::vm::class::{ClassAndMethod, ClassAndMethodId, ClassRef};
+use crate::vm::class::class_and_member::{ClassAndMethod, ClassAndMethodId};
+use crate::vm::class::ClassRef;
 use crate::vm::constants::THROWABLE_detailsMessage_INDEX;
 use crate::vm::debug::DebugHelper;
 use crate::vm::java_error::JavaError;
