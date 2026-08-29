@@ -70,7 +70,7 @@ impl <'a> Application<'a> {
                 trace!(target: "debug", "result: {res:?}");
                 res
             }
-            Ok(VMResultType::Interrupted(_, _)) => {
+            Ok(VMResultType::Interrupted(..)) => {
                 self.handle_partial(JavaThread::invoke_frames_until(self.context(), -1))
             }
             Ok(VMResultType::ExceptionThrown) => {

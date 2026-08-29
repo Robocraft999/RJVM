@@ -614,8 +614,9 @@ impl<'a> ClassAndMethod<'a>{
                     }
                 };
                 if can_handle{
-                    //FIXME check if end_pc is inclusive or exclusive
-                    if handler.start_pc <= current_pc.0 && current_pc.0 <= handler.end_pc{
+                    // end_pc is usually exclusive but if invokes fail the pc is already advanced
+                    // it would have to be reset to be still in range
+                    if handler.start_pc <= current_pc.0 && current_pc.0 <= handler.end_pc {
                         return Some(handler.handler_pc);
                     }
                 }

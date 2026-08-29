@@ -1,13 +1,16 @@
-use std::collections::BTreeMap;
-
-use crate::bytecode::Instruction;
+use crate::bytecode::{parse_instruction, Instruction};
+use crate::class_file::methods::code::LocatedInstruction;
+use crate::vm::result::VMResult;
 
 mod il;
 mod raw;
 
 #[derive(Debug, PartialEq, Clone)]
-pub enum InstructionBlock{
+pub enum IrInstruction {
+    // not optimized
     Single(Instruction),
+
+    // optimization level 1
     AStoreWithoutPop(usize),
     IStoreWithoutPop(usize),
     LStoreWithoutPop(usize),
@@ -17,19 +20,37 @@ pub enum InstructionBlock{
     LConstReturn(i64),
     FConstReturn(f32),
     DConstReturn(f64),
-    JumpLabel,
-    Jump(usize, Instruction)
+
+    // optimization level 2
+    ObjectInstantiation(u16, u16),
 }
 
-#[cfg(feature = "il")]
-pub fn get_blocks(bytes: &Vec<u8>) -> BTreeMap<u16, InstructionBlock>{
-    il::get_blocks(bytes)
+fn decode(code: &[u8]) -> VMResult<Vec<LocatedInstruction>> {
+    let mut pc = 0;
+    let mut result = Vec::new();
+
+    while pc < code.len() {
+        let start_pc = pc;
+
+        let (instruction, next_pc) = parse_instruction(code, pc)?;
+
+        result.push(LocatedInstruction {
+            pc: start_pc as u16,
+            next_pc: next_pc as u16,
+            instruction,
+        });
+
+        pc = next_pc;
+    }
+
+    Ok(result)
 }
 
-#[cfg(not(feature = "il"))]
-pub fn get_blocks(bytes: &Vec<u8>) -> BTreeMap<u16, InstructionBlock>{
-    raw::get_blocks(bytes)
-}
+#[cfg(feature = "o1")]
+pub use il::as_ir_code as as_ir_code;
+
+#[cfg(not(feature = "o1"))]
+pub use raw::as_ir_code as as_ir_code;
 /*
 #[cfg(test)]
 mod tests{

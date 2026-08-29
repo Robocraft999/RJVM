@@ -1,13 +1,12 @@
 pub mod attributes;
 pub mod descriptor;
+pub mod code;
 
 use crate::access_flags::method_flags;
 use crate::class_file::methods::attributes::{ExceptionTableEntry, MethodInfoAttributes};
 use crate::class_file::methods::descriptor::MethodDescriptor;
-use crate::vm::bytecode::InstructionBlock;
 use crate::vm::ProgramCounter;
-use crate::vm::VmError;
-use std::collections::BTreeMap;
+use crate::class_file::methods::code::{IrCode, LocatedIrInstruction, PC};
 use crate::vm::class::ClassId;
 
 #[derive(Debug, Clone)]
@@ -17,7 +16,7 @@ pub struct MethodInfo{
     pub descriptor: MethodDescriptor,
     pub slot: usize,
     pub vtable_index: isize,
-    pub code_blocks: Option<BTreeMap<u16, InstructionBlock>>,
+    pub ir_code: Option<IrCode>,
     pub holder_id: ClassId,
     // FIXME store the entire holder instead.
     // This would require to store all methods including from superclass in a vtable to be useful
@@ -83,23 +82,17 @@ impl MethodInfo{
         }
     }
 
-    pub fn get_code_block_at(&self, pc: ProgramCounter) -> &InstructionBlock{
-        &self.code_blocks
-            .as_ref()
-            .unwrap()
-            .get(&pc.0)
-            .ok_or_else(|| VmError::ValidationError(
-                format!("Code block out of bounds: {}, {:?}", pc.0, self.code_blocks)
-            ))
-            .unwrap()
+    pub fn get_code_block_at(&self, pc: ProgramCounter) -> Option<&LocatedIrInstruction> {
+        if let Some((ir_code)) = &self.ir_code {
+            ir_code.get(pc.0)
+        } else {
+            None
+        }
     }
 
-    pub fn next_pc(&self, pc: ProgramCounter) -> Option<u16>{
-        self.code_blocks.as_ref().map(|blocks| blocks.range(pc.0+1..).next()).flatten().map(|t|*t.0)
-    }
-
-    pub fn previous_pc(&self, pc: ProgramCounter) -> u16{
-        self.code_blocks.as_ref().map(|blocks| blocks.range(..pc.0).next_back()).flatten().map(|t|*t.0).unwrap_or(0)
+    pub fn next_pc(&self, pc: ProgramCounter) -> PC {
+        let Some(ir_code) = &self.ir_code else { unreachable!("there is no code") };
+        ir_code.get(pc.0).unwrap().next_pc
     }
 
     pub fn has_vtable_index(&self) -> bool {

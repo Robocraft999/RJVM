@@ -382,7 +382,7 @@ impl<'a> Context<'a, '_> {
     pub fn get_or_initialize_class(&self, class_name: &str) -> VMPartialResult<ClassRef<'a>>{
         let resolved = self.get_or_resolve_class(class_name)?;
         match self.ensure_initialized(resolved)? {
-            VMResultType::Interrupted(c, flag) => Ok(VMResultType::Interrupted(c, flag)),
+            VMResultType::Interrupted(c) => Ok(VMResultType::Interrupted(c)),
             _ => successful_result(resolved)
         }
     }
@@ -401,7 +401,7 @@ impl<'a> Context<'a, '_> {
                 .filter(Option::is_some)
                 .count();
             if count > 0{
-                Ok(VMResultType::Interrupted(count, true))
+                Ok(VMResultType::Interrupted(count))
             } else {
                 Ok(VMResultType::Successful(()))
             }

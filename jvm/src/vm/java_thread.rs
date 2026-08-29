@@ -183,7 +183,7 @@ impl JavaThread {
                 }
                 let current_pc = &ctx.thread.call_stack.get_pc();
                 //[unchecked] class already loaded by method
-                if let Some(handler_pc) = class_and_method.resolve_exception_handler(&ctx, current_pc, thrown_class_name.as_str()){
+                if let Some(handler_pc) = class_and_method.resolve_exception_handler(&ctx, &current_pc, thrown_class_name.as_str()){
                     ctx.thread.call_stack.set_pc(handler_pc);
                     ctx.thread.call_stack.clear_operand_stack();
                     ctx.thread.call_stack.push_operand_value(Value::Reference(*throwable_ref_id));
@@ -245,7 +245,7 @@ impl JavaThread {
             let call_result = if class_and_method.method.is_native(){
                 Self::execute_native(ctx, class_and_method)?
             } else {
-                executor::execute(ctx)?
+                executor::execute(ctx, class_and_method)?
             };
 
             match call_result {
@@ -268,11 +268,11 @@ impl JavaThread {
                         }
                     }
                     let frame = ctx.thread.call_stack.pop_call_frame();
-                    if frame_amount as isize -2 == stop_index{
+                    if frame_amount as isize -2 == stop_index {
                         return Ok(VMResultType::Successful(result));
                     }
-                    if let Some(value) = result{
-                        if frame.should_push_return{
+                    if let Some(value) = result {
+                        if frame.should_push_return {
                             ctx.thread.call_stack.push_operand_value(value);
                         }
                     }
@@ -284,15 +284,13 @@ impl JavaThread {
                     continue;
                 }
                 // should only be returned by non-native functions
-                VMResultType::Interrupted(frame_amount, reset_pc) => {
-                    if reset_pc{
-                        let last_frame_index = ctx.thread.call_stack.pcs.borrow().len() - frame_amount - 1;
-                        let current_pc = ctx.thread.call_stack.pcs.borrow()[last_frame_index];
-                        let camid = ctx.thread.call_stack.frames.borrow()[last_frame_index].class_and_method;
-                        let cam = ClassAndMethod::try_resolve(ctx.vm, &camid)?;
-                        let previous_pc = cam.method.previous_pc(current_pc);
-                        *ctx.thread.call_stack.pcs.borrow_mut().get_mut(last_frame_index).unwrap() = ProgramCounter(previous_pc);
-                    }
+                VMResultType::Interrupted(_) => {
+                    // changing pc is not necessary anymore:
+                    // case 1: invoke
+                    //     increased pc before call so reentry is safely after the invoke
+                    // case 2: class init
+                    //     needed a reset before, but now it gets set after the execution
+                    //     so early interrupts still keep the old pc
                 }
             }
         }

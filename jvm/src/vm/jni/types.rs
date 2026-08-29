@@ -138,7 +138,7 @@ impl JNIEnv {
         }
     }
 
-    pub fn vm(&self) -> &VM {
+    pub fn vm(&self) -> &VM<'_> {
         unsafe{&*(self.vm as *const VM)}
     }
 }
