@@ -9,18 +9,19 @@ use crate::class_file::methods::{MethodInfo, GARBAGE_VTABLE_INDEX};
 use crate::class_file::nom::parse_class_file;
 use crate::error::ClassParseError;
 use crate::vm::application::thread;
+use crate::vm::class::method_tables::VTable;
 use crate::vm::class::{ArrayInfo, Class, ClassId, ClassRef};
 use crate::vm::class_path::ClassPath;
+use crate::vm::java_thread::JavaThread;
 use crate::vm::result::{VMResult, VMResultType};
 use crate::vm::value::{RefId, Reference, Value};
 use crate::vm::{bytecode, Context, VmError, VM};
 use log::{info, warn};
+use parking_lot::{Mutex, RwLock};
 use std::cmp::PartialEq;
 use std::collections::HashMap;
 use std::str::FromStr;
-use parking_lot::{Mutex, RwLock};
 use typed_arena::Arena;
-use crate::vm::java_thread::JavaThread;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ClassLoadingState{
@@ -150,6 +151,7 @@ impl<'a> ClassManager<'a>{
             interfaces: Vec::new(),
             fields: Vec::new(),
             methods: Vec::new(),
+            vtable: VTable::new(),
             transitive_field_count: 0,
             first_field_index: 0,
             transitive_method_count: 0,
@@ -269,6 +271,8 @@ impl<'a> ClassManager<'a>{
 
         thread().debug_helper.bytecode_helper.push_class(class_ref, bytes);
 
+        class.vtable = VTable::initialize(&mut class);
+
         class.init_vtable();
         class.init_itable();
 
@@ -293,6 +297,7 @@ impl<'a> ClassManager<'a>{
                 interfaces: wrapper.interfaces.clone(),
                 fields: wrapper.fields.clone(),
                 methods: wrapper.methods.clone(),
+                vtable: wrapper.vtable.clone(),
                 transitive_field_count: wrapper.transitive_field_count,
                 first_field_index: wrapper.first_field_index,
                 transitive_method_count: wrapper.transitive_method_count,

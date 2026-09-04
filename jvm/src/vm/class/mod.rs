@@ -4,6 +4,7 @@ use crate::class_file::constant_pool::{ConstantPool, ConstantPoolEntry};
 use crate::class_file::fields::field_type::FieldType;
 use crate::class_file::fields::FieldInfo;
 use crate::class_file::methods::{MethodInfo, ITABLE_INDEX_MAX, NONVIRTUAL_VTABLE_INDEX, PENDING_ITABLE_INDEX};
+use crate::vm::class::method_tables::VTable;
 use crate::vm::value::{RefId, Value};
 use crate::vm::Context;
 use class_and_member::ClassAndMethod;
@@ -13,6 +14,7 @@ use std::hash::Hash;
 
 pub mod class_and_member;
 pub mod constants;
+pub mod method_tables;
 
 pub struct Class<'a>{
     pub id: ClassId,
@@ -24,6 +26,7 @@ pub struct Class<'a>{
     pub interfaces: Vec<ClassRef<'a>>,
     pub fields: Vec<FieldInfo>,
     pub methods: Vec<MethodInfo>,
+    pub vtable: VTable<'a>,
     pub transitive_field_count: usize,
     pub transitive_method_count: usize,
     pub first_field_index: usize,
