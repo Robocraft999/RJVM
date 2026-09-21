@@ -1,10 +1,11 @@
+use std::collections::{HashSet, VecDeque};
 use crate::access_flags::{class_flags, method_flags};
 use crate::class_file::attributes::ClassFileAttributes;
 use crate::class_file::constant_pool::{ConstantPool, ConstantPoolEntry};
 use crate::class_file::fields::field_type::FieldType;
 use crate::class_file::fields::FieldInfo;
 use crate::class_file::methods::{MethodInfo, ITABLE_INDEX_MAX, NONVIRTUAL_VTABLE_INDEX, PENDING_ITABLE_INDEX};
-use crate::vm::class::method_tables::VTable;
+use crate::vm::class::method_tables::{ITable, VTable};
 use crate::vm::value::{RefId, Value};
 use crate::vm::Context;
 use class_and_member::ClassAndMethod;
@@ -26,7 +27,9 @@ pub struct Class<'a>{
     pub interfaces: Vec<ClassRef<'a>>,
     pub fields: Vec<FieldInfo>,
     pub methods: Vec<MethodInfo>,
-    pub vtable: VTable<'a>,
+    pub default_methods: Vec<usize>,
+    pub vtable: VTable,
+    pub itable: ITable,
     pub transitive_field_count: usize,
     pub transitive_method_count: usize,
     pub first_field_index: usize,
@@ -81,6 +84,47 @@ impl<'a> Class<'a>{
             }
         }
     }
+
+    pub fn lookup_instance_method(&self, method_name: &str, descriptor: &str) -> Option<MethodInfo> {
+        let mut current_class = self;
+        let mut target = current_class.find_method(method_name, descriptor);
+        if target.is_some(){
+            return target.cloned();
+        }
+
+        while let Some(super_class) = current_class.superclass {
+            current_class = super_class;
+            target = current_class.find_method(method_name, descriptor);
+            if target.is_some(){
+                return target.cloned();
+            }
+        }
+
+        if self.is_array() {
+            return None;
+        }
+
+        // search default methods
+        // FIXME just take the first but verify that
+        let mut candidates = Vec::new();
+
+        let transitive_interfaces = self.transitive_interfaces();
+        for interface_clazz in transitive_interfaces {
+            for i in &interface_clazz.default_methods {
+                let default_method = &interface_clazz.methods[*i];
+                if default_method.name == method_name && default_method.descriptor.as_str() == descriptor {
+                    candidates.push(default_method.clone());
+                }
+            }
+        }
+
+        if candidates.len() > 0 {
+            return Some(candidates.into_iter().next().unwrap())
+        }
+
+        None
+    }
+
     pub fn find_method_slot(&self, method_name: &str, descriptor: &str) -> Option<usize> {
         self.methods
             .iter()
@@ -226,6 +270,28 @@ impl<'a> Class<'a>{
         } else {
             self.fields.get(index - self.first_field_index)
         }
+    }
+
+    // FIXME OMFG THIS IS TOO EXPENSIVE!!! CACHE THIS YOU IDIOT
+    pub fn transitive_interfaces(&self) -> Vec<ClassRef<'a>> {
+        let mut ids = HashSet::new();
+        let mut res = Vec::new();
+        let mut to_process = VecDeque::from(self.interfaces.clone());
+
+        let mut current_class = self;
+        while let Some(super_class) = current_class.superclass {
+            to_process.extend(super_class.interfaces.iter());
+            current_class = super_class;
+        }
+
+        while let Some(interface_clazz) = to_process.pop_front() {
+            if !ids.contains(&interface_clazz.id) {
+                ids.insert(interface_clazz.id);
+                to_process.extend(interface_clazz.interfaces.iter());
+                res.push(interface_clazz);
+            }
+        }
+        res
     }
 
 

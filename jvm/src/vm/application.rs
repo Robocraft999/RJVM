@@ -50,7 +50,7 @@ impl <'a> Application<'a> {
         Self {vm}
     }
 
-    fn context(&self) -> Context<'a, '_> {
+    pub(crate) fn context(&self) -> Context<'a, '_> {
         let thread = thread();
         Context {thread, vm: &self.vm}
     }
@@ -185,16 +185,17 @@ impl <'a> Application<'a> {
     }
 
     pub fn start_user_code(&self) {
+        let main_class_name = "logicsim/App";
+        self.start_test(main_class_name);
+    }
+
+    pub(crate) fn start_test(&self, main_class_name: &str) {
         let ctx = self.context();
         let args = env::args().skip(1).map(|s| Value::Reference(ctx.try_new_string_object(&s).unwrap().id)).collect();
         let string_arr_clazz = ctx.get_or_resolve_class(JAVA_LANG_STRING_ARR).unwrap();
         let args_array = ctx.try_new_array(string_arr_clazz, args).unwrap();
         let args = vec![Value::Reference(args_array.id)];
-        //run_and_catch_method(&mut vm, "de/klassenserver7b/k7bot/Main", "main", "([Ljava/lang/String;)V", p_args);
-        //app.run_and_catch_method("Main", "main", "([Ljava/lang/String;)V", p_args);
 
-        let main_class_name = "logicsim/App";
-        //let main_class_name = "Hello";
         ctx.thread.call_stack.class_loaders.borrow_mut().push(*ctx.vm.system_class_loader.read());
         let clazz = ctx.get_or_resolve_class(main_class_name).unwrap();
         self.init_class(main_class_name);

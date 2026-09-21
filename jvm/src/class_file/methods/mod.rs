@@ -108,8 +108,7 @@ impl MethodInfo{
     }
 
     pub fn itable_index(&self) -> isize {
-        // technically <= pending_itable_entry, but we don't have that
-        assert!(self.vtable_index <= ITABLE_INDEX_MAX);
+        assert!(self.vtable_index <= PENDING_ITABLE_INDEX);
         ITABLE_INDEX_MAX - self.vtable_index
     }
 }

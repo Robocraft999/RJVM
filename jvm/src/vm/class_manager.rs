@@ -9,7 +9,7 @@ use crate::class_file::methods::{MethodInfo, GARBAGE_VTABLE_INDEX};
 use crate::class_file::nom::parse_class_file;
 use crate::error::ClassParseError;
 use crate::vm::application::thread;
-use crate::vm::class::method_tables::VTable;
+use crate::vm::class::method_tables::{ITable, VTable};
 use crate::vm::class::{ArrayInfo, Class, ClassId, ClassRef};
 use crate::vm::class_path::ClassPath;
 use crate::vm::java_thread::JavaThread;
@@ -22,6 +22,7 @@ use std::cmp::PartialEq;
 use std::collections::HashMap;
 use std::str::FromStr;
 use typed_arena::Arena;
+use crate::access_flags::{class_flags, method_flags};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ClassLoadingState{
@@ -151,7 +152,9 @@ impl<'a> ClassManager<'a>{
             interfaces: Vec::new(),
             fields: Vec::new(),
             methods: Vec::new(),
+            default_methods: Vec::new(),
             vtable: VTable::new(),
+            itable: ITable::new(),
             transitive_field_count: 0,
             first_field_index: 0,
             transitive_method_count: 0,
@@ -223,6 +226,8 @@ impl<'a> ClassManager<'a>{
             Some(clazz) => clazz.transitive_method_count,
             None => 0,
         };
+        let mut default_method_indices = Vec::new();
+        let is_interface = class.is_interface();
         class.methods = parsed_class.methods.iter()
             .enumerate()
             .map(|(i, raw_method)| (i, raw_method, class.get_or_resolve_constant(ctx, raw_method.name_index), class.get_or_resolve_constant(ctx, raw_method.descriptor_index)))
@@ -245,6 +250,10 @@ impl<'a> ClassManager<'a>{
                     }
                     let descriptor = MethodDescriptor::new(descriptor);
                     let ir_code = method_attributes.code.clone().map(|c| bytecode::as_ir_code(&c));
+                    // is interface default method
+                    if is_interface && raw_field.access_flags & method_flags::ABSTRACT == 0 && raw_field.access_flags & method_flags::STATIC == 0 {
+                        default_method_indices.push(i);
+                    }
                     Some(MethodInfo{
                         name,
                         descriptor,
@@ -263,6 +272,10 @@ impl<'a> ClassManager<'a>{
             .ok_or_else(|| VmError::ParseError(ClassParseError::ConstantPoolError(format!("Method of class '{}' could not be loaded.", class.name))))?;
         class.transitive_method_count = super_class_method_count + class.methods.len();
         class.first_method_index = super_class_method_count;
+        class.default_methods = default_method_indices;
+
+        class.vtable = VTable::initialize(&mut class);
+        class.itable = ITable::initialize(&mut class);
 
         let class_ref = unsafe {
             let class_ptr: *const Class<'a> = &class;
@@ -270,11 +283,6 @@ impl<'a> ClassManager<'a>{
         };
 
         thread().debug_helper.bytecode_helper.push_class(class_ref, bytes);
-
-        class.vtable = VTable::initialize(&mut class);
-
-        class.init_vtable();
-        class.init_itable();
 
         Ok(class)
     }
@@ -297,7 +305,9 @@ impl<'a> ClassManager<'a>{
                 interfaces: wrapper.interfaces.clone(),
                 fields: wrapper.fields.clone(),
                 methods: wrapper.methods.clone(),
+                default_methods: wrapper.default_methods.clone(),
                 vtable: wrapper.vtable.clone(),
+                itable: wrapper.itable.clone(),
                 transitive_field_count: wrapper.transitive_field_count,
                 first_field_index: wrapper.first_field_index,
                 transitive_method_count: wrapper.transitive_method_count,
@@ -311,7 +321,7 @@ impl<'a> ClassManager<'a>{
                 let guard = self.classes.lock();
                 let class_ref = guard.alloc(class);
                 unsafe {
-                    let class_ptr: *const Class<'a> = class_ref;
+                    let class_ptr: *const Class<'_> = class_ref;
                     &*class_ptr
                 }
             };

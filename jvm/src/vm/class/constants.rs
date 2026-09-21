@@ -201,3 +201,40 @@ fn resolve_method_ref<'a>(ctx: &Context<'a, '_>, constant_pool: &ConstantPool<'a
     // 3.3
     None
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::class_file::constant_pool::ConstantPoolEntry;
+    use crate::vm::application::Application;
+    use crate::vm::class::constants::resolve_class_and_name_and_type;
+    use crate::vm::class_path::ClassPath;
+
+    #[test]
+    fn test_method_ref_always_directly_resolvable() {
+        let mut cp = ClassPath::default();
+        cp.push("../resources/rt.jar;../resources/test").unwrap();
+        let mut app = Application::new(cp);
+
+        app.startup();
+
+        let classes = app.vm.class_manager.classes_by_id.read().clone();
+
+        for clazz in classes.values() {
+            for entry in clazz.constants.read().iter() {
+                match entry {
+                    ConstantPoolEntry::RawMethodRef(class_index, name_and_type_index) => {
+                        let (clazz, name, sig) = resolve_class_and_name_and_type(&app.context(), clazz.constants.read().as_ref(), *class_index, *name_and_type_index).unwrap();
+                        //println!("Is {}.{}  directly defined: {}", clazz.name, name, clazz.find_method(name.as_str(), sig.as_str()).is_some());
+                        if clazz.find_method(name.as_str(), sig.as_str()).is_none() {
+                            println!("Is {}.{} not directly defined", clazz.name, name);
+                        }
+                    }
+                    ConstantPoolEntry::MethodRef(cam) => {
+                        //println!("already resolved: {}", cam.format());
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+}
