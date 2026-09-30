@@ -51,8 +51,8 @@ impl <'a> Class<'a>{
                 self.constants.write()[index as usize - 1] = entry;
             }
             ConstantPoolEntry::RawInterfaceMethodRef(class_index, name_and_type_index) => {
-                let cam = resolve_class_and_method(&ctx, self.constants.read().deref(), class_index, name_and_type_index, true)?;
-                self.constants.write()[index as usize - 1] = ConstantPoolEntry::InterfaceMethodRef(cam);
+                let entry = resolve_interface_method_ref(&ctx, self.constants.read().deref(), class_index, name_and_type_index).unwrap();
+                self.constants.write()[index as usize - 1] = entry;
             }
             ConstantPoolEntry::RawMethodHandle(kind, ref_index) => {
                 let kind = BytecodeBehavior::from_repr(kind)?;
@@ -161,7 +161,7 @@ fn resolve_class_and_method<'a>(ctx: &Context<'a, '_>, constant_pool: &ConstantP
 
 fn resolve_method_ref<'a>(ctx: &Context<'a, '_>, constant_pool: &ConstantPool<'a>, class_index: u16, name_and_type_index: u16) -> Option<ConstantPoolEntry<'a>> {
     let (clazz, method_name, method_descriptor) = resolve_class_and_name_and_type(ctx, constant_pool, class_index, name_and_type_index)?;
-    // 1.
+    // 1
     if clazz.is_interface() {
         // TODO IncompatibleClassChangeError
         return None;
@@ -183,22 +183,52 @@ fn resolve_method_ref<'a>(ctx: &Context<'a, '_>, constant_pool: &ConstantPool<'a
         }
     }
     // 3.1
-    let mut interface_queue = VecDeque::from(clazz.interfaces.clone());
+    let mut interface_queue = VecDeque::from(clazz.transitive_interfaces());
     while let Some(super_interface) = interface_queue.pop_front() {
         if let Some(m) = super_interface.find_method(method_name.as_str(), method_descriptor.as_str()) && !m.is_abstract() {
             return Some(ConstantPoolEntry::MethodRef(ClassAndMethod{ class: super_interface, method: m }));
         }
-        interface_queue.extend(super_interface.interfaces.iter());
     }
     // 3.2
-    interface_queue = VecDeque::from(clazz.interfaces.clone());
+    interface_queue = VecDeque::from(clazz.transitive_interfaces());
     while let Some(super_interface) = interface_queue.pop_front() {
         if let Some(m) = super_interface.find_method(method_name.as_str(), method_descriptor.as_str()) && !m.is_private() && !m.is_static() {
             return Some(ConstantPoolEntry::MethodRef(ClassAndMethod{ class: super_interface, method: m }));
         }
-        interface_queue.extend(super_interface.interfaces.iter());
     }
     // 3.3
+    None
+}
+
+fn resolve_interface_method_ref<'a>(ctx: &Context<'a, '_>, constant_pool: &ConstantPool<'a>, class_index: u16, name_and_type_index: u16) -> Option<ConstantPoolEntry<'a>> {
+    let (clazz, method_name, method_descriptor) = resolve_class_and_name_and_type(ctx, constant_pool, class_index, name_and_type_index)?;
+    // 1
+    if !clazz.is_interface() {
+        // TODO IncompatibleClassChangeError
+        return None;
+    }
+    // 2
+    if let Some(m) = clazz.find_method(method_name.as_str(), method_descriptor.as_str()) {
+        let cam = ClassAndMethod{ class: clazz, method: m };
+        return Some(ConstantPoolEntry::InterfaceMethodRef(cam));
+    }
+    // 3
+    // FIXME Does this even happen?
+    // 4
+    let mut interface_queue = VecDeque::from(clazz.transitive_interfaces());
+    while let Some(super_interface) = interface_queue.pop_front() {
+        if let Some(m) = super_interface.find_method(method_name.as_str(), method_descriptor.as_str()) && !m.is_abstract() {
+            return Some(ConstantPoolEntry::MethodRef(ClassAndMethod{ class: super_interface, method: m }));
+        }
+    }
+    // 5
+    interface_queue = VecDeque::from(clazz.transitive_interfaces());
+    while let Some(super_interface) = interface_queue.pop_front() {
+        if let Some(m) = super_interface.find_method(method_name.as_str(), method_descriptor.as_str()) && !m.is_private() && !m.is_static() {
+            return Some(ConstantPoolEntry::MethodRef(ClassAndMethod{ class: super_interface, method: m }));
+        }
+    }
+    // 6
     None
 }
 

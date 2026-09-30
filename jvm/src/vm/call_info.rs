@@ -1,5 +1,6 @@
 use crate::class_file::methods::{MethodInfo, INVALID_VTABLE_INDEX, NONVIRTUAL_VTABLE_INDEX};
 use crate::vm::class::ClassRef;
+use std::fmt::{Debug, Formatter};
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub enum CallInfoKind {
@@ -11,7 +12,7 @@ pub enum CallInfoKind {
 
 pub struct CallInfo<'a> {
     resolved_class: ClassRef<'a>,
-    selected_class: ClassRef<'a>,
+    pub selected_class: ClassRef<'a>,
     pub resolved_method: &'a MethodInfo,
     pub selected_method: &'a MethodInfo,
     pub kind: CallInfoKind,
@@ -105,6 +106,17 @@ impl<'a> CallInfo<'a>{
     }
 }
 
+impl Debug for CallInfo<'_> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CallInfo")
+            .field("kind", &self.kind)
+            .field("resolved", &format_args!("{}.{}{}", self.resolved_class.name, self.resolved_method.name, self.resolved_method.descriptor.as_str()))
+            .field("selected", &format_args!("{}.{}{}", self.selected_class.name, self.selected_method.name, self.selected_method.descriptor.as_str()))
+            .field("index", &self.index)
+            .finish()
+    }
+}
+
 pub fn can_be_statically_bound<'a>(resolved_method: &'a MethodInfo, resolved_class: ClassRef<'a>) -> bool {
     if resolved_method.is_final() || resolved_class.is_final() { return true; }
     let is_non_virtual = resolved_method.vtable_index() == NONVIRTUAL_VTABLE_INDEX;
@@ -140,6 +152,28 @@ pub fn resolve_virtual_call<'a>(receiver_class: ClassRef<'a>, resolved_class: Cl
     CallInfo::new_virtual(resolved_class, receiver_class, resolved_method, selected_method.method, vtable_index)
 }
 
+pub fn resolve_virtual_call2<'a>(receiver_class: ClassRef<'a>, resolved_class: ClassRef<'a>, resolved_method: &'a MethodInfo) -> Option<CallInfo<'a>> {
+    if resolved_class.is_interface() {
+        assert!(resolved_method.has_itable_index());
+        let vtable_index = resolved_method.itable_index();
+        assert!(vtable_index >= 0);
+        let selected_method = receiver_class.get_itable_entry(&resolved_class.id, vtable_index as usize)?;
+        // found a default method so the defined method should be in the itable of the resolved class
+        Some(CallInfo::new_interface(resolved_class, resolved_class, resolved_method, selected_method, vtable_index))
+    } else {
+        assert!(!resolved_method.has_itable_index());
+        let vtable_index = resolved_method.vtable_index();
+
+        let selected_method = if vtable_index == NONVIRTUAL_VTABLE_INDEX {
+            assert!(can_be_statically_bound(resolved_method, resolved_class));
+            resolved_method
+        } else {
+            receiver_class.get_vtable_entry(vtable_index as usize)?
+        };
+        Some(CallInfo::new_virtual(resolved_class, receiver_class, resolved_method, selected_method, vtable_index))
+    }
+}
+
 pub fn resolve_special_call<'a>(resolved_class: ClassRef<'a>, method_name: &str, method_signature: &str) -> CallInfo<'a> {
     let cam = if !resolved_class.is_interface() {
         resolved_class.resolve_method_virtual(method_name, method_signature).unwrap()
@@ -162,3 +196,22 @@ LinkResolver::resolve_virtual_call(CallInfo& result, Handle recv, KlassHandle re
                                         Symbol* method_name, Symbol* method_signature, KlassHandle current_klass,
                                         bool check_access, bool check_null_and_abstract, TRAPS)
  */
+
+pub fn resolve_interface_call<'a>(receiver_class: ClassRef<'a>, resolved_class: ClassRef<'a>, resolved_method: &'a MethodInfo) -> Option<CallInfo<'a>> {
+    assert!(resolved_class.is_interface() && !resolved_method.is_private());
+
+    assert!(resolved_method.has_itable_index());
+    let vtable_index = resolved_method.itable_index();
+    assert!(vtable_index >= 0);
+    let selected_method = receiver_class.get_itable_entry(&resolved_class.id, vtable_index as usize)?;
+    // FIXME selected method should be actual receiver
+    if !selected_method.has_itable_index() {
+        Some(CallInfo::new_virtual(resolved_class, receiver_class, resolved_method, selected_method, vtable_index))
+    } else {
+        Some(CallInfo::new_interface(resolved_class, resolved_class, resolved_method, selected_method, vtable_index))
+    }
+}
+
+pub fn resolve_static_call<'a>(resolved_class: ClassRef<'a>, resolved_method: &'a MethodInfo) -> Option<CallInfo<'a>> {
+    Some(CallInfo::new_static(resolved_class, resolved_method))
+}

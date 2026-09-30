@@ -1,7 +1,7 @@
-use std::collections::HashMap;
-use std::ops::Index;
 use crate::class_file::methods::{MethodInfo, ITABLE_INDEX_MAX, NONVIRTUAL_VTABLE_INDEX, PENDING_ITABLE_INDEX};
 use crate::vm::class::{Class, ClassId, ClassRef};
+use std::collections::HashMap;
+use std::ops::Index;
 
 #[derive(Debug, Clone)]
 pub struct VTable {
@@ -207,6 +207,21 @@ impl ITable {
         }
 
         self.entries[entry_offset] = methods;
+    }
+}
+
+impl<'a> Class<'a> {
+    pub fn find_vtable_entry(&self, name: &str, descriptor: &str) -> Option<&MethodInfo> {
+        self.vtable.table.iter().find(|m| m.name == name && m.descriptor.as_str() == descriptor)
+    }
+
+    pub fn get_vtable_entry(&self, index: usize) -> Option<&MethodInfo> {
+        self.vtable.method_at(index)
+    }
+
+    pub fn get_itable_entry(&self, interface_id: &ClassId, index: usize) -> Option<&MethodInfo> {
+        let interface_index = self.itable.interface_to_index.get(interface_id)?;
+        self.itable.entries[*interface_index].get(index).flatten_ref()
     }
 }
 
