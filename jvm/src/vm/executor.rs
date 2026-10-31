@@ -11,8 +11,8 @@ use crate::vm::debug::validation::FieldTypeExt;
 use crate::vm::java_thread::JavaThread;
 use crate::vm::monitoring::MonitorAssociate;
 use crate::vm::result::{VMPartialResult, VMResultType};
-use crate::vm::{call_info, Context};
-use crate::{bytecode::Instruction, get_or_init, get_or_init_option, vm::{bytecode::IrInstruction, class::ClassRef, java_error::JavaError, result::VMResult, value::{ReferenceType, Value}, VmError, VM}};
+use crate::vm::{Context, call_info};
+use crate::{bytecode::Instruction, get_or_init, get_or_init_option, vm::{VM, VmError, bytecode::IrInstruction, class::ClassRef, java_error::JavaError, result::VMResult, value::{ReferenceType, Value}}};
 use log::{debug, error, info, trace, warn};
 use parking_lot::RwLock;
 use std::str::FromStr;
@@ -1302,7 +1302,7 @@ fn execute_invoke<'a>(ctx: Context<'a, '_>, next_pc: PC, index: u16, kind: Invok
             ctx.thread.debug_helper.tracker.push_method_event(cam.format(), format!("Calling static from {} with args: {}", calling_class_and_method.format(), args.iter().map(|v| format!("\n    {}", v.print(ctx.vm))).collect::<Vec<_>>().join("") ));
         }
     }
-    if !cam.class.has_method_polymorphic_signature(cam.method) {
+    if !cam.method.is_sig_poly {
         for (i, provided_arg) in args.iter().filter(|a| if let Value::Dummy = a {false} else {true}).enumerate(){
             if !(&cam.method.descriptor.args[i] == provided_arg){
                 return Err(VmError::ValidationError(format!("Expected arg type: {:?} but got value: {:?}", cam.method.descriptor.args[i], provided_arg)));
@@ -1374,11 +1374,16 @@ fn get_method_interface_virtual<'a>(class: ClassRef<'a>, method_name: &str, desc
 
 fn get_constant_method_ref_and_args_count<'a>(calling: &ClassAndMethod<'a>, ctx: &Context<'a, '_>, index: u16) -> Option<(ClassAndMethod<'a>, usize)> {
     match calling.class.get_or_resolve_constant(ctx, index) {
+        Some(ConstantPoolEntry::ResolvedMethodRef(resolved)) => {
+            Some((ClassAndMethod { class: resolved.resolved_clazz, method: resolved.selected_method }, resolved.resolved_descriptor.args.len()))
+        }
         Some(ConstantPoolEntry::MethodRef(cam)) | Some(ConstantPoolEntry::InterfaceMethodRef(cam)) => {
+            unreachable!("deprecated");
             let args_count = cam.method.descriptor.args.len();
             Some((cam, args_count))
         }
         Some(ConstantPoolEntry::MethodRefSigPoly(cam, desc)) => {
+            unreachable!("deprecated");
             Some((cam, desc.args.len()))
         }
         _ => None

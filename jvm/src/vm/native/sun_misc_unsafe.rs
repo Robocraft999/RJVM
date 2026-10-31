@@ -1,17 +1,17 @@
 use crate::class_file::constant_pool::ConstantPoolEntry;
+use crate::vm::VmError;
 use crate::vm::class::Class;
 use crate::vm::class_manager::{AnonClassInfo, ClassLoadingState};
 use crate::vm::constants::classes::{JAVA_LANG_CLASS, SUN_MISC_UNSAFE};
 use crate::vm::constants::{FIELD_clazz_INDEX, FIELD_name_INDEX};
+use crate::vm::debug::validation::FieldTypeExt;
 use crate::vm::java_thread::ThreadState;
-use crate::vm::native::{gen_delegate, invalidation, non_failing_none, non_failing_some, wrap_init, NativeMethodRegistry};
+use crate::vm::native::{NativeMethodRegistry, gen_delegate, invalidation, non_failing_none, non_failing_some, wrap_init};
 use crate::vm::result::VMPartialResult;
 use crate::vm::value::{Reference, ReferenceType, Value};
-use crate::vm::VmError;
 use log::{debug, trace};
 use std::thread::{park, park_timeout};
 use std::time::{Duration, SystemTime};
-use crate::vm::debug::validation::FieldTypeExt;
 
 pub fn register_natives(registry: &mut NativeMethodRegistry) {
     let mut register = |method_name, sig, delegate| registry.register(SUN_MISC_UNSAFE, method_name, sig, delegate);
@@ -568,7 +568,7 @@ gen_delegate!(delegate_define_anon_class, |ctx, _obj_ref, args| {
         let byte_arr_ref = ctx.vm.resolve_object_by_id(*byte_arr_ref_id)?;
         if let ReferenceType::Array(bytes ) = &byte_arr_ref.reference_type{
             let bytes = bytes.read().as_byte_vec().unwrap();
-            let class = ctx.vm.class_manager.define_class(&ctx, None, None, bytes)?;
+            let class = ctx.vm.class_manager.define_class(&ctx, None, bytes)?;
             
             let class_ref = {
                 let guard = ctx.vm.class_manager.classes.lock();

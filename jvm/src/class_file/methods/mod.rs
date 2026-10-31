@@ -4,9 +4,9 @@ pub mod code;
 
 use crate::access_flags::method_flags;
 use crate::class_file::methods::attributes::{ExceptionTableEntry, MethodInfoAttributes};
+use crate::class_file::methods::code::{IrCode, LocatedIrInstruction, PC};
 use crate::class_file::methods::descriptor::MethodDescriptor;
 use crate::vm::ProgramCounter;
-use crate::class_file::methods::code::{IrCode, LocatedIrInstruction, PC};
 use crate::vm::class::ClassId;
 
 #[derive(Debug, Clone)]
@@ -22,6 +22,7 @@ pub struct MethodInfo{
     // This would require to store all methods including from superclass in a vtable to be useful
     // Although it would improve virtual resolving a lot
     pub is_holder_interface: bool,
+    pub is_sig_poly: bool,
     pub attributes: MethodInfoAttributes,
 }
 

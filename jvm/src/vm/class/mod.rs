@@ -1,15 +1,15 @@
-use std::collections::{HashSet, VecDeque};
 use crate::access_flags::{class_flags, method_flags};
 use crate::class_file::attributes::ClassFileAttributes;
 use crate::class_file::constant_pool::{ConstantPool, ConstantPoolEntry};
-use crate::class_file::fields::field_type::FieldType;
 use crate::class_file::fields::FieldInfo;
-use crate::class_file::methods::{MethodInfo, ITABLE_INDEX_MAX, NONVIRTUAL_VTABLE_INDEX, PENDING_ITABLE_INDEX};
+use crate::class_file::fields::field_type::FieldType;
+use crate::class_file::methods::{ITABLE_INDEX_MAX, MethodInfo, NONVIRTUAL_VTABLE_INDEX, PENDING_ITABLE_INDEX};
+use crate::vm::Context;
 use crate::vm::class::method_tables::{ITable, VTable};
 use crate::vm::value::{RefId, Value};
-use crate::vm::Context;
 use class_and_member::ClassAndMethod;
 use parking_lot::RwLock;
+use std::collections::{HashSet, VecDeque};
 use std::fmt::{Debug, Formatter};
 use std::hash::Hash;
 
@@ -41,14 +41,7 @@ pub struct Class<'a>{
 
 impl<'a> Class<'a>{
     pub fn find_method(&self, method_name: &str, descriptor: &str) -> Option<&MethodInfo>{
-        self.methods.iter().find(|m|  m.name == method_name && (m.descriptor.matches(descriptor) || self.has_method_polymorphic_signature(m)))
-    }
-
-    //https://docs.oracle.com/javase/specs/jvms/se8/html/jvms-2.html#jvms-2.9
-    pub fn has_method_polymorphic_signature(&self, info: &MethodInfo) -> bool {
-        info.flags & method_flags::NATIVE > 0 && info.flags & method_flags::VARARGS > 0 &&
-            info.descriptor.matches("([Ljava/lang/Object;)Ljava/lang/Object;") &&
-            self.name == "java/lang/invoke/MethodHandle"
+        self.methods.iter().find(|m|  m.name == method_name && (m.descriptor.matches(descriptor) || m.is_sig_poly))
     }
 
     pub fn resolve_method_virtual(&'a self, method_name: &str, descriptor: &str) -> Option<ClassAndMethod<'a>> {

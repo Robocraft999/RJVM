@@ -1,28 +1,29 @@
+use crate::access_flags::{class_flags, method_flags};
 use crate::class_file::attributes::ClassFileAttributes;
 use crate::class_file::constant_pool::ConstantPoolEntry;
 use crate::class_file::fields::attributes::FieldInfoAttributes;
-use crate::class_file::fields::field_type::{extract_component_type_from_array_class, FieldType};
-use crate::class_file::fields::{primitive_to_wrapper_name, FieldInfo};
+use crate::class_file::fields::field_type::{FieldType, extract_component_type_from_array_class};
+use crate::class_file::fields::{FieldInfo, primitive_to_wrapper_name};
 use crate::class_file::methods::attributes::{CodeAttributes, MethodInfoAttributes};
 use crate::class_file::methods::descriptor::MethodDescriptor;
-use crate::class_file::methods::{MethodInfo, GARBAGE_VTABLE_INDEX};
+use crate::class_file::methods::{GARBAGE_VTABLE_INDEX, MethodInfo};
 use crate::class_file::nom::parse_class_file;
 use crate::error::ClassParseError;
 use crate::vm::application::thread;
 use crate::vm::class::method_tables::{ITable, VTable};
 use crate::vm::class::{ArrayInfo, Class, ClassId, ClassRef};
 use crate::vm::class_path::ClassPath;
+use crate::vm::constants::classes::{JAVA_LANG_INVOKE_METHOD_HANDLE, JAVA_LANG_OBJECT};
 use crate::vm::java_thread::JavaThread;
 use crate::vm::result::{VMResult, VMResultType};
 use crate::vm::value::{RefId, Reference, Value};
-use crate::vm::{bytecode, Context, VmError, VM};
+use crate::vm::{Context, VM, VmError, bytecode};
 use log::{info, warn};
 use parking_lot::{Mutex, RwLock};
 use std::cmp::PartialEq;
 use std::collections::HashMap;
 use std::str::FromStr;
 use typed_arena::Arena;
-use crate::access_flags::{class_flags, method_flags};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ClassLoadingState{
@@ -63,7 +64,7 @@ impl<'a> ClassManager<'a>{
         }
     }
 
-    pub fn get_or_resolve_class(&self, ctx: &Context<'a, '_>, class_name: &str) -> Result<ClassRef<'a>, VmError>{
+    pub fn get_or_resolve_class(&self, ctx: &Context<'a, '_>, class_name: &str) -> VMResult<ClassRef<'a>>{
         if let Some(loaded_class) = self.find_class_by_name(class_name){
             Ok(loaded_class)
         } else {
@@ -81,21 +82,24 @@ impl<'a> ClassManager<'a>{
         }
     }
 
-    fn resolve_class(&self, ctx: &Context<'a, '_>, class_name: &str) -> Result<ClassRef<'a>, VmError>{
-        let (class_to_load_name, array_info) = self.try_create_array_class(class_name)?;
-        let bytes = self.class_path.resolve(class_to_load_name.as_str())?.ok_or(ClassParseError::ClassResolveError(class_name.to_owned()))?;
-        self.parse_and_load_class(ctx, class_name, class_to_load_name.as_str(), array_info, bytes)
+    fn resolve_class(&self, ctx: &Context<'a, '_>, class_name: &str) -> VMResult<ClassRef<'a>>{
+        if let Some(array_info) = self.try_create_array_class(class_name) {
+            let class = self.define_array_class(ctx, class_name, array_info)?;
+            Ok(self.load_class(class))
+        } else {
+            let bytes = self.class_path.resolve(class_name)?.ok_or(ClassParseError::ClassResolveError(class_name.to_owned()))?;
+            self.define_and_load_class(ctx, class_name, bytes)
+        }
     }
 
-    pub fn parse_and_load_class(&self, ctx: &Context<'a, '_>, class_name: &str, class_to_load_name: &str, array_info: Option<ArrayInfo>, bytes: Vec<u8>) -> VMResult<ClassRef<'a>>{
-        let class = self.define_class(ctx, Some(class_name), array_info, bytes)?;
+    pub fn define_and_load_class(&self, ctx: &Context<'a, '_>, class_name: &str, bytes: Vec<u8>) -> VMResult<ClassRef<'a>>{
+        let class = self.define_class(ctx, Some(class_name), bytes)?;
+        Ok(self.load_class(class))
+    }
 
-        if class.array_info.is_some(){
-            let _ = self.get_or_resolve_class(ctx, class_to_load_name)?;
-        }
-
+    fn load_class(&self, class: Class<'a>) -> ClassRef<'a> {
         // alloc + register
-        let class_ref = { 
+        let class_ref = {
             let guard = self.classes.lock();
             let class_ref = guard.alloc(class);
             unsafe {
@@ -109,14 +113,14 @@ impl<'a> ClassManager<'a>{
             &*class_ptr
         };
 
-        self.classes_by_name.write().insert(class_name.to_owned(), class_ref);
+        self.classes_by_name.write().insert(class_ref.name.clone(), class_ref);
         self.classes_by_id.write().insert(class_ref.id, class_ref);
         self.class_loading_states.write().insert(class_ref.id, ClassLoadingState::LOADED);
 
-        Ok(class_ref)
+        class_ref
     }
 
-    pub fn define_class(&self, ctx: &Context<'a, '_>, class_name: Option<&str>, array_info: Option<ArrayInfo>, bytes: Vec<u8>) -> VMResult<Class<'a>>{
+    pub fn define_class(&self, ctx: &Context<'a, '_>, class_name: Option<&str>, bytes: Vec<u8>) -> VMResult<Class<'a>>{
         let parsed_class = parse_class_file(bytes.clone())?;
         let next_id = *self.next_id.read();
         *self.next_id.write() += 1;
@@ -161,7 +165,7 @@ impl<'a> ClassManager<'a>{
             first_method_index: 0,
             class_loader: ctx.thread.call_stack.get_context_class_loader(),
             attributes: ClassFileAttributes::default(),
-            array_info,
+            array_info: None,
         };
 
         // resolve super and interface classes
@@ -228,6 +232,7 @@ impl<'a> ClassManager<'a>{
         };
         let mut default_method_indices = Vec::new();
         let is_interface = class.is_interface();
+        let is_method_handle_clazz = class.name == JAVA_LANG_INVOKE_METHOD_HANDLE;
         class.methods = parsed_class.methods.iter()
             .enumerate()
             .map(|(i, raw_method)| (i, raw_method, class.get_or_resolve_constant(ctx, raw_method.name_index), class.get_or_resolve_constant(ctx, raw_method.descriptor_index)))
@@ -248,6 +253,11 @@ impl<'a> ClassManager<'a>{
                         }
                         code.attributes = code_attributes;
                     }
+                    // https://docs.oracle.com/javase/specs/jvms/se8/html/jvms-2.html#jvms-2.9
+                    let is_sig_poly = is_method_handle_clazz &&
+                        descriptor == "([Ljava/lang/Object;)Ljava/lang/Object;" &&
+                        raw_field.access_flags & method_flags::NATIVE > 0 &&
+                        raw_field.access_flags & method_flags::VARARGS > 0;
                     let descriptor = MethodDescriptor::new(descriptor);
                     let ir_code = method_attributes.code.clone().map(|c| bytecode::as_ir_code(&c));
                     // is interface default method
@@ -262,6 +272,7 @@ impl<'a> ClassManager<'a>{
                         attributes: method_attributes,
                         holder_id: class.id,
                         is_holder_interface: class.is_interface(),
+                        is_sig_poly,
                         ir_code,
                         flags: raw_field.access_flags,
                     })
@@ -283,6 +294,48 @@ impl<'a> ClassManager<'a>{
         };
 
         thread().debug_helper.bytecode_helper.push_class(class_ref, bytes);
+
+        Ok(class)
+    }
+
+    pub fn define_array_class(&self, ctx: &Context<'a, '_>, class_name: &str, array_info: ArrayInfo) -> VMResult<Class<'a>> {
+        let next_id = *self.next_id.read();
+        *self.next_id.write() += 1;
+
+        let obj_clazz = self.get_or_resolve_class(ctx, JAVA_LANG_OBJECT)?;
+        let (component_clazz, access) = if array_info.component_type.is_primitive() {
+            let prim_id = self.get_primitive_class(ctx, array_info.component_type.to_class_name().as_str());
+            let component_clazz = self.find_class_by_id(prim_id).unwrap();
+            (component_clazz, class_flags::PUBLIC)
+        } else {
+            let component_clazz = self.get_or_resolve_class(ctx, array_info.component_type.to_class_name().as_str()).unwrap();
+            (component_clazz, component_clazz.flags & class_flags::PUBLIC)
+        };
+
+        let mut class = Class {
+            id: ClassId(next_id),
+            name: class_name.to_owned(),
+            constants: Default::default(),
+            flags: access,
+            superclass: Some(obj_clazz),
+            this_index: 0,
+            interfaces: vec![],
+            fields: vec![],
+            methods: vec![],
+            default_methods: vec![],
+            vtable: VTable::new(),
+            itable: ITable::new(),
+            transitive_field_count: obj_clazz.transitive_field_count,
+            transitive_method_count: obj_clazz.transitive_method_count,
+            first_field_index: obj_clazz.transitive_field_count,
+            first_method_index: obj_clazz.transitive_method_count,
+            class_loader: component_clazz.class_loader,
+            array_info: Some(array_info),
+            attributes: Default::default(),
+        };
+
+        class.vtable = VTable::initialize(&mut class);
+        class.itable = ITable::initialize(&mut class);
 
         Ok(class)
     }
@@ -366,22 +419,15 @@ impl<'a> ClassManager<'a>{
         guard.insert(clazz.id, new_state);
     }
 
-    fn try_create_array_class(&self, class_name: &str) -> VMResult<(String, Option<ArrayInfo>)>{
+    fn try_create_array_class(&self, class_name: &str) -> Option<ArrayInfo>{
         if let Ok((component_type, dims)) = extract_component_type_from_array_class(class_name){
-            let new_class_name = if component_type.is_primitive() {
-                // 私はこれがすきじゃないです
-                primitive_to_wrapper_name(component_type.to_class_name().as_str())
-            } else {
-                component_type.to_class_name()
-            };
-            info!("{}", new_class_name);
             let array_info = ArrayInfo{
                 dims,
                 component_type,
             };
-            Ok((new_class_name, Some(array_info)))
+            Some(array_info)
         } else {
-            Ok((class_name.to_owned(), None))
+            None
         }
     }
 

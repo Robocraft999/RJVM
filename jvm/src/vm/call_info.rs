@@ -1,4 +1,4 @@
-use crate::class_file::methods::{MethodInfo, INVALID_VTABLE_INDEX, NONVIRTUAL_VTABLE_INDEX};
+use crate::class_file::methods::{INVALID_VTABLE_INDEX, MethodInfo, NONVIRTUAL_VTABLE_INDEX};
 use crate::vm::class::ClassRef;
 use std::fmt::{Debug, Formatter};
 
@@ -200,15 +200,21 @@ LinkResolver::resolve_virtual_call(CallInfo& result, Handle recv, KlassHandle re
 pub fn resolve_interface_call<'a>(receiver_class: ClassRef<'a>, resolved_class: ClassRef<'a>, resolved_method: &'a MethodInfo) -> Option<CallInfo<'a>> {
     assert!(resolved_class.is_interface() && !resolved_method.is_private());
 
-    assert!(resolved_method.has_itable_index());
-    let vtable_index = resolved_method.itable_index();
-    assert!(vtable_index >= 0);
-    let selected_method = receiver_class.get_itable_entry(&resolved_class.id, vtable_index as usize)?;
-    // FIXME selected method should be actual receiver
-    if !selected_method.has_itable_index() {
+    if !resolved_method.has_itable_index() {
+        let vtable_index = resolved_method.vtable_index();
+        let selected_method = receiver_class.get_vtable_entry(vtable_index as usize)?;
+        assert_eq!(vtable_index, selected_method.vtable_index);
         Some(CallInfo::new_virtual(resolved_class, receiver_class, resolved_method, selected_method, vtable_index))
     } else {
-        Some(CallInfo::new_interface(resolved_class, resolved_class, resolved_method, selected_method, vtable_index))
+        let vtable_index = resolved_method.itable_index();
+        let selected_method = receiver_class.get_itable_entry(&resolved_class.id, vtable_index as usize)?;
+
+        // FIXME selected method should be actual receiver
+        if !selected_method.has_itable_index() {
+            Some(CallInfo::new_virtual(resolved_class, receiver_class, resolved_method, selected_method, vtable_index))
+        } else {
+            Some(CallInfo::new_interface(resolved_class, resolved_class, resolved_method, selected_method, vtable_index))
+        }
     }
 }
 

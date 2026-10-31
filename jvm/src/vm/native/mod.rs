@@ -142,7 +142,7 @@ impl <'a> NativeMethodRegistry<'a> {
                 let needed_arg_count = cam.method.descriptor.args.len();
                 let provided_arg_count = args.iter().filter(|v| v != &&Value::Dummy).count();
                 info!("METHOD_NAME (custom native): {}", cam.format());
-                if needed_arg_count == provided_arg_count || cam.class.has_method_polymorphic_signature(cam.method){
+                if needed_arg_count == provided_arg_count || cam.method.is_sig_poly{
                     return Some((method.delegate)(ctx, object, args))
                 }
                 return Some(invalidation!("expected {} args but got: {}:{:?}", needed_arg_count, provided_arg_count, args))

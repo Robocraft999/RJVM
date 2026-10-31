@@ -1,4 +1,5 @@
 use crate::class_file::constant_pool::{BytecodeBehavior, ConstantPool, ConstantPoolEntry};
+use crate::class_file::methods::MethodInfo;
 use crate::class_file::methods::descriptor::MethodDescriptor;
 use crate::error::ClassParseError;
 use crate::vm::class::class_and_member::{ClassAndField, ClassAndMethod};
@@ -17,6 +18,7 @@ impl <'a> Class<'a>{
             ConstantPoolEntry::MethodRef(..) |
             ConstantPoolEntry::MethodRefSigPoly(..) |
             ConstantPoolEntry::InterfaceMethodRef(..) |
+            ConstantPoolEntry::ResolvedMethodRef(..) |
             ConstantPoolEntry::String(..) |
             ConstantPoolEntry::Integer(..) |
             ConstantPoolEntry::Float(..) |
@@ -47,12 +49,12 @@ impl <'a> Class<'a>{
                 self.constants.write()[index as usize - 1] = ConstantPoolEntry::FieldRef(caf);
             }
             ConstantPoolEntry::RawMethodRef(class_index, name_and_type_index) => {
-                let entry = resolve_method_ref(ctx, self.constants.read().deref(), class_index, name_and_type_index).unwrap();
-                self.constants.write()[index as usize - 1] = entry;
+                let resolved = resolve_method_ref(ctx, self.constants.read().deref(), class_index, name_and_type_index).unwrap();
+                self.constants.write()[index as usize - 1] = ConstantPoolEntry::ResolvedMethodRef(resolved);
             }
             ConstantPoolEntry::RawInterfaceMethodRef(class_index, name_and_type_index) => {
-                let entry = resolve_interface_method_ref(&ctx, self.constants.read().deref(), class_index, name_and_type_index).unwrap();
-                self.constants.write()[index as usize - 1] = entry;
+                let resolved = resolve_interface_method_ref(&ctx, self.constants.read().deref(), class_index, name_and_type_index).unwrap();
+                self.constants.write()[index as usize - 1] = ConstantPoolEntry::ResolvedMethodRef(resolved);
             }
             ConstantPoolEntry::RawMethodHandle(kind, ref_index) => {
                 let kind = BytecodeBehavior::from_repr(kind)?;
@@ -159,7 +161,7 @@ fn resolve_class_and_method<'a>(ctx: &Context<'a, '_>, constant_pool: &ConstantP
     })
 }
 
-fn resolve_method_ref<'a>(ctx: &Context<'a, '_>, constant_pool: &ConstantPool<'a>, class_index: u16, name_and_type_index: u16) -> Option<ConstantPoolEntry<'a>> {
+fn resolve_method_ref<'a>(ctx: &Context<'a, '_>, constant_pool: &ConstantPool<'a>, class_index: u16, name_and_type_index: u16) -> Option<ResolvedMethod<'a>> {
     let (clazz, method_name, method_descriptor) = resolve_class_and_name_and_type(ctx, constant_pool, class_index, name_and_type_index)?;
     // 1
     if clazz.is_interface() {
@@ -170,12 +172,13 @@ fn resolve_method_ref<'a>(ctx: &Context<'a, '_>, constant_pool: &ConstantPool<'a
     let mut current_class = clazz;
     loop {
         if let Some(m) = current_class.find_method(method_name.as_str(), method_descriptor.as_str()) {
-            let cam = ClassAndMethod{ class: current_class, method: m };
-            return if current_class.has_method_polymorphic_signature(m) {
-                Some(ConstantPoolEntry::MethodRefSigPoly(cam, MethodDescriptor::new(method_descriptor)))
-            } else {
-                Some(ConstantPoolEntry::MethodRef(cam))
-            }
+            return Some(ResolvedMethod {
+                resolved_clazz: current_class,
+                resolved_name: method_name,
+                resolved_descriptor: MethodDescriptor::new(method_descriptor),
+                selected_method: m,
+                is_sigpoly: m.is_sig_poly,
+            })
         }
         match &current_class.superclass {
             Some(super_class) => current_class = super_class,
@@ -186,21 +189,33 @@ fn resolve_method_ref<'a>(ctx: &Context<'a, '_>, constant_pool: &ConstantPool<'a
     let mut interface_queue = VecDeque::from(clazz.transitive_interfaces());
     while let Some(super_interface) = interface_queue.pop_front() {
         if let Some(m) = super_interface.find_method(method_name.as_str(), method_descriptor.as_str()) && !m.is_abstract() {
-            return Some(ConstantPoolEntry::MethodRef(ClassAndMethod{ class: super_interface, method: m }));
+            return Some(ResolvedMethod {
+                resolved_clazz: super_interface,
+                resolved_name: method_name,
+                resolved_descriptor: MethodDescriptor::new(method_descriptor),
+                selected_method: m,
+                is_sigpoly: false,
+            })
         }
     }
     // 3.2
     interface_queue = VecDeque::from(clazz.transitive_interfaces());
     while let Some(super_interface) = interface_queue.pop_front() {
         if let Some(m) = super_interface.find_method(method_name.as_str(), method_descriptor.as_str()) && !m.is_private() && !m.is_static() {
-            return Some(ConstantPoolEntry::MethodRef(ClassAndMethod{ class: super_interface, method: m }));
+            return Some(ResolvedMethod {
+                resolved_clazz: super_interface,
+                resolved_name: method_name,
+                resolved_descriptor: MethodDescriptor::new(method_descriptor),
+                selected_method: m,
+                is_sigpoly: false,
+            })
         }
     }
     // 3.3
     None
 }
 
-fn resolve_interface_method_ref<'a>(ctx: &Context<'a, '_>, constant_pool: &ConstantPool<'a>, class_index: u16, name_and_type_index: u16) -> Option<ConstantPoolEntry<'a>> {
+fn resolve_interface_method_ref<'a>(ctx: &Context<'a, '_>, constant_pool: &ConstantPool<'a>, class_index: u16, name_and_type_index: u16) -> Option<ResolvedMethod<'a>> {
     let (clazz, method_name, method_descriptor) = resolve_class_and_name_and_type(ctx, constant_pool, class_index, name_and_type_index)?;
     // 1
     if !clazz.is_interface() {
@@ -209,8 +224,14 @@ fn resolve_interface_method_ref<'a>(ctx: &Context<'a, '_>, constant_pool: &Const
     }
     // 2
     if let Some(m) = clazz.find_method(method_name.as_str(), method_descriptor.as_str()) {
-        let cam = ClassAndMethod{ class: clazz, method: m };
-        return Some(ConstantPoolEntry::InterfaceMethodRef(cam));
+        return Some(ResolvedMethod {
+            resolved_clazz: clazz,
+            resolved_name: method_name,
+            // FIXME could be cloned from 'm'
+            resolved_descriptor: MethodDescriptor::new(method_descriptor),
+            selected_method: m,
+            is_sigpoly: false,
+        })
     }
     // 3
     // FIXME Does this even happen?
@@ -218,18 +239,41 @@ fn resolve_interface_method_ref<'a>(ctx: &Context<'a, '_>, constant_pool: &Const
     let mut interface_queue = VecDeque::from(clazz.transitive_interfaces());
     while let Some(super_interface) = interface_queue.pop_front() {
         if let Some(m) = super_interface.find_method(method_name.as_str(), method_descriptor.as_str()) && !m.is_abstract() {
-            return Some(ConstantPoolEntry::MethodRef(ClassAndMethod{ class: super_interface, method: m }));
+            return Some(ResolvedMethod {
+                resolved_clazz: super_interface,
+                resolved_name: method_name,
+                // see above
+                resolved_descriptor: MethodDescriptor::new(method_descriptor),
+                selected_method: m,
+                is_sigpoly: false,
+            });
         }
     }
     // 5
     interface_queue = VecDeque::from(clazz.transitive_interfaces());
     while let Some(super_interface) = interface_queue.pop_front() {
         if let Some(m) = super_interface.find_method(method_name.as_str(), method_descriptor.as_str()) && !m.is_private() && !m.is_static() {
-            return Some(ConstantPoolEntry::MethodRef(ClassAndMethod{ class: super_interface, method: m }));
+            return Some(ResolvedMethod {
+                resolved_clazz: super_interface,
+                resolved_name: method_name,
+                // see above
+                resolved_descriptor: MethodDescriptor::new(method_descriptor),
+                selected_method: m,
+                is_sigpoly: false,
+            });
         }
     }
     // 6
     None
+}
+
+#[derive(Debug, Clone)]
+pub struct ResolvedMethod<'a> {
+    pub resolved_clazz: ClassRef<'a>,
+    pub resolved_name: String,
+    pub resolved_descriptor: MethodDescriptor,
+    pub selected_method: &'a MethodInfo,
+    pub is_sigpoly: bool,
 }
 
 #[cfg(test)]
