@@ -30,8 +30,11 @@ pub fn execute<'a>(ctx: Context<'a, '_>, class_and_method: ClassAndMethod<'a>) -
     if ctx.vm.class_manager.expect_class_state(class_and_method.class.id, ClassLoadingState::LOADED){
         unreachable!("Class {} has to be initialized to call {} upon", class_and_method.class.name, class_and_method.format());
     }
-    info!("");
-    info!("METHOD_NAME: {} at {}", class_and_method.format(), ctx.thread.call_stack.get_pc().0);
+    if ctx.thread.meta.id == 0 {
+        info!("");
+        info!("METHOD_NAME: {} at {}", class_and_method.format(), ctx.thread.call_stack.get_pc().0);
+    }
+
     trace!("{:?}", class_and_method.method.ir_code);
     if let Some(_) = &class_and_method.method.attributes.code{
         let mut result = execute_current_block(ctx, &class_and_method);
@@ -1235,7 +1238,7 @@ fn execute_invoke<'a>(ctx: Context<'a, '_>, next_pc: PC, index: u16, kind: Invok
             return Err(VmError::ValidationError(format!("Expected object or array as receiver for {} but found: {:?}", cam.format(), popped)));
         }
     };
-    println!("Y {:?}: ({})", &kind, cam.format());
+    //println!("Y {:?}: ({})", &kind, cam.format());
     let ci = if let Some(rec) = receiver {
         let receiver_class = ctx.vm.find_class_by_id(rec.class_id).unwrap();
         let ci = match &kind {
@@ -1252,7 +1255,7 @@ fn execute_invoke<'a>(ctx: Context<'a, '_>, next_pc: PC, index: u16, kind: Invok
         }.unwrap();
         ci
     };
-    println!("YY {:?}", ci);
+    //println!("YY {:?}", ci);
     let cam = ClassAndMethod { class: ci.selected_class, method: ci.selected_method };
     /*let class_and_method = match kind {
         InvokeKind::VIRTUAL | InvokeKind::INTERFACE => {

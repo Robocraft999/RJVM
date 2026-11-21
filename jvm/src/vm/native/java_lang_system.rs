@@ -1,10 +1,10 @@
+use crate::vm::VmError;
 use crate::vm::constants::classes::JAVA_LANG_SYSTEM;
 use crate::vm::constants::{SYSTEM_err_INDEX, SYSTEM_in_INDEX, SYSTEM_out_INDEX};
 use crate::vm::java_thread::JavaThread;
-use crate::vm::native::{gen_delegate, invalidation, non_failing_none, non_failing_some, wrap_init, NativeMethodRegistry};
+use crate::vm::native::{NativeMethodRegistry, gen_delegate, invalidation, non_failing_none, non_failing_some, wrap_init};
 use crate::vm::result::VMPartialResult;
 use crate::vm::value::{Reference, ReferenceType, Value};
-use crate::vm::VmError;
 use log::trace;
 use std::env;
 use std::hash::{DefaultHasher, Hash, Hasher};
@@ -128,6 +128,7 @@ gen_delegate!(delegate_init_properties, |ctx, _obj_ref, args| {
         ("sun.arch.data.model", "64".to_owned()),
         ("user.dir", env::current_dir().unwrap().to_string_lossy().to_string()),
         ("user.home", env::home_dir().unwrap().to_string_lossy().to_string()),
+        ("java.io.tmpdir", env::temp_dir().to_string_lossy().to_string()),
         ("os.name", "Linux".to_owned()),
         ("os.arch", "x86_64".to_owned()),
         ("java.awt.graphicsenv", "sun.awt.X11GraphicsEnvironment".to_owned()),
