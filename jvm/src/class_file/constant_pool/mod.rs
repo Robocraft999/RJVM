@@ -1,8 +1,9 @@
 use crate::class_file::attributes::BootstrapMethod;
 use crate::class_file::methods::descriptor::MethodDescriptor;
 use crate::class_file::nom::parse_cesu_string;
-use crate::vm::class::class_and_member::{ClassAndField, ClassAndMethod};
 use crate::vm::class::ClassRef;
+use crate::vm::class::class_and_member::{ClassAndField, ClassAndMethod};
+use crate::vm::class::constants::ResolvedMethod;
 use nom::combinator::map;
 use nom::error::Error;
 use nom::number::{be_f32, be_f64, be_i32, be_i64, be_u16, be_u8};
@@ -24,6 +25,7 @@ pub enum ConstantPoolEntry<'a>{
 
     RawInterfaceMethodRef(u16, u16),
     InterfaceMethodRef(ClassAndMethod<'a>),
+    ResolvedMethodRef(ResolvedMethod<'a>),
 
     RawString(u16),
     String(String),

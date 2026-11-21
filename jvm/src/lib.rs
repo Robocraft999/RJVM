@@ -1,6 +1,7 @@
 #![feature(negative_impls)]
 #![feature(c_variadic)]
 #![feature(iterator_try_collect)]
+#![feature(option_reference_flattening)]
 extern crate core;
 
 use log::LevelFilter;

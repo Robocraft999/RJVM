@@ -141,8 +141,10 @@ impl <'a> NativeMethodRegistry<'a> {
             if method.method_name == cam.method.name && method.method_descriptor == cam.method.descriptor && cam.class.name == method.class_name{
                 let needed_arg_count = cam.method.descriptor.args.len();
                 let provided_arg_count = args.iter().filter(|v| v != &&Value::Dummy).count();
-                info!("METHOD_NAME (custom native): {}", cam.format());
-                if needed_arg_count == provided_arg_count || cam.class.has_method_polymorphic_signature(cam.method){
+                if ctx.thread.meta.id == 0 {
+                    info!("METHOD_NAME (custom native): {}", cam.format());
+                }
+                if needed_arg_count == provided_arg_count || cam.method.is_sig_poly{
                     return Some((method.delegate)(ctx, object, args))
                 }
                 return Some(invalidation!("expected {} args but got: {}:{:?}", needed_arg_count, provided_arg_count, args))
@@ -161,7 +163,9 @@ impl <'a> NativeMethodRegistry<'a> {
                     object.unwrap()
                 };
                 debug!(target: "native", "[try_resolve_extern_native]: {} with args: \n{:?}", class_object_or_this.print(ctx.vm), args);
-                info!("METHOD_NAME (extern native): {}", cam.format());
+                if ctx.thread.meta.id == 0 {
+                    info!("METHOD_NAME (extern native): {}", cam.format());
+                }
                 let jni_result = extern_native.call(cam, class_object_or_this, args);
                 let result = if let Some(val) = jni_result{
                     unsafe {

@@ -11,17 +11,17 @@ use crate::vm::constants::classes::{JAVA_LANG_CHAR_ARR_PRIM, JAVA_LANG_CLASS, JA
 use crate::vm::constants::{BOOLEAN_value_INDEX, BYTE_value_INDEX, CHARACTER_value_INDEX, CLASS_classloader_INDEX, CLASS_name_INDEX, DOUBLE_value_INDEX, FLOAT_value_INDEX, INTEGER_value_INDEX, LONG_value_INDEX, METHODTYPE_ptypes_INDEX, METHODTYPE_rtype_INDEX, SHORT_value_INDEX, STRING_hash_INDEX, STRING_value_INDEX};
 use crate::vm::debug::validation::FieldTypeExt;
 use crate::vm::gc::ObjectAllocator;
-use crate::vm::heap::direct::Unsafe;
 use crate::vm::heap::HeapAllocator;
+use crate::vm::heap::direct::Unsafe;
 use crate::vm::java_error::JavaError;
-use crate::vm::java_thread::{JavaThread, ThreadMeta, TID};
+use crate::vm::java_thread::{JavaThread, TID, ThreadMeta};
 use crate::vm::jni::types::{jclass, jobject};
 use crate::vm::monitoring::MonitorHandler;
-use crate::vm::native::{register_all_natives, NativeMethodRegistry};
+use crate::vm::native::{NativeMethodRegistry, register_all_natives};
 use crate::vm::result::{VMPartialResult, VMResult, VMResultType};
 use crate::vm::value::{RefId, Reference, ReferenceType};
 use crate::{get_or_init, get_or_init_special};
-use cesu8::{from_java_cesu8, Cesu8DecodingError};
+use cesu8::{Cesu8DecodingError, from_java_cesu8};
 use class::class_and_member::ClassAndMethod;
 use class_manager::ClassManager;
 use class_path::ClassPath;
@@ -367,7 +367,7 @@ impl<'a> Context<'a, '_> {
         //println!("FIXME: define_class");
         let resolved = match self.vm.find_class_by_name(class_name){
             Some(resolved) => resolved,
-            None => self.vm.class_manager.parse_and_load_class(self, class_name, class_name, None, bytes)?
+            None => self.vm.class_manager.define_and_load_class(self, class_name, bytes)?
         };
         self.new_class_object_by_class(resolved)
     }
@@ -639,7 +639,7 @@ impl<'a> Context<'a, '_> {
             }
             offset = 1;
         }
-        if !class_and_method.class.has_method_polymorphic_signature(class_and_method.method) {
+        if !class_and_method.method.is_sig_poly {
             #[cfg(feature = "validation")]
             {
                 let provided_args_count = args.iter().filter(|a| !matches!(a, Value::Dummy)).count();

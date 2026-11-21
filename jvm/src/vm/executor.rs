@@ -11,8 +11,8 @@ use crate::vm::debug::validation::FieldTypeExt;
 use crate::vm::java_thread::JavaThread;
 use crate::vm::monitoring::MonitorAssociate;
 use crate::vm::result::{VMPartialResult, VMResultType};
-use crate::vm::Context;
-use crate::{bytecode::Instruction, get_or_init, get_or_init_option, vm::{bytecode::IrInstruction, class::ClassRef, java_error::JavaError, result::VMResult, value::{ReferenceType, Value}, VmError, VM}};
+use crate::vm::{Context, call_info};
+use crate::{bytecode::Instruction, get_or_init, get_or_init_option, vm::{VM, VmError, bytecode::IrInstruction, class::ClassRef, java_error::JavaError, result::VMResult, value::{ReferenceType, Value}}};
 use log::{debug, error, info, trace, warn};
 use parking_lot::RwLock;
 use std::str::FromStr;
@@ -30,8 +30,11 @@ pub fn execute<'a>(ctx: Context<'a, '_>, class_and_method: ClassAndMethod<'a>) -
     if ctx.vm.class_manager.expect_class_state(class_and_method.class.id, ClassLoadingState::LOADED){
         unreachable!("Class {} has to be initialized to call {} upon", class_and_method.class.name, class_and_method.format());
     }
-    info!("");
-    info!("METHOD_NAME: {} at {}", class_and_method.format(), ctx.thread.call_stack.get_pc().0);
+    if ctx.thread.meta.id == 0 {
+        info!("");
+        info!("METHOD_NAME: {} at {}", class_and_method.format(), ctx.thread.call_stack.get_pc().0);
+    }
+
     trace!("{:?}", class_and_method.method.ir_code);
     if let Some(_) = &class_and_method.method.attributes.code{
         let mut result = execute_current_block(ctx, &class_and_method);
@@ -1199,6 +1202,7 @@ fn execute_invoke<'a>(ctx: Context<'a, '_>, next_pc: PC, index: u16, kind: Invok
     let calling_class_and_method = cam;
 
     let (cam, args_count) = get_constant_method_ref_and_args_count(calling_class_and_method, &ctx, index).expect("GIB MICH DIE METHODE");
+
     trace!("loading class to execute on: '{}'", cam.class.name.as_str());
     get_or_init!(ctx.ensure_initialized(cam.class)?);
     if ctx.vm.class_manager.expect_class_state(cam.class.id, ClassLoadingState::LOADED) {
@@ -1222,18 +1226,7 @@ fn execute_invoke<'a>(ctx: Context<'a, '_>, next_pc: PC, index: u16, kind: Invok
         return Err(VmError::ValidationError(format!("[Validation]: kind is: {:?} but method is_static? {}", kind, cam.method.is_static())));
     }
 
-    let class_and_method = match kind {
-        InvokeKind::SPECIAL | InvokeKind::STATIC => {
-            cam.class
-                .find_method(cam.method.name.as_str(), cam.method.descriptor.as_str())
-                .map(|method| ClassAndMethod {class: cam.class, method})
-                .unwrap_or(get_method_virtual(cam.class, cam.method.name.as_str(), cam.method.descriptor.as_str())?)
-        }
-        InvokeKind::VIRTUAL | InvokeKind::INTERFACE => {
-            get_method_virtual(cam.class, cam.method.name.as_str(), cam.method.descriptor.as_str())?
-        }
-    };
-    let receiver = if class_and_method.method.is_static(){
+    let receiver = if cam.method.is_static(){
         None
     } else {
         let popped = ctx.thread.call_stack.pop_operand_value();
@@ -1241,11 +1234,30 @@ fn execute_invoke<'a>(ctx: Context<'a, '_>, next_pc: PC, index: u16, kind: Invok
             let reference = ctx.vm.resolve_object_by_id(ref_id)?;
             Some(reference)
         } else {
-            println!("XXXX: {} {:?}", class_and_method.class.name, ctx.vm.class_manager.class_loading_states.read().get(&class_and_method.class.id));
-            return Err(VmError::ValidationError(format!("Expected object or array as receiver for {} but found: {:?}", class_and_method.format(), popped)));
+            println!("XXXX: {} {:?}", cam.class.name, ctx.vm.class_manager.class_loading_states.read().get(&cam.class.id));
+            return Err(VmError::ValidationError(format!("Expected object or array as receiver for {} but found: {:?}", cam.format(), popped)));
         }
     };
-    let class_and_method = match kind {
+    //println!("Y {:?}: ({})", &kind, cam.format());
+    let ci = if let Some(rec) = receiver {
+        let receiver_class = ctx.vm.find_class_by_id(rec.class_id).unwrap();
+        let ci = match &kind {
+            InvokeKind::VIRTUAL => call_info::resolve_virtual_call2(receiver_class, cam.class, cam.method),
+            InvokeKind::SPECIAL => Some(call_info::resolve_special_call(cam.class, cam.method.name.as_str(), cam.method.descriptor.as_str())),
+            InvokeKind::INTERFACE => call_info::resolve_interface_call(receiver_class, cam.class, cam.method),
+            _ => None,
+        }.unwrap();
+        ci
+    } else {
+        let ci = match &kind {
+            InvokeKind::STATIC => call_info::resolve_static_call(cam.class, cam.method),
+            _ => None,
+        }.unwrap();
+        ci
+    };
+    //println!("YY {:?}", ci);
+    let cam = ClassAndMethod { class: ci.selected_class, method: ci.selected_method };
+    /*let class_and_method = match kind {
         InvokeKind::VIRTUAL | InvokeKind::INTERFACE => {
             match receiver {
                 Some(obj) => {
@@ -1272,9 +1284,9 @@ fn execute_invoke<'a>(ctx: Context<'a, '_>, next_pc: PC, index: u16, kind: Invok
             }
         }
         _ => class_and_method
-    };
+    };*/
 
-    trace!("STATUS of '{}' before invoke: ", class_and_method.method.name);
+    trace!("STATUS of '{}' before invoke: ", cam.method.name);
     trace!("stack=");
     for (index, value) in ctx.thread.call_stack.operand_stacks.borrow().last().unwrap().iter().enumerate(){
         trace!("    [{}] {:?}", index, value);
@@ -1287,16 +1299,16 @@ fn execute_invoke<'a>(ctx: Context<'a, '_>, next_pc: PC, index: u16, kind: Invok
     #[cfg(feature = "debug")]
     {
         if let Some(rec) = receiver{
-            ctx.thread.debug_helper.tracker.push_object_event(rec.id, format!("Preparing call {} with args:{}", class_and_method.format(), args.iter().map(|v| format!("\n    {}", v.print(ctx.vm))).collect::<Vec<_>>().join("")));
-            ctx.thread.debug_helper.tracker.push_method_event(class_and_method.format(), format!("Calling on {} from {} with args: {}", rec.print(ctx.vm), calling_class_and_method.format(), args.iter().map(|v| format!("\n    {}", v.print(ctx.vm))).collect::<Vec<_>>().join("") ));
+            ctx.thread.debug_helper.tracker.push_object_event(rec.id, format!("Preparing call {} with args:{}", cam.format(), args.iter().map(|v| format!("\n    {}", v.print(ctx.vm))).collect::<Vec<_>>().join("")));
+            ctx.thread.debug_helper.tracker.push_method_event(cam.format(), format!("Calling on {} from {} with args: {}", rec.print(ctx.vm), calling_class_and_method.format(), args.iter().map(|v| format!("\n    {}", v.print(ctx.vm))).collect::<Vec<_>>().join("") ));
         } else {
-            ctx.thread.debug_helper.tracker.push_method_event(class_and_method.format(), format!("Calling static from {} with args: {}", calling_class_and_method.format(), args.iter().map(|v| format!("\n    {}", v.print(ctx.vm))).collect::<Vec<_>>().join("") ));
+            ctx.thread.debug_helper.tracker.push_method_event(cam.format(), format!("Calling static from {} with args: {}", calling_class_and_method.format(), args.iter().map(|v| format!("\n    {}", v.print(ctx.vm))).collect::<Vec<_>>().join("") ));
         }
     }
-    if !class_and_method.class.has_method_polymorphic_signature(class_and_method.method) {
+    if !cam.method.is_sig_poly {
         for (i, provided_arg) in args.iter().filter(|a| if let Value::Dummy = a {false} else {true}).enumerate(){
-            if !(&class_and_method.method.descriptor.args[i] == provided_arg){
-                return Err(VmError::ValidationError(format!("Expected arg type: {:?} but got value: {:?}", class_and_method.method.descriptor.args[i], provided_arg)));
+            if !(&cam.method.descriptor.args[i] == provided_arg){
+                return Err(VmError::ValidationError(format!("Expected arg type: {:?} but got value: {:?}", cam.method.descriptor.args[i], provided_arg)));
             }
         }
     }
@@ -1304,7 +1316,7 @@ fn execute_invoke<'a>(ctx: Context<'a, '_>, next_pc: PC, index: u16, kind: Invok
     // Explicitly increase the pc here because we exit early
     ctx.thread.call_stack.set_pc(next_pc);
 
-    ctx.create_and_push_call_frame(class_and_method, receiver, args, true);
+    ctx.create_and_push_call_frame(cam, receiver, args, true);
     Ok(VMResultType::Interrupted(1))
 }
 
@@ -1365,11 +1377,16 @@ fn get_method_interface_virtual<'a>(class: ClassRef<'a>, method_name: &str, desc
 
 fn get_constant_method_ref_and_args_count<'a>(calling: &ClassAndMethod<'a>, ctx: &Context<'a, '_>, index: u16) -> Option<(ClassAndMethod<'a>, usize)> {
     match calling.class.get_or_resolve_constant(ctx, index) {
+        Some(ConstantPoolEntry::ResolvedMethodRef(resolved)) => {
+            Some((ClassAndMethod { class: resolved.resolved_clazz, method: resolved.selected_method }, resolved.resolved_descriptor.args.len()))
+        }
         Some(ConstantPoolEntry::MethodRef(cam)) | Some(ConstantPoolEntry::InterfaceMethodRef(cam)) => {
+            unreachable!("deprecated");
             let args_count = cam.method.descriptor.args.len();
             Some((cam, args_count))
         }
         Some(ConstantPoolEntry::MethodRefSigPoly(cam, desc)) => {
+            unreachable!("deprecated");
             Some((cam, desc.args.len()))
         }
         _ => None
