@@ -6,7 +6,7 @@ pub struct ExceptionHelper{
 }
 
 impl ExceptionHelper{
-    pub fn new() -> Self{
+    pub const fn new() -> Self{
         Self{
             history: RefCell::new(Vec::new())
         }

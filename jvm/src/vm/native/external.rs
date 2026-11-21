@@ -2,7 +2,7 @@ use crate::class_file::fields::field_type::{FieldType, PrimitiveType};
 use crate::class_file::methods::descriptor::MethodDescriptor;
 use crate::vm::application::thread;
 use crate::vm::class::class_and_member::ClassAndMethod;
-use crate::vm::jni::types::{jboolean, jbyte, jchar, jdouble, jfloat, jint, jlong, jobject, jshort, jvalue, JNIEnv};
+use crate::vm::jni::types::{JNIEnv, jboolean, jbyte, jchar, jdouble, jfloat, jint, jlong, jobject, jshort, jvalue};
 use crate::vm::value::{Reference, Value};
 use libffi::high::CodePtr;
 use libffi::middle::{Arg, Cif, Type};
@@ -35,18 +35,14 @@ fn descriptor_to_cif(method_descriptor: &MethodDescriptor) -> Cif {
         .into_iter()
         .chain(method_descriptor.args.iter().map(field_type_to_native))
         .collect();
-    let return_type = if let Some(ft) = &method_descriptor.return_type{
-        field_type_to_native(ft)
-    } else {
-        Type::void()
-    };
+    let return_type = method_descriptor.return_type.as_ref().map_or_else(Type::void, field_type_to_native);
     Cif::new(args, return_type)
 }
 
 const NULL: *const c_void = std::ptr::null();
 
-fn values_to_jni_args<'a>(args: &'a Vec<Value>) -> Vec<Arg<'a>> {
-    args.iter().filter(|v| if let Value::Dummy = v {false} else {true}).map(|arg| {
+fn values_to_jni_args(args: &[Value]) -> Vec<Arg<'_>> {
+    args.iter().filter(|v| !matches!(v, Value::Dummy)).map(|arg| {
         match arg{
             Value::Reference(reference) => if reference.is_null() {
                 Arg::new(&NULL)

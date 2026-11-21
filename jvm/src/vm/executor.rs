@@ -5,16 +5,15 @@ use crate::class_file::methods::code::PC;
 use crate::class_file::methods::descriptor::MethodDescriptor;
 use crate::vm::class::class_and_member::ClassAndMethod;
 use crate::vm::class_manager::ClassLoadingState;
-use crate::vm::constants::classes::{JAVA_LANG_ARITHMETIC_EXCEPTION, JAVA_LANG_OBJECT};
+use crate::vm::constants::classes::JAVA_LANG_ARITHMETIC_EXCEPTION;
 use crate::vm::constants::{MEMBERNAME_clazz_INDEX, MEMBERNAME_name_INDEX, MEMBERNAME_type_INDEX, THROWABLE_detailsMessage_INDEX};
 use crate::vm::debug::validation::FieldTypeExt;
 use crate::vm::java_thread::JavaThread;
 use crate::vm::monitoring::MonitorAssociate;
 use crate::vm::result::{VMPartialResult, VMResultType};
 use crate::vm::{Context, call_info};
-use crate::{bytecode::Instruction, get_or_init, get_or_init_option, vm::{VM, VmError, bytecode::IrInstruction, class::ClassRef, java_error::JavaError, result::VMResult, value::{ReferenceType, Value}}};
-use log::{debug, error, info, trace, warn};
-use parking_lot::RwLock;
+use crate::{bytecode::Instruction, get_or_init, get_or_init_option, vm::{VmError, bytecode::IrInstruction, class::ClassRef, java_error::JavaError, result::VMResult, value::Value}};
+use log::{debug, info, trace, warn};
 use std::str::FromStr;
 
 macro_rules! wrap_error {
@@ -36,9 +35,9 @@ pub fn execute<'a>(ctx: Context<'a, '_>, class_and_method: ClassAndMethod<'a>) -
     }
 
     trace!("{:?}", class_and_method.method.ir_code);
-    if let Some(_) = &class_and_method.method.attributes.code{
+    if class_and_method.method.attributes.code.is_some(){
         let mut result = execute_current_block(ctx, &class_and_method);
-        while let None = result{
+        while result.is_none(){
             result = execute_current_block(ctx, &class_and_method);
         }
         return result.unwrap();
@@ -127,10 +126,8 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>, class_and_method: &ClassA
                     debug!("POP2");
                     let popped1 = ctx.thread.call_stack.pop_operand_value();
                     if let Some(val) = popped1{
-                        if val.get_computational_type() == 1{
-                            if ctx.thread.call_stack.pop_operand_value().is_none(){
-                                return Some(Err(VmError::ValidationError("Expected a second value to pop but Stack was empty".to_owned())));
-                            }
+                        if val.get_computational_type() == 1 && ctx.thread.call_stack.pop_operand_value().is_none(){
+                            return Some(Err(VmError::ValidationError("Expected a second value to pop but Stack was empty".to_owned())));
                         }
                     } else {
                         return Some(Err(VmError::ValidationError("Expected a value to pop but Stack was empty".to_owned())));
@@ -139,14 +136,14 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>, class_and_method: &ClassA
                 Instruction::DUP => {
                     debug!("DUP");
                     let top = ctx.thread.call_stack.pop_operand_value().unwrap();
-                    ctx.thread.call_stack.push_operand_value(top.clone());
+                    ctx.thread.call_stack.push_operand_value(top);
                     ctx.thread.call_stack.push_operand_value(top);
                 }
                 Instruction::DUPX1 => {
                     debug!("DUPX1");
                     let value = ctx.thread.call_stack.pop_operand_value().unwrap();
                     let value2 = ctx.thread.call_stack.pop_operand_value().unwrap();
-                    ctx.thread.call_stack.push_operand_value(value.clone());
+                    ctx.thread.call_stack.push_operand_value(value);
                     ctx.thread.call_stack.push_operand_value(value2);
                     ctx.thread.call_stack.push_operand_value(value);
                 }
@@ -156,12 +153,12 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>, class_and_method: &ClassA
                     let value2 = ctx.thread.call_stack.pop_operand_value().unwrap();
                     if value2.get_computational_type() == 1{
                         let value3 = ctx.thread.call_stack.pop_operand_value().unwrap();
-                        ctx.thread.call_stack.push_operand_value(value1.clone());
+                        ctx.thread.call_stack.push_operand_value(value1);
                         ctx.thread.call_stack.push_operand_value(value3);
                         ctx.thread.call_stack.push_operand_value(value2);
                         ctx.thread.call_stack.push_operand_value(value1);
                     } else {
-                        ctx.thread.call_stack.push_operand_value(value1.clone());
+                        ctx.thread.call_stack.push_operand_value(value1);
                         ctx.thread.call_stack.push_operand_value(value2);
                         ctx.thread.call_stack.push_operand_value(value1);
                     }
@@ -171,12 +168,12 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>, class_and_method: &ClassA
                     let value1 = ctx.thread.call_stack.pop_operand_value().unwrap();
                     if value1.get_computational_type() == 1{
                         let value2 = ctx.thread.call_stack.pop_operand_value().unwrap();
-                        ctx.thread.call_stack.push_operand_value(value2.clone());
-                        ctx.thread.call_stack.push_operand_value(value1.clone());
+                        ctx.thread.call_stack.push_operand_value(value2);
+                        ctx.thread.call_stack.push_operand_value(value1);
                         ctx.thread.call_stack.push_operand_value(value2);
                         ctx.thread.call_stack.push_operand_value(value1);
                     } else {
-                        ctx.thread.call_stack.push_operand_value(value1.clone());
+                        ctx.thread.call_stack.push_operand_value(value1);
                         ctx.thread.call_stack.push_operand_value(value1);
                     }
                 }
@@ -186,14 +183,14 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>, class_and_method: &ClassA
                     if value1.get_computational_type() == 1{
                         let value2 = ctx.thread.call_stack.pop_operand_value().unwrap();
                         let value3 = ctx.thread.call_stack.pop_operand_value().unwrap();
-                        ctx.thread.call_stack.push_operand_value(value2.clone());
-                        ctx.thread.call_stack.push_operand_value(value1.clone());
+                        ctx.thread.call_stack.push_operand_value(value2);
+                        ctx.thread.call_stack.push_operand_value(value1);
                         ctx.thread.call_stack.push_operand_value(value3);
                         ctx.thread.call_stack.push_operand_value(value2);
                         ctx.thread.call_stack.push_operand_value(value1);
                     } else {
                         let value2 = ctx.thread.call_stack.pop_operand_value().unwrap();
-                        ctx.thread.call_stack.push_operand_value(value1.clone());
+                        ctx.thread.call_stack.push_operand_value(value1);
                         ctx.thread.call_stack.push_operand_value(value2);
                         ctx.thread.call_stack.push_operand_value(value1);
                     }
@@ -204,12 +201,12 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>, class_and_method: &ClassA
                     let value2 = ctx.thread.call_stack.pop_operand_value().unwrap();
                     if value1.get_computational_type() == 2{
                         if value2.get_computational_type() == 2{
-                            ctx.thread.call_stack.push_operand_value(value1.clone());
+                            ctx.thread.call_stack.push_operand_value(value1);
                             ctx.thread.call_stack.push_operand_value(value2);
                             ctx.thread.call_stack.push_operand_value(value1);
                         } else {
                             let value3 = ctx.thread.call_stack.pop_operand_value().unwrap();
-                            ctx.thread.call_stack.push_operand_value(value1.clone());
+                            ctx.thread.call_stack.push_operand_value(value1);
                             ctx.thread.call_stack.push_operand_value(value3);
                             ctx.thread.call_stack.push_operand_value(value2);
                             ctx.thread.call_stack.push_operand_value(value1);
@@ -217,15 +214,15 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>, class_and_method: &ClassA
                     } else {
                         let value3 = ctx.thread.call_stack.pop_operand_value().unwrap();
                         if value3.get_computational_type() == 2{
-                            ctx.thread.call_stack.push_operand_value(value2.clone());
-                            ctx.thread.call_stack.push_operand_value(value1.clone());
+                            ctx.thread.call_stack.push_operand_value(value2);
+                            ctx.thread.call_stack.push_operand_value(value1);
                             ctx.thread.call_stack.push_operand_value(value3);
                             ctx.thread.call_stack.push_operand_value(value2);
                             ctx.thread.call_stack.push_operand_value(value1);
                         } else {
                             let value4 = ctx.thread.call_stack.pop_operand_value().unwrap();
-                            ctx.thread.call_stack.push_operand_value(value2.clone());
-                            ctx.thread.call_stack.push_operand_value(value1.clone());
+                            ctx.thread.call_stack.push_operand_value(value2);
+                            ctx.thread.call_stack.push_operand_value(value1);
                             ctx.thread.call_stack.push_operand_value(value4);
                             ctx.thread.call_stack.push_operand_value(value3);
                             ctx.thread.call_stack.push_operand_value(value2);
@@ -525,29 +522,23 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>, class_and_method: &ClassA
                 Instruction::IF_ACMPEQ(target) => {
                     let o1 = ctx.thread.call_stack.pop_operand_value().unwrap();
                     let o2 = ctx.thread.call_stack.pop_operand_value().unwrap();
-                    match (o1, o2) {
-                        (Value::Reference(obj1), Value::Reference(obj2)) => {
-                            debug!("IF_ACMPEQ {:?} == {:?}?", obj1, obj2);
-                            if obj1 == obj2 {
-                                ctx.thread.call_stack.set_pc(*target);
-                                return None;
-                            }
+                    if let (Value::Reference(obj1), Value::Reference(obj2)) = (o1, o2) {
+                        debug!("IF_ACMPEQ {:?} == {:?}?", obj1, obj2);
+                        if obj1 == obj2 {
+                            ctx.thread.call_stack.set_pc(*target);
+                            return None;
                         }
-                        _ => {}
                     };
                 }
                 Instruction::IF_ACMPNE(target) => {
                     let o1 = ctx.thread.call_stack.pop_operand_value().unwrap();
                     let o2 = ctx.thread.call_stack.pop_operand_value().unwrap();
-                    match (o1, o2) {
-                        (Value::Reference(obj1), Value::Reference(obj2)) => {
-                            debug!("IF_ACMPNE {:?} != {:?}?", obj1, obj2);
-                            if obj1 != obj2 {
-                                ctx.thread.call_stack.set_pc(*target);
-                                return None;
-                            }
+                    if let (Value::Reference(obj1), Value::Reference(obj2)) = (o1, o2) {
+                        debug!("IF_ACMPNE {:?} != {:?}?", obj1, obj2);
+                        if obj1 != obj2 {
+                            ctx.thread.call_stack.set_pc(*target);
+                            return None;
                         }
-                        _ => {}
                     };
                 }
 
@@ -561,13 +552,12 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>, class_and_method: &ClassA
                     if index < *low || index > *high{
                         debug!("TABLESWITCH default {}", default);
                         ctx.thread.call_stack.set_pc(*default);
-                        return None;
                     } else {
                         let offset = offsets[(index - low) as usize];
                         debug!("TABLESWITCH[{}]: {}", index, offset);
                         ctx.thread.call_stack.set_pc(offset);
-                        return None;
                     }
+                    return None;
                 }
                 Instruction::LOOKUPSWITCH(default, targets) => {
                     let popped = ctx.thread.call_stack.pop_operand_value().unwrap().expect_int().unwrap();
@@ -578,7 +568,7 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>, class_and_method: &ClassA
                             return None;
                         }
                     }
-                    ctx.thread.call_stack.set_pc(*default as u16);
+                    ctx.thread.call_stack.set_pc(*default);
                     return None;
                 }
 
@@ -587,8 +577,8 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>, class_and_method: &ClassA
                     let value = ctx.thread.call_stack.pop_operand_value().unwrap();
                     debug!("XRETURN: {}", value.print(ctx.vm));
                     if !class_and_method.method.is_static(){
+                        #[cfg(feature = "debug")]
                         if let Some(Value::Reference(this)) = ctx.thread.call_stack.load_local(0){
-                            #[cfg(feature = "debug")]
                             ctx.thread.debug_helper.tracker.push_object_event(this, format!("Function {} returned:\n    {}", class_and_method.format(), value.print(ctx.vm)))
                         }
                     }
@@ -698,7 +688,7 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>, class_and_method: &ClassA
                     let caller_obj = Value::Reference(get_or_init_option!(ctx.new_class_object_by_class(class_and_method.class)).id);
 
                     let Some(ConstantPoolEntry::MethodHandleMethod(bm_kind, bootstrap_cam)) = class_and_method.class.get_or_resolve_constant(&ctx, bm.bootstrap_method_ref) else { unreachable!("Do Errors") };
-                    let Some(Value::Reference(bm_type_id)) = get_or_init_option!(ctx.new_method_type(&bootstrap_cam.method.descriptor)) else { unreachable!("Do errors") };
+                    let Some(Value::Reference(bm_type_id)) = get_or_init_option!(ctx.new_method_type(&bootstrap_cam.resolved_descriptor)) else { unreachable!("Do errors") };
                     let bm_type_ref = wrap_error!(ctx.vm.resolve_object_by_id(bm_type_id));
                     let bootstrap_method_obj = get_or_init_option!(ctx.new_method_handle(class_and_method.class, bm_kind, bootstrap_cam, bm_type_ref)).unwrap();
 
@@ -710,7 +700,7 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>, class_and_method: &ClassA
                         let Some(val) = (match class_and_method.class.get_or_resolve_constant(&ctx, *index) {
                             Some(ConstantPoolEntry::MethodType(desc)) => get_or_init_option!(ctx.new_method_type(&desc)),
                             Some(ConstantPoolEntry::MethodHandleMethod(arg_kind, arg_cam)) => {
-                                let Some(Value::Reference(arg_method_type_id)) = get_or_init_option!(ctx.new_method_type(&arg_cam.method.descriptor)) else {
+                                let Some(Value::Reference(arg_method_type_id)) = get_or_init_option!(ctx.new_method_type(&arg_cam.selected_method.descriptor)) else {
                                     return Some(Err(VmError::ValidationError("Could not create MethodType for static callsite arg".to_owned())));
                                 };
                                 let arg_method_type = wrap_error!(ctx.vm.resolve_object_by_id(arg_method_type_id));
@@ -774,7 +764,7 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>, class_and_method: &ClassA
                     }
                     let new_object = ctx.new_object_from_class(clazz);
 
-                    debug!("NEW: {} {} {:?}", index, clazz.name, &new_object.print(ctx.vm));
+                    debug!("NEW: {} {} {:?}", index, clazz.name, new_object.print(ctx.vm));
                     ctx.thread.call_stack.push_operand_value(Value::Reference(new_object.id));
                 }
                 Instruction::NEWARRAY(atype) => {
@@ -813,7 +803,7 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>, class_and_method: &ClassA
                         let reference = wrap_error!(ctx.vm.resolve_object_by_id(ref_id));
                         ctx.thread.call_stack.push_operand_value(Value::Integer(reference.get_length() as i32));
                     } else {
-                        return Some(Err(VmError::ValidationError(format!("Expected an array ref but found: {:?}", &popped))))
+                        return Some(Err(VmError::ValidationError(format!("Expected an array ref but found: {:?}", popped))))
                     }
                 }
 
@@ -841,7 +831,7 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>, class_and_method: &ClassA
 
                 Instruction::CHECKCAST(constant_index) => {
                     //TODO
-                    debug!("CHECKCAST {:?}", &class_and_method.class.get_or_resolve_constant(&ctx, *constant_index));
+                    debug!("CHECKCAST {:?}", class_and_method.class.get_or_resolve_constant(&ctx, *constant_index));
                 }
                 Instruction::INSTANCEOF(constant_index) => {
                     let of_class = match class_and_method.class.get_or_resolve_constant(&ctx, *constant_index){
@@ -858,7 +848,7 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>, class_and_method: &ClassA
                         let object_class = ctx.vm.find_class_by_id(object.class_id).unwrap();
                         let instance_of = ctx.vm.is_instance_of(object_class, of_class);
 
-                        debug!("INSTANCEOF {:?} = {}", &class_and_method.class.get_or_resolve_constant(&ctx, *constant_index), instance_of);
+                        debug!("INSTANCEOF {:?} = {}", class_and_method.class.get_or_resolve_constant(&ctx, *constant_index), instance_of);
 
                         ctx.thread.call_stack.push_operand_value(Value::from(instance_of));
                     }
@@ -958,12 +948,12 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>, class_and_method: &ClassA
         IrInstruction::AStoreWithoutPop(index) |
         IrInstruction::IStoreWithoutPop(index) |
         IrInstruction::FStoreWithoutPop(index) => {
-            let top = ctx.thread.call_stack.operand_stacks.borrow().last().unwrap().last().unwrap().clone();
+            let top = *ctx.thread.call_stack.operand_stacks.borrow().last().unwrap().last().unwrap();
             ctx.thread.call_stack.store_local(top, *index);
         }
         IrInstruction::LStoreWithoutPop(index) |
         IrInstruction::DStoreWithoutPop(index) => {
-            let top = ctx.thread.call_stack.operand_stacks.borrow().last().unwrap().last().unwrap().clone();
+            let top = *ctx.thread.call_stack.operand_stacks.borrow().last().unwrap().last().unwrap();
             ctx.thread.call_stack.store_local(top, *index);
             ctx.thread.call_stack.store_local(Value::Dummy, *index + 1);
         }
@@ -985,7 +975,7 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>, class_and_method: &ClassA
             }
             let new_object = ctx.new_object_from_class(clazz);
 
-            debug!("New Object: {} {} {:?}", class_idx, clazz.name, &new_object.print(ctx.vm));
+            debug!("New Object: {} {} {:?}", class_idx, clazz.name, new_object.print(ctx.vm));
 
             // TODO: this is where the optimization should hit
             ctx.thread.call_stack.push_operand_value(Value::Reference(new_object.id));
@@ -1004,7 +994,7 @@ pub fn execute_current_block<'a>(ctx: Context<'a, '_>, class_and_method: &ClassA
     None
 }
 
-fn x_const<'a>(thread: &JavaThread, value: Value){
+fn x_const(thread: &JavaThread, value: Value){
     debug!("XCONST: {:?}", value);
     thread.call_stack.push_operand_value(value);
 }
@@ -1096,7 +1086,7 @@ fn dload(thread: &JavaThread, index: usize) -> VMResult<()> {
     }
 }
 
-fn aload<'a>(thread: &JavaThread, index: usize) -> VMResult<()>{
+fn aload(thread: &JavaThread, index: usize) -> VMResult<()>{
     let popped = thread.call_stack.load_local(index).unwrap();
     match popped {
         Value::Reference(reference) => {
@@ -1239,7 +1229,13 @@ fn execute_invoke<'a>(ctx: Context<'a, '_>, next_pc: PC, index: u16, kind: Invok
         }
     };
     //println!("Y {:?}: ({})", &kind, cam.format());
-    let ci = if let Some(rec) = receiver {
+    let ci = receiver.map_or_else(|| {
+        let ci = match &kind {
+            InvokeKind::STATIC => call_info::resolve_static_call(cam.class, cam.method),
+            _ => None,
+        }.unwrap();
+        ci
+    }, |rec| {
         let receiver_class = ctx.vm.find_class_by_id(rec.class_id).unwrap();
         let ci = match &kind {
             InvokeKind::VIRTUAL => call_info::resolve_virtual_call2(receiver_class, cam.class, cam.method),
@@ -1248,13 +1244,7 @@ fn execute_invoke<'a>(ctx: Context<'a, '_>, next_pc: PC, index: u16, kind: Invok
             _ => None,
         }.unwrap();
         ci
-    } else {
-        let ci = match &kind {
-            InvokeKind::STATIC => call_info::resolve_static_call(cam.class, cam.method),
-            _ => None,
-        }.unwrap();
-        ci
-    };
+    });
     //println!("YY {:?}", ci);
     let cam = ClassAndMethod { class: ci.selected_class, method: ci.selected_method };
     /*let class_and_method = match kind {
@@ -1306,7 +1296,7 @@ fn execute_invoke<'a>(ctx: Context<'a, '_>, next_pc: PC, index: u16, kind: Invok
         }
     }
     if !cam.method.is_sig_poly {
-        for (i, provided_arg) in args.iter().filter(|a| if let Value::Dummy = a {false} else {true}).enumerate(){
+        for (i, provided_arg) in args.iter().filter(|a| matches!(a, Value::Dummy)).enumerate(){
             if !(&cam.method.descriptor.args[i] == provided_arg){
                 return Err(VmError::ValidationError(format!("Expected arg type: {:?} but got value: {:?}", cam.method.descriptor.args[i], provided_arg)));
             }
@@ -1320,74 +1310,10 @@ fn execute_invoke<'a>(ctx: Context<'a, '_>, next_pc: PC, index: u16, kind: Invok
     Ok(VMResultType::Interrupted(1))
 }
 
-fn get_method_virtual<'a>(class: ClassRef<'a>, method_name: &str, descriptor: &str) -> Result<ClassAndMethod<'a>, VmError>{
-    let mut current_class = class;
-    if current_class.is_array() && method_name == "clone"{
-        while let Some(super_class) = current_class.superclass{
-            current_class = super_class;
-        }
-        return Ok(ClassAndMethod{class: current_class, method: current_class.find_method(method_name, descriptor).unwrap()})
-    }
-    if class.is_interface(){
-        loop {
-            if let Some(method) = current_class.find_method(method_name, descriptor){
-                return Ok(ClassAndMethod{class: current_class, method});
-            }
-            if let Some(super_interface) = current_class.interfaces.first(){
-                current_class = super_interface
-            } else {
-                return Err(VmError::JavaException(JavaError::MethodNotFoundException(format!("{}{} in {}", method_name, descriptor, class.name))));
-            }
-        }
-    } else {
-        loop {
-            if let Some(method) = current_class.find_method(method_name, descriptor){
-                return Ok(ClassAndMethod{class: current_class, method});
-            }
-            if let Some(super_class) = current_class.superclass{
-                current_class = super_class
-            } else {
-                return Err(VmError::JavaException(JavaError::MethodNotFoundException(format!("{}{} in {}", method_name, descriptor, class.name))));
-            }
-        }
-    }
-}
-
-fn get_method_interface_virtual<'a>(class: ClassRef<'a>, method_name: &str, descriptor: &str) -> Result<ClassAndMethod<'a>, VmError>{
-    let mut current_class = class;
-    loop {
-        if let Some(method) = current_class.find_method(method_name, descriptor){
-            return Ok(ClassAndMethod{class: current_class, method});
-        }
-        if let Some(super_class) = current_class.superclass{
-            if super_class.superclass.is_some(){
-                current_class = super_class
-            } else {
-                if let Some(super_interface) = current_class.interfaces.first(){
-                    current_class = super_interface
-                } else {
-                    return Err(VmError::JavaException(JavaError::MethodNotFoundException(format!("{}{} in {}", method_name, descriptor, class.name))));
-                }
-            }
-        } else {
-            return Err(VmError::JavaException(JavaError::MethodNotFoundException(format!("{}{} in {}", method_name, descriptor, class.name))));
-        }
-    }
-}
-
 fn get_constant_method_ref_and_args_count<'a>(calling: &ClassAndMethod<'a>, ctx: &Context<'a, '_>, index: u16) -> Option<(ClassAndMethod<'a>, usize)> {
     match calling.class.get_or_resolve_constant(ctx, index) {
         Some(ConstantPoolEntry::ResolvedMethodRef(resolved)) => {
             Some((ClassAndMethod { class: resolved.resolved_clazz, method: resolved.selected_method }, resolved.resolved_descriptor.args.len()))
-        }
-        Some(ConstantPoolEntry::MethodRef(cam)) | Some(ConstantPoolEntry::InterfaceMethodRef(cam)) => {
-            unreachable!("deprecated");
-            let args_count = cam.method.descriptor.args.len();
-            Some((cam, args_count))
-        }
-        Some(ConstantPoolEntry::MethodRefSigPoly(cam, desc)) => {
-            unreachable!("deprecated");
-            Some((cam, desc.args.len()))
         }
         _ => None
     }

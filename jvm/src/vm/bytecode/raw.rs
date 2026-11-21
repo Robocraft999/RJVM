@@ -1,7 +1,7 @@
 use crate::class_file::methods::attributes::Code;
 use crate::class_file::methods::code::{IrCode, LocatedIrInstruction};
-use crate::vm::bytecode::decode;
 use crate::vm::bytecode::IrInstruction;
+use crate::vm::bytecode::decode;
 
 pub fn as_ir_code(code_attr: &Code) -> IrCode {
     let decoded = decode(&code_attr.code).unwrap();

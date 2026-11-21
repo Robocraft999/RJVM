@@ -17,7 +17,7 @@ pub struct FieldInfo{
 }
 
 impl FieldInfo {
-    pub fn is_static(&self) -> bool {
+    pub const fn is_static(&self) -> bool {
         self.flags & field_flags::STATIC > 0
     }
 }

@@ -6,14 +6,12 @@ use crate::vm::java_thread::{JavaThread, NORM_PRIORITY, RUNNABLE};
 use crate::vm::jni::types::{JNIEnv, JavaVM};
 use crate::vm::result::{VMPartialResult, VMResultType};
 use crate::vm::value::{Reference, Value};
-use crate::vm::{jni, Context, VmError, VM};
+use crate::vm::{Context, VM, VmError};
 use log::{error, trace};
 use std::cell::RefCell;
 use std::env;
 use std::pin::Pin;
 use std::time::Duration;
-use parking_lot::RwLock;
-use crate::class_file::fields::field_type::FieldType;
 
 thread_local! {
     pub static JAVA_THREAD: RefCell<JavaThread> = RefCell::new(JavaThread::new(0, false));
@@ -23,12 +21,12 @@ pub fn thread() -> &'static mut JavaThread {
     JAVA_THREAD.with(|cell| unsafe { &mut *cell.as_ptr() })
 }
 
-pub fn with_thread<R>(f: impl FnOnce(&mut JavaThread) -> R) -> R {
+/*pub fn with_thread<R>(f: impl FnOnce(&mut JavaThread) -> R) -> R {
     JAVA_THREAD.with(|cell| {
         let mut thread = cell.borrow_mut();
         f(&mut thread)
     })
-}
+}*/
 
 pub struct Application<'a> {
     pub(crate) vm: Pin<Box<VM<'a>>>,

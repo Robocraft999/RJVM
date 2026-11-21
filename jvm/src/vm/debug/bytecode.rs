@@ -48,7 +48,7 @@ impl BytecodeHelper {
     pub fn push_class(&self, class: ClassRef, bytecode: Vec<u8>) {
         #[cfg(feature = "debug")]
         {
-            if self.tracked_classes.iter().find(|f| f == &class).is_some() {
+            if self.tracked_classes.iter().any(|f| f == class) {
                 self.cached_bytecode.borrow_mut().push((class.name.clone(), bytecode));
             }
         }
@@ -59,7 +59,7 @@ impl BytecodeHelper {
             let path = format!("resources/debug/bytecode/{}_{}.class", i, name.replace("/", "."));
             //let path = "resources/debug/bytecode/dump.class";
             println!("{}", path.as_str());
-            let mut dump_file = File::options().write(true).create(true).open(path.as_str()).unwrap();
+            let mut dump_file = File::options().write(true).create(true).truncate(true).open(path.as_str()).unwrap();
 
             if dump_file.write_all(bytecode).is_err() {
                 warn!("Failed to write to dump file for class: {}", name);

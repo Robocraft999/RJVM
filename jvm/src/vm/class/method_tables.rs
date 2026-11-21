@@ -1,7 +1,6 @@
-use crate::class_file::methods::{MethodInfo, ITABLE_INDEX_MAX, NONVIRTUAL_VTABLE_INDEX, PENDING_ITABLE_INDEX};
+use crate::class_file::methods::{ITABLE_INDEX_MAX, MethodInfo, NONVIRTUAL_VTABLE_INDEX, PENDING_ITABLE_INDEX};
 use crate::vm::class::{Class, ClassId, ClassRef};
 use std::collections::HashMap;
-use std::ops::Index;
 
 #[derive(Debug, Clone)]
 pub struct VTable {
@@ -9,7 +8,7 @@ pub struct VTable {
 }
 
 impl VTable {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             table: Vec::new()
         }
@@ -33,7 +32,7 @@ impl VTable {
         self.table.get(index)
     }
 
-    pub fn index_of(&self, method: &MethodInfo) -> Option<isize> {
+    pub const fn index_of(&self, method: &MethodInfo) -> Option<isize> {
         if !method.has_vtable_index() {
             None
         } else {
@@ -81,7 +80,7 @@ impl VTable {
             let super_method = self.method_at(i).unwrap();
 
             if super_method == target_method {
-                if !super_method.is_private() && (is_default || false) {
+                if !super_method.is_private() && (is_default) {
                     if !target_method.is_package_private() {
                         allocate_new = false;
                     }
@@ -89,8 +88,6 @@ impl VTable {
 
                 if !is_default {
                     target_method.vtable_index = i as isize;
-                } else {
-
                 }
                 self.put_method_at(target_method.clone(), i);
             }
@@ -99,11 +96,8 @@ impl VTable {
         allocate_new
     }
 
-    pub fn initialize(clazz: &mut Class<'_>) -> VTable{
-        let mut vtable = match clazz.superclass {
-            None => VTable::new(),
-            Some(super_clazz) => super_clazz.vtable.clone(),
-        };
+    pub fn initialize(clazz: &mut Class<'_>) -> Self{
+        let mut vtable = clazz.superclass.map_or_else(Self::new, |super_clazz| super_clazz.vtable.clone());
         let super_vtable_len = vtable.len();
 
         if clazz.is_array() {
@@ -148,8 +142,8 @@ impl ITable {
         self.entries.len()
     }
 
-    pub fn initialize(clazz: &mut Class<'_>) -> ITable {
-        let mut itable = ITable::new();
+    pub fn initialize(clazz: &mut Class<'_>) -> Self {
+        let mut itable = Self::new();
         if clazz.is_interface() {
             let len = clazz.methods.len();
             let mut ime_num = 0;
@@ -176,8 +170,8 @@ impl ITable {
         let num_interfaces = transitive_interfaces.len();
         itable.entries = vec![Vec::new(); num_interfaces];
 
-        for i in 0..num_interfaces {
-            itable.initialize_for_interface(clazz, i, &transitive_interfaces[i])
+        for (i, transitive_interface) in transitive_interfaces.iter().enumerate() {
+            itable.initialize_for_interface(clazz, i, transitive_interface)
         }
 
         itable
@@ -189,7 +183,7 @@ impl ITable {
 
         let nof_methods = interface_clazz.methods.len();
         for i in 0..nof_methods {
-            let mut m = interface_clazz.methods.get(i).cloned().unwrap();
+            let m = interface_clazz.methods.get(i).cloned().unwrap();
             let target = if m.has_itable_index() {
                 clazz.lookup_instance_method(m.name.as_str(), m.descriptor.as_str())
             } else {

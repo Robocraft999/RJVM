@@ -21,7 +21,7 @@ pub struct CallInfo<'a> {
 
 impl<'a> CallInfo<'a>{
     // https://github.com/openjdk/jdk8u/blob/master/hotspot/src/share/vm/interpreter/linkResolver.cpp#L137
-    pub fn new(resolved_method: &'a MethodInfo, resolved_class: ClassRef<'a>) -> CallInfo<'a> {
+    pub fn new(resolved_method: &'a MethodInfo, resolved_class: ClassRef<'a>) -> Self {
         let mut kind = CallInfoKind::Unknown;
         let mut index = resolved_method.vtable_index();
 
@@ -56,7 +56,7 @@ impl<'a> CallInfo<'a>{
         }
     }
 
-    pub fn new_static(resolved_class: ClassRef<'a>, resolved_method: &'a MethodInfo) -> CallInfo<'a> {
+    pub const fn new_static(resolved_class: ClassRef<'a>, resolved_method: &'a MethodInfo) -> Self {
         Self {
             resolved_class,
             selected_class: resolved_class,
@@ -67,7 +67,7 @@ impl<'a> CallInfo<'a>{
         }
     }
 
-    pub fn new_virtual(resolved_class: ClassRef<'a>, selected_class: ClassRef<'a>, resolved_method: &'a MethodInfo, selected_method: &'a MethodInfo, index: isize) -> CallInfo<'a> {
+    pub fn new_virtual(resolved_class: ClassRef<'a>, selected_class: ClassRef<'a>, resolved_method: &'a MethodInfo, selected_method: &'a MethodInfo, index: isize) -> Self {
         assert!(index >= 0 || index == NONVIRTUAL_VTABLE_INDEX);
         assert!(index < 0 || !resolved_method.has_vtable_index() || index == resolved_method.vtable_index());
         let kind = if index >= 0 && !can_be_statically_bound(resolved_method, resolved_class){ CallInfoKind::Vtable } else { CallInfoKind::Direct };
@@ -81,7 +81,7 @@ impl<'a> CallInfo<'a>{
         }
     }
 
-    pub fn new_interface(resolved_class: ClassRef<'a>, selected_class: ClassRef<'a>, resolved_method: &'a MethodInfo, selected_method: &'a MethodInfo, index: isize) -> CallInfo<'a> {
+    pub fn new_interface(resolved_class: ClassRef<'a>, selected_class: ClassRef<'a>, resolved_method: &'a MethodInfo, selected_method: &'a MethodInfo, index: isize) -> Self {
         assert!(resolved_class.is_interface());
         assert_eq!(index, resolved_method.itable_index());
         Self {
@@ -92,17 +92,6 @@ impl<'a> CallInfo<'a>{
             kind: CallInfoKind::Itable,
             index,
         }
-    }
-
-    pub fn set_common(&mut self, resolved_class: ClassRef<'a>, selected_class: ClassRef<'a>, resolved_method: &'a MethodInfo, selected_method: &'a MethodInfo, kind: CallInfoKind, index: isize) {
-        assert_eq!(resolved_method.descriptor, selected_method.descriptor);
-
-        self.resolved_class = resolved_class;
-        self.selected_class = selected_class;
-        self.resolved_method = resolved_method;
-        self.selected_method = selected_method;
-        self.kind = kind;
-        self.index = index;
     }
 }
 
@@ -218,6 +207,6 @@ pub fn resolve_interface_call<'a>(receiver_class: ClassRef<'a>, resolved_class: 
     }
 }
 
-pub fn resolve_static_call<'a>(resolved_class: ClassRef<'a>, resolved_method: &'a MethodInfo) -> Option<CallInfo<'a>> {
+pub const fn resolve_static_call<'a>(resolved_class: ClassRef<'a>, resolved_method: &'a MethodInfo) -> Option<CallInfo<'a>> {
     Some(CallInfo::new_static(resolved_class, resolved_method))
 }

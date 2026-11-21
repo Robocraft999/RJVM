@@ -1,15 +1,13 @@
+use crate::Value;
 use crate::class_file::constant_pool::ConstantPoolEntry;
-use crate::class_file::fields::field_type::FieldType;
 use crate::error::ClassParseError;
+use crate::vm::Reference;
 use crate::vm::constants::classes::{JAVA_LANG_CLASS, JAVA_LANG_REFLECT_CONSTRUCTOR, JAVA_LANG_REFLECT_CONSTRUCTOR_ARR, JAVA_LANG_REFLECT_FIELD, JAVA_LANG_REFLECT_FIELD_ARR, JAVA_LANG_REFLECT_METHOD, JAVA_LANG_REFLECT_METHOD_ARR};
 use crate::vm::constants::{CONSTRUCTOR_clazz_INDEX, CONSTRUCTOR_exceptionTypes_INDEX, CONSTRUCTOR_modifiers_INDEX, CONSTRUCTOR_parameterTypes_INDEX, CONSTRUCTOR_slot_INDEX, FIELD_clazz_INDEX, FIELD_modifiers_INDEX, FIELD_name_INDEX, FIELD_type_INDEX, METHOD_clazz_INDEX, METHOD_exceptionTypes_INDEX, METHOD_modifiers_INDEX, METHOD_name_INDEX, METHOD_parameterTypes_INDEX, METHOD_returnType_INDEX, METHOD_slot_INDEX};
 use crate::vm::java_thread::JavaThread;
-use crate::vm::native::{gen_delegate, invalidation, non_failing_none, non_failing_some, wrap_init, NativeMethodRegistry};
-use crate::vm::Reference;
+use crate::vm::native::{NativeMethodRegistry, gen_delegate, invalidation, non_failing_none, non_failing_some, wrap_init};
 use crate::vm::{VMPartialResult, VmError};
-use crate::Value;
 use log::{debug, info};
-use parking_lot::RwLock;
 
 pub fn register_natives(registry: &mut NativeMethodRegistry) {
     let mut register = |method_name, sig, delegate|registry.register(JAVA_LANG_CLASS, method_name, sig, delegate);
@@ -171,7 +169,7 @@ gen_delegate!(delegate_get_declared_methods0, |ctx, class_ref, args| {
             // slot
             java_method_ref.set_field(METHOD_slot_INDEX, Value::Integer(method.slot as i32));
 
-            let name = wrap_init!(ctx, ctx.new_string_object(&method.name.as_str())?);
+            let name = wrap_init!(ctx, ctx.new_string_object(method.name.as_str())?);
             // name
             java_method_ref.set_field(METHOD_name_INDEX, Value::Reference(name.id));
 
@@ -278,7 +276,7 @@ gen_delegate!(delegate_get_enclosing_method0, |ctx, class_ref, _args| {
             } else {
                 return invalidation!("Expected NameAndType for EnclosingClass")
             };
-            let res = wrap_init!(ctx, ctx.new_object_array_1(vec![class_val.clone(), method_name.clone(), method_type.clone()])?);
+            let res = wrap_init!(ctx, ctx.new_object_array_1(vec![class_val, method_name, method_type])?);
             non_failing_some(Value::Reference(res.id))
         } else {
             non_failing_some(ctx.vm.null())

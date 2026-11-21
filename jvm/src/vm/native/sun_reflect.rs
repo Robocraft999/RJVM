@@ -5,7 +5,7 @@ use crate::vm::constants::classes::{SUN_REFLECT_NCAI, SUN_REFLECT_NMAI, SUN_REFL
 use crate::vm::constants::{CONSTRUCTOR_clazz_INDEX, CONSTRUCTOR_parameterTypes_INDEX, METHOD_clazz_INDEX, METHOD_name_INDEX, METHOD_parameterTypes_INDEX, METHOD_returnType_INDEX};
 use crate::vm::java_error::JavaError;
 use crate::vm::java_thread::JavaThread;
-use crate::vm::native::{gen_delegate, invalidation, non_failing_some, wrap_init, NativeMethodRegistry};
+use crate::vm::native::{NativeMethodRegistry, gen_delegate, invalidation, non_failing_some, wrap_init};
 use crate::vm::result::{VMPartialResult, VMResult, VMResultType};
 use crate::vm::value::{Reference, ReferenceType, Value};
 use crate::vm::{Context, VmError};
@@ -69,7 +69,8 @@ gen_delegate!(delegate_new_instance0, |ctx, _obj_ref, args| {
             if let ReferenceType::Array(type_content) = &parameter_arr_ref.reference_type {
                 let class = ctx.resolve_clazz_by_class_ref_id(class_ref_id)?;
                 let mut descriptor = String::from("(");
-                for parameter_type_ref_id in type_content.read().as_ref_vec().unwrap().iter() {
+                let parameter_refs = type_content.read().as_ref_vec();
+                for parameter_type_ref_id in parameter_refs.unwrap().iter() {
                     let class = ctx.resolve_clazz_by_class_ref_id(*parameter_type_ref_id)?;
                     if !class.is_array() {
                         descriptor.push_str(&get_class_descriptor(&class.name));
@@ -85,8 +86,9 @@ gen_delegate!(delegate_new_instance0, |ctx, _obj_ref, args| {
                         let argument_arr_ref = ctx.vm.resolve_object_by_id(*argument_arr_id)?;
                         if let ReferenceType::Array(args_content) = &argument_arr_ref.reference_type {
                             let mut args = Vec::new();
-                            for (i, provided_arg) in args_content.read().as_vec().iter().enumerate(){
-                                args.extend(unbox_param_if_needed(ctx, &class_and_method.method.descriptor.args[i], provided_arg.clone())?);
+                            let arg_refs = args_content.read().as_vec();
+                            for (i, provided_arg) in arg_refs.iter().enumerate(){
+                                args.extend(unbox_param_if_needed(ctx, &class_and_method.method.descriptor.args[i], *provided_arg)?);
                             }
                             args
                         } else {
@@ -137,7 +139,8 @@ gen_delegate!(delegate_invoke0, |ctx, _obj_ref, args| {
             if let ReferenceType::Array(type_content) = &parameter_arr_ref.reference_type {
                 let clazz = ctx.resolve_clazz_by_class_ref_id(class_ref_id)?;
                 let mut descriptor = String::from("(");
-                for parameter_type_ref_id in type_content.read().as_ref_vec().unwrap().iter() {
+                let parameter_refs = type_content.read().as_ref_vec();
+                for parameter_type_ref_id in parameter_refs.unwrap().iter() {
                     let class = ctx.resolve_clazz_by_class_ref_id(*parameter_type_ref_id)?;
                     if !class.is_array(){
                         descriptor.push_str(&get_class_descriptor(&class.name));
@@ -145,7 +148,7 @@ gen_delegate!(delegate_invoke0, |ctx, _obj_ref, args| {
                         descriptor.push_str(&class.name);
                     }
                 }
-                descriptor.push_str(")");
+                descriptor.push(')');
                 if !return_type_ref_id.is_null(){
                     let return_type = ctx.resolve_clazz_by_class_ref_id(return_type_ref_id)?;
                     if !return_type.is_array(){
@@ -162,8 +165,9 @@ gen_delegate!(delegate_invoke0, |ctx, _obj_ref, args| {
                         let args_arr_ref = ctx.vm.resolve_object_by_id(*args_arr_ref_id)?;
                         if let ReferenceType::Array(args_content) = &args_arr_ref.reference_type {
                             let mut args = Vec::new();
-                            for (i, provided_arg) in args_content.read().as_vec().iter().enumerate(){
-                                args.extend(unbox_param_if_needed(ctx, &class_and_method.method.descriptor.args[i], provided_arg.clone())?);
+                            let arg_refs = args_content.read().as_vec();
+                            for (i, provided_arg) in arg_refs.iter().enumerate(){
+                                args.extend(unbox_param_if_needed(ctx, &class_and_method.method.descriptor.args[i], *provided_arg)?);
                             }
                             args
                         } else {

@@ -1,9 +1,8 @@
-use log::error;
 use crate::class_file::fields::field_type::FieldType;
-use crate::vm::{Context, VmError};
 use crate::vm::constants::classes::JAVA_LANG_OBJECT;
 use crate::vm::result::VMResult;
 use crate::vm::value::Value;
+use crate::vm::{Context, VmError};
 
 pub trait FieldTypeExt {
     fn validate(&self, value: Value, ctx: Context) -> VMResult<()>;
@@ -12,7 +11,7 @@ pub trait FieldTypeExt {
 impl FieldTypeExt for FieldType {
     fn validate(&self, value: Value, ctx: Context) -> VMResult<()> {
         if !match self {
-            FieldType::Object(class_name) => {
+            Self::Object(class_name) => {
                 if let Value::Reference(val_id) = value {
                     if val_id.is_null() {
                         true
@@ -20,7 +19,7 @@ impl FieldTypeExt for FieldType {
                         let val_ref = ctx.vm.resolve_object_by_id(val_id)?;
                         let val_clazz = ctx.vm.find_class_by_id(val_ref.class_id);
                         let target_clazz = ctx.get_or_resolve_class(class_name);
-                        if let ((Some(val_clazz)), Ok(target_clazz)) = (val_clazz, &target_clazz) {
+                        if let (Some(val_clazz), Ok(target_clazz)) = (val_clazz, &target_clazz) {
                             if target_clazz.name == JAVA_LANG_OBJECT && val_clazz.is_array() {
                                 true
                             } else {
@@ -35,7 +34,7 @@ impl FieldTypeExt for FieldType {
                     false
                 }
             }
-            FieldType::Array(class_name, ..) => {
+            Self::Array(_class_name, ..) => {
                 if let Value::Reference(val_id) = value {
                     if val_id.is_null() {
                         true

@@ -1,21 +1,15 @@
-use std::ffi::CString;
-use crate::vm::constants::classes::{JAVA_IO_FILE_INPUT_STREAM, JAVA_IO_FILE_OUTPUT_STREAM, JAVA_IO_UNIX_FILE_SYSTEM, JAVA_IO_IOEXCEPTION, JAVA_LANG_STRING, JAVA_IO_RANDOM_ACCESS_FILE, JAVA_LANG_STRING_ARR};
-use crate::vm::constants::{FILEDESCRIPTOR_fd_INDEX, FILEINPUTSTREAM_fd_INDEX, FILEINPUTSTREAM_path_INDEX, FILEOUTPUTSTREAM_fd_INDEX, FILE_path_INDEX, RANDOMACCESSFILE_fd_INDEX};
+use crate::vm::VmError;
+use crate::vm::constants::classes::{JAVA_IO_FILE_INPUT_STREAM, JAVA_IO_FILE_OUTPUT_STREAM, JAVA_IO_IOEXCEPTION, JAVA_IO_RANDOM_ACCESS_FILE, JAVA_IO_UNIX_FILE_SYSTEM, JAVA_LANG_STRING_ARR};
+use crate::vm::constants::{FILEDESCRIPTOR_fd_INDEX, FILEINPUTSTREAM_fd_INDEX, FILEOUTPUTSTREAM_fd_INDEX, FILE_path_INDEX, RANDOMACCESSFILE_fd_INDEX};
+use crate::vm::heap::array::ArrayContent;
 use crate::vm::java_thread::JavaThread;
-use crate::vm::native::{gen_delegate, invalidation, non_failing_none, non_failing_some, promote_exception, wrap_init, NativeMethodRegistry};
-use crate::vm::result::{VMPartialResult, VMResult, VMResultType};
+use crate::vm::native::{NativeMethodRegistry, gen_delegate, invalidation, non_failing_none, non_failing_some, promote_exception, wrap_init};
+use crate::vm::result::VMPartialResult;
 use crate::vm::value::{Reference, ReferenceType, Value};
-use crate::vm::{Context, VmError};
-use log::{debug, error, warn};
-use std::fs::File;
+use log::{debug, error};
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
-use std::str::FromStr;
 use std::time::SystemTime;
-use libc::{c_int, stat64, FIONREAD};
-use parking_lot::RwLock;
-use crate::class_file::fields::field_type::FieldType;
-use crate::vm::heap::array::ArrayContent;
 
 mod util;
 

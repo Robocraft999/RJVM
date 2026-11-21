@@ -1,6 +1,6 @@
 use crate::vm::callstack::CallStack;
-use crate::vm::class::class_and_member::{ClassAndMethod, ClassAndMethodId};
 use crate::vm::class::ClassRef;
+use crate::vm::class::class_and_member::{ClassAndMethod, ClassAndMethodId};
 use crate::vm::constants::THROWABLE_detailsMessage_INDEX;
 use crate::vm::debug::DebugHelper;
 use crate::vm::java_error::JavaError;
@@ -9,7 +9,7 @@ use crate::vm::monitoring::MonitorAssociate;
 use crate::vm::native::NativeMethodRegistry;
 use crate::vm::result::{VMPartialResult, VMResult, VMResultType};
 use crate::vm::value::{RefId, Reference, Value};
-use crate::vm::{executor, Context, ProgramCounter, VmError};
+use crate::vm::{Context, VmError, executor};
 use log::{debug, warn};
 use parking_lot::{Mutex, RwLock};
 use std::cell::RefCell;
@@ -21,7 +21,7 @@ pub type TID = u32;
 pub const NORM_PRIORITY: i32 = 5;
 pub const RUNNABLE: i32 = 1 + 4; //jvmti: alive + runnable
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum ThreadState {
     Running,
     Sleeping,
@@ -48,7 +48,7 @@ pub struct ThreadMeta {
 }
 
 impl ThreadMeta {
-    pub fn new(id: TID, os_thread: Thread, daemon: bool) -> Self {
+    pub const fn new(id: TID, os_thread: Thread, daemon: bool) -> Self {
         Self {
             id,
             os_thread,
@@ -184,7 +184,7 @@ impl JavaThread {
                 }
                 let current_pc = &ctx.thread.call_stack.get_pc();
                 //[unchecked] class already loaded by method
-                if let Some(handler_pc) = class_and_method.resolve_exception_handler(&ctx, &current_pc, thrown_class_name.as_str()){
+                if let Some(handler_pc) = class_and_method.resolve_exception_handler(&ctx, current_pc, thrown_class_name.as_str()){
                     ctx.thread.call_stack.set_pc(handler_pc);
                     ctx.thread.call_stack.clear_operand_stack();
                     ctx.thread.call_stack.push_operand_value(Value::Reference(*throwable_ref_id));
@@ -272,10 +272,8 @@ impl JavaThread {
                     if frame_amount as isize -2 == stop_index {
                         return Ok(VMResultType::Successful(result));
                     }
-                    if let Some(value) = result {
-                        if frame.should_push_return {
-                            ctx.thread.call_stack.push_operand_value(value);
-                        }
+                    if let Some(value) = result &&  frame.should_push_return{
+                        ctx.thread.call_stack.push_operand_value(value);
                     }
                 }
                 // returned by both non-native and native functions
@@ -324,9 +322,7 @@ impl JavaThread {
             .collect::<Vec<_>>();
         let try_native = NativeMethodRegistry::invoke(ctx, &class_and_method, object, args);
         debug!("TTT native[{}] returned: {:?}", class_and_method.format(), try_native);
-        if let Some(native) = try_native {
-            native
-        } else {
+        try_native.unwrap_or_else(|| {
             debug!("native not found");
             if class_and_method.method.descriptor.return_type.is_some(){
                 Err(VmError::MethodCallError(format!("native {} returns a value which is probably used", class_and_method.format())))
@@ -334,7 +330,7 @@ impl JavaThread {
                 warn!(target: "native", "Native function: {} not found. Skipping", class_and_method.format());
                 Ok(VMResultType::Successful(None))
             }
-        }
+        })
     }
 
     /// Returns a `VMResultType::ExceptionThrown` and places the throwable into the exception slot

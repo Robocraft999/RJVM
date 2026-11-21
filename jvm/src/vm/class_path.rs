@@ -1,17 +1,9 @@
-use thiserror::Error;
-
 use crate::vm::class_path_entry::ClassPathEntry;
 use crate::vm::result::VMResult;
 
 #[derive(Debug, Default)]
 pub struct ClassPath{
     entries: Vec<ClassPathEntry>
-}
-
-#[derive(Error, Debug, PartialEq)]
-pub enum ClassPathParseError{
-    #[error("invalid classpath entry {0}")]
-    InvalidEntry(String),
 }
 
 impl ClassPath{

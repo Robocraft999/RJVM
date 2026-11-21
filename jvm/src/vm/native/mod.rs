@@ -151,11 +151,10 @@ impl <'a> NativeMethodRegistry<'a> {
             }
         }
         if ctx.vm.native_method_registry.try_resolve_extern_native(cam){
-            let optional_extern = if let Ok(res) = ctx.vm.native_method_registry.extern_methods.read() {
-                res.get(&cam).cloned()
-            } else {
-                unreachable!("Could not acquire lock for extern methods")
-            };
+            let optional_extern = ctx.vm.native_method_registry.extern_methods.read().map_or_else(
+                |_| unreachable!("Could not acquire lock for extern methods"), 
+                |res| res.get(cam).cloned()
+            );
             if let Some(extern_native) = optional_extern {
                 let class_object_or_this = if cam.method.is_static(){
                     ctx.try_new_class_object(cam.class).ok()?
@@ -167,9 +166,7 @@ impl <'a> NativeMethodRegistry<'a> {
                     info!("METHOD_NAME (extern native): {}", cam.format());
                 }
                 let jni_result = extern_native.call(cam, class_object_or_this, args);
-                let result = if let Some(val) = jni_result{
-                    unsafe {
-                        Some(match (cam.method.descriptor.return_type.clone().unwrap(), val){
+                let result = jni_result.map(|val| unsafe { match (cam.method.descriptor.return_type.clone().unwrap(), val){
                             (FieldType::Primitive(PrimitiveType::Boolean), jvalue { z }) => Value::Integer(z as i32),
                             (FieldType::Primitive(PrimitiveType::Byte), jvalue { b }) => Value::Integer(b as i32),
                             (FieldType::Primitive(PrimitiveType::Char), jvalue { c }) => Value::Integer(c as i32),
@@ -179,11 +176,7 @@ impl <'a> NativeMethodRegistry<'a> {
                             (FieldType::Primitive(PrimitiveType::Long), jvalue { j }) => Value::Long(j as i64),
                             (FieldType::Primitive(PrimitiveType::Short), jvalue { s }) => Value::Integer(s as i32),
                             (_, jvalue { l }) => { Value::Reference(RefId(l as u32)) }
-                        })
-                    }
-                } else {
-                    None
-                };
+                        } });
                 if let Ok(mut res) = ctx.vm.native_method_registry.exception_in_native.write() {
                     return if *res {
                         *res = false;
@@ -225,13 +218,14 @@ pub fn register_all_natives(registry: &mut NativeMethodRegistry) {
     sun_reflect::register_natives(registry);
 }
 
-fn non_failing_some<'a>(value: Value) -> VMPartialResult<Option<Value>>{
+const fn non_failing_some(value: Value) -> VMPartialResult<Option<Value>>{
     Ok(VMResultType::Successful(Some(value)))
 }
 
-fn non_failing_none<'a>() -> VMPartialResult<Option<Value>> {
+const fn non_failing_none() -> VMPartialResult<Option<Value>> {
     Ok(VMResultType::Successful(None))
 }
+
 macro_rules! invalidation {
     ($raw:expr) => { Err(VmError::ValidationError(String::from($raw))) };
     ($($arg:tt)*) => { Err(VmError::ValidationError(format!($($arg)*))) };

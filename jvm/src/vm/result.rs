@@ -16,13 +16,13 @@ impl <T> VMResultType<T>{
         F: FnOnce(T) -> U
     {
         match self {
-            VMResultType::Successful(t) => VMResultType::Successful(f(t)),
-            VMResultType::ExceptionThrown => VMResultType::ExceptionThrown,
-            VMResultType::Interrupted(t) => VMResultType::Interrupted(t)
+            Self::Successful(t) => VMResultType::Successful(f(t)),
+            Self::ExceptionThrown => VMResultType::ExceptionThrown,
+            Self::Interrupted(t) => VMResultType::Interrupted(t)
         }
     }
     
-    pub fn to_result(self) -> VMPartialResult<T> {
+    pub const fn to_result(self) -> VMPartialResult<T> {
         Ok(self)
     }
 }

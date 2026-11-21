@@ -519,25 +519,25 @@ gen_delegate!(delegate_put_ordered_object, |ctx, _obj_ref, args| {
     if let (Some(Value::Reference(o_id)), Some(Value::Long(index)), Some(x)) = (args.get(0), args.get(1), args.get(3)) {
         let o = ctx.vm.resolve_object_by_id(*o_id)?;
         if o.is_array(){
-            o.set_element(*index as usize - ARRAY_BASE_OFFSET, x.clone());
+            o.set_element(*index as usize - ARRAY_BASE_OFFSET, *x);
             return non_failing_none();
         }
         if o.class_name == JAVA_LANG_CLASS {
             let class_ref = ctx.extract_class_from_class_object(o)?;
-            let _ = wrap_init!(ctx, ctx.ensure_initialized(class_ref)?);
-            let static_object = ctx.vm.static_class_objects.read().get(&class_ref.id).unwrap().clone();
+            wrap_init!(ctx, ctx.ensure_initialized(class_ref)?);
+            let static_object = *ctx.vm.static_class_objects.read().get(&class_ref.id).unwrap();
             #[cfg(feature = "validation")]
             {
-                class_ref.field_at_index(*index as usize).unwrap().field_type.validate(x.clone(), ctx)?;
+                class_ref.field_at_index(*index as usize).unwrap().field_type.validate(*x, ctx)?;
             }
-            static_object.set_field(*index as usize, x.clone());
+            static_object.set_field(*index as usize, *x);
         } else {
             #[cfg(feature = "validation")]
             {
                 let class_ref = ctx.vm.find_class_by_id(o.class_id).unwrap();
-                class_ref.field_at_index(*index as usize).unwrap().field_type.validate(x.clone(), ctx)?;
+                class_ref.field_at_index(*index as usize).unwrap().field_type.validate(*x, ctx)?;
             }
-            o.set_field(*index as usize, x.clone());
+            o.set_field(*index as usize, *x);
         }
         non_failing_none()
     } else {
@@ -620,7 +620,7 @@ gen_delegate!(delegate_should_be_initialized, |ctx, _obj_ref, args| {
 gen_delegate!(delegate_ensure_initialized, |ctx, _obj_ref, args| {
     if let Some(Value::Reference(class_ref_id)) = args.get(0){
         let clazz = ctx.resolve_clazz_by_class_ref_id(*class_ref_id)?;
-        let _clazz = wrap_init!(ctx, ctx.ensure_initialized(clazz)?);
+        wrap_init!(ctx, ctx.ensure_initialized(clazz)?);
         non_failing_none()
     } else {
         invalidation!("Expected a class reference but got: {:?}", args)
@@ -634,6 +634,7 @@ gen_delegate!(delegate_park, |ctx, _obj_ref, args| {
         let mut unparked_flag_lock = ctx.thread.meta.unsafe_unpark_count.lock();
         if *unparked_flag_lock > 0 {
             *unparked_flag_lock -= 1;
+            drop(unparked_flag_lock);
             return non_failing_none();
         }
     }

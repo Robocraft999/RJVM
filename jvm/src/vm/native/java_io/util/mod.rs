@@ -1,11 +1,11 @@
-use crate::vm::constants::classes::{JAVA_IO_FILE_NOT_FOUND_EXCEPTION, JAVA_IO_IOEXCEPTION};
+use crate::vm::Context;
 use crate::vm::constants::FILEDESCRIPTOR_fd_INDEX;
+use crate::vm::constants::classes::{JAVA_IO_FILE_NOT_FOUND_EXCEPTION, JAVA_IO_IOEXCEPTION};
 use crate::vm::java_thread::JavaThread;
 use crate::vm::jni::types::jbyte;
 use crate::vm::native::wrap_init;
 use crate::vm::result::{VMPartialResult, VMResult, VMResultType};
 use crate::vm::value::{Reference, Value};
-use crate::vm::Context;
 use std::ffi::CString;
 use std::str::FromStr;
 

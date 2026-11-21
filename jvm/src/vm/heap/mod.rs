@@ -1,10 +1,10 @@
-use parking_lot::Mutex;
 use crate::class_file::fields::field_type::{FieldType, PrimitiveType};
 use crate::vm::class::ClassRef;
 use crate::vm::heap::array::{ArrayContent, RawArray};
 use crate::vm::heap::memory_chunk::MemoryChunk;
 use crate::vm::jni::types::{jboolean, jbyte, jchar, jdouble, jfloat, jint, jlong, jobject, jshort};
 use crate::vm::value::Value;
+use parking_lot::Mutex;
 
 pub mod array;
 mod memory_chunk;
@@ -60,7 +60,7 @@ impl HeapAllocator {
     }
 
     pub fn allocate_array_body(&self, clazz: ClassRef, content: Vec<Value>) -> ArrayContent {
-        if let Some(ingo) = &clazz.array_info {
+        clazz.array_info.as_ref().map_or_else(|| unreachable!("clazz has no array info"), |ingo| {
             let length = content.len();
             if ingo.dims > 1 {
                 let raw_array = self.alloc_native_arr::<jobject>(length);
@@ -125,9 +125,7 @@ impl HeapAllocator {
                     }
                 }
             }
-        } else {
-            unreachable!("clazz has no array info")
-        }
+        })
     }
 }
 

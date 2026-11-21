@@ -1,16 +1,15 @@
-use crate::class_file::fields::field_type::{FieldType, PrimitiveType};
-use crate::vm::application::{thread, JAVA_THREAD};
+use crate::class_file::fields::field_type::FieldType;
+use crate::vm::application::{JAVA_THREAD, thread};
 use crate::vm::class::class_and_member::ClassAndMethod;
 use crate::vm::constants::classes::{JAVA_LANG_BYTE_ARR_PRIM, JAVA_LANG_BYTE_ARR_PRIM_2, JAVA_LANG_PACKAGE, JAVA_LANG_PROCESS_ENVIRONMENT, JAVA_LANG_REFLECT_ARRAY, JAVA_LANG_RUNTIME, JAVA_LANG_STRING, JAVA_LANG_THREAD, JAVA_LANG_THROWABLE};
-use crate::vm::constants::{THREADGROUP_maxPriority_INDEX, THREADGROUP_nUnstartedThreads_INDEX, THREADGROUP_name_INDEX, THREADGROUP_parent_INDEX, THREAD_daemon_INDEX, THREAD_group_INDEX, THREAD_name_INDEX, THREAD_priority_INDEX, THREAD_target_INDEX};
+use crate::vm::constants::{THREAD_daemon_INDEX, THREAD_name_INDEX, THREAD_priority_INDEX, THREAD_target_INDEX};
 use crate::vm::java_thread::JavaThread;
 use crate::vm::jni::types::{JNIEnv, JavaVM};
-use crate::vm::native::{gen_delegate, invalidation, non_failing_none, non_failing_some, wrap_init, NativeMethodRegistry};
-use crate::vm::result::{VMPartialResult, VMResult};
+use crate::vm::native::{NativeMethodRegistry, gen_delegate, invalidation, non_failing_none, non_failing_some, wrap_init};
+use crate::vm::result::VMPartialResult;
 use crate::vm::value::{Reference, Value};
-use crate::vm::{jni, Context, VmError, VM};
+use crate::vm::{Context, VM, VmError};
 use log::error;
-use parking_lot::RwLock;
 use std::thread;
 use std::thread::yield_now;
 use std::time::Duration;
@@ -35,19 +34,17 @@ pub fn register_natives(registry: &mut NativeMethodRegistry) {
 }
 
 gen_delegate!(delegate_fill_in_stacktrace, |_ctx, obj_ref, _args| {
-    if let Some(obj_ref) = obj_ref{
-        non_failing_some(Value::Reference(obj_ref.id))
-    } else {
-        invalidation!("Expected a Throwable")
-    }
+    obj_ref.map_or_else(
+        || invalidation!("Expected a Throwable"), 
+        |obj_ref| non_failing_some(Value::Reference(obj_ref.id))
+    )
 });
 
 gen_delegate!(delegate_stack_trace_depth, |_ctx, obj_ref, _args| {
-    if let Some(_obj_ref) = obj_ref{
-        non_failing_some(Value::Integer(0))
-    } else {
-        invalidation!("Expected a Throwable")
-    }
+    obj_ref.map_or_else(
+        || invalidation!("Expected a Throwable"), 
+        |_obj_ref| non_failing_some(Value::Integer(0))
+    )
 });
 
 gen_delegate!(delegate_intern, |ctx, obj_ref, _args| {
@@ -156,7 +153,7 @@ gen_delegate!(delegate_sleep, |ctx, _obj_ref, args| {
 gen_delegate!(delegate_is_interrupted, |ctx, _obj_ref, args| {
     let Some(Value::Integer(clear_interrupted)) = args.get(0) else { return invalidation!("Expected a boolean parameter") };
 
-    let was_interrupted = ctx.thread.meta.interrupted.read().clone();
+    let was_interrupted = *ctx.thread.meta.interrupted.read();
 
     if *clear_interrupted == 1 {
         *ctx.thread.meta.interrupted.write() = false;
@@ -174,9 +171,7 @@ gen_delegate!(delegate_free_memory, |_ctx, _obj_ref, _args| {
 });
 
 gen_delegate!(delegate_environ, |ctx, _obj_ref, _args| {
-    let vars = vec![
-        ("DISPLAY", ":0")
-    ];
+    let vars = [("DISPLAY", ":0")];
     let arr_clazz_1 = ctx.get_or_resolve_class(JAVA_LANG_BYTE_ARR_PRIM)?;
     let arr_clazz_2 = ctx.get_or_resolve_class(JAVA_LANG_BYTE_ARR_PRIM_2)?;
     let values: Vec<Value> = vars.iter()
@@ -193,7 +188,7 @@ gen_delegate!(delegate_environ, |ctx, _obj_ref, _args| {
 gen_delegate!(delegate_get_system_package0, |ctx, _obj_ref, args| {
     if let Some(name_val) = args.get(0) {
         let name = ctx.vm.extract_string_from_value(*name_val)?;
-        let (prefix, _) = name.rsplit_once("/").unwrap();
+        let (_prefix, _) = name.rsplit_once("/").unwrap();
         non_failing_some(ctx.vm.null())
     } else {
         invalidation!("Expected a string argument")

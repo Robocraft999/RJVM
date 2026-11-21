@@ -47,44 +47,44 @@ gen_delegate!(delegate_identity_hash_code, |_ctx, _obj_ref, args| {
 
 gen_delegate!(delegate_set_in0, |ctx, _obj_ref, args| {
     let clazz = ctx.get_or_resolve_class(JAVA_LANG_SYSTEM)?;
-    if let Some(static_obj_refect) = ctx.vm.get_static_class_object(clazz.id){
-        if let Some(Value::Reference(object)) = args.get(0){
-            static_obj_refect.set_field(SYSTEM_in_INDEX, Value::Reference(*object));
-            non_failing_none()
-        } else {
-            invalidation!("Expected Object but found '{:?}'", args.get(0))
-        }
-    } else {
-        invalidation!("Couldn't find static Object of class {}", clazz.name)
-    }
+    ctx.vm.get_static_class_object(clazz.id).map_or_else(
+        || invalidation!("Couldn't find static Object of class {}", clazz.name), 
+        |static_obj_refect|
+            if let Some(Value::Reference(object)) = args.get(0) {
+                static_obj_refect.set_field(SYSTEM_in_INDEX, Value::Reference(*object));
+                non_failing_none()
+            } else {
+                invalidation!("Expected Object but found '{:?}'", args.get(0))
+            }
+    )
 });
 
 gen_delegate!(delegate_set_out0, |ctx, _obj_ref, args| {
     let clazz = ctx.get_or_resolve_class(JAVA_LANG_SYSTEM)?;
-    if let Some(static_obj_refect) = ctx.vm.get_static_class_object(clazz.id){
-        if let Some(Value::Reference(object)) = args.get(0){
-            static_obj_refect.set_field(SYSTEM_out_INDEX, Value::Reference(*object));
-            non_failing_none()
-        } else {
-            invalidation!("Expected Object but found '{:?}'", args.get(0))
-        }
-    } else {
-        invalidation!("Couldn't find static Object of class {}", clazz.name)
-    }
+    ctx.vm.get_static_class_object(clazz.id).map_or_else(
+        || invalidation!("Couldn't find static Object of class {}", clazz.name), 
+        |static_obj_refect| 
+            if let Some(Value::Reference(object)) = args.get(0){
+                static_obj_refect.set_field(SYSTEM_out_INDEX, Value::Reference(*object));
+                non_failing_none()
+            } else {
+                invalidation!("Expected Object but found '{:?}'", args.get(0))
+            }
+    )
 });
 
 gen_delegate!(delegate_set_err0, |ctx, _obj_ref, args| {
     let clazz = ctx.get_or_resolve_class(JAVA_LANG_SYSTEM)?;
-    if let Some(static_obj_refect) = ctx.vm.get_static_class_object(clazz.id){
-        if let Some(Value::Reference(object_id)) = args.get(0){
-            static_obj_refect.set_field(SYSTEM_err_INDEX, Value::Reference(*object_id));
-            non_failing_none()
-        } else {
-            invalidation!("Expected Object but found '{:?}'", args.get(0))
-        }
-    } else {
-        invalidation!("Couldn't find static Object of class {}", clazz.name)
-    }
+    ctx.vm.get_static_class_object(clazz.id).map_or_else(
+        || invalidation!("Couldn't find static Object of class {}", clazz.name), 
+        |static_obj_refect| 
+            if let Some(Value::Reference(object_id)) = args.get(0){
+                static_obj_refect.set_field(SYSTEM_err_INDEX, Value::Reference(*object_id));
+                non_failing_none()
+            } else {
+                invalidation!("Expected Object but found '{:?}'", args.get(0))
+            }
+    )
 });
 
 // TODO real arraycopy
@@ -102,7 +102,7 @@ gen_delegate!(delegate_arraycopy, |ctx, _obj_ref, args| {
         let dst_pos = *dst_pos as usize;
         let length = *length as usize;
         if let (ReferenceType::Array(src), ReferenceType::Array(dst)) = (&src_ref.reference_type, &dst_ref.reference_type){
-            src.read().copy(&mut dst.read(), src_pos, dst_pos, length);
+            src.read().copy(&dst.read(), src_pos, dst_pos, length);
             #[cfg(feature = "debug")]
             ctx.thread.debug_helper.tracker.push_object_event(dst_ref.id, format!("Arraycopy from {:?} [{}:{}]->[{}:{}] :\n    {:?}", src_ref.id, src_pos, src_pos+length, dst_pos, dst_pos+length, dst_ref));
             return non_failing_none()

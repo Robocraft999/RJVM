@@ -26,7 +26,7 @@ pub struct IrCode {
 
 impl IrCode {
     pub fn get(&self, pc: PC) -> Option<&LocatedIrInstruction> {
-        let index = self.pc_to_instruction_map.get(pc as usize)?.clone()?;
+        let index = (*self.pc_to_instruction_map.get(pc as usize)?)?;
         self.ir_instructions.get(index)
     }
 }

@@ -3,13 +3,13 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use thiserror::Error;
-use zip::result::ZipError;
 use zip::ZipArchive;
+use zip::result::ZipError;
 
 use crate::error::{ClassParseError, InvalidDirectoryError};
+use crate::vm::VmError;
 use crate::vm::java_error::JavaError;
 use crate::vm::result::VMResult;
-use crate::vm::VmError;
 
 #[derive(Debug)]
 pub enum ClassPathEntry {
@@ -19,17 +19,17 @@ pub enum ClassPathEntry {
 
 impl ClassPathEntry {
     pub fn new(string: &str) -> VMResult<Self> {
-        Self::try_new_dir(string).or(Self::try_new_jar(string)).map_err(|e| VmError::ParseError(ClassParseError::EntryResolveError(e.into())))
+        Self::try_new_dir(string).or_else(|_| Self::try_new_jar(string)).map_err(|e| VmError::ParseError(ClassParseError::EntryResolveError(e.into())))
     }
 
     fn try_new_dir<P: AsRef<Path>>(path: P) -> Result<Self, InvalidDirectoryError>{
         let mut dir = PathBuf::new();
         dir.push(path);
         if !dir.exists() || !dir.is_dir(){
-            let path = std::path::absolute(&dir).map(|p| p.to_string_lossy().to_string()).unwrap_or(dir.to_string_lossy().to_string());
+            let path = std::path::absolute(&dir).map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|_| dir.to_string_lossy().to_string());
             Err(InvalidDirectoryError{path})
         } else {
-            Ok(ClassPathEntry::FileSystem(dir))
+            Ok(Self::FileSystem(dir))
         }
     }
 
@@ -42,12 +42,12 @@ impl ClassPathEntry {
         let file = File::open(path).map_err(|_| JarFileError::ReadingError(file_name.to_string()))?;
         let archive = ZipArchive::new(file).map_err(|_| JarFileError::InvalidJar(file_name.to_string()))?;
 
-        Ok(ClassPathEntry::Jar(Mutex::new(archive)))
+        Ok(Self::Jar(Mutex::new(archive)))
     }
 
     pub fn resolve(&self, class_name: &str) -> VMResult<Option<Vec<u8>>>{
         match self {
-            ClassPathEntry::FileSystem(path) => {
+            Self::FileSystem(path) => {
                 let mut candidate = path.clone();
                 let class_name = class_name.replace(".", "/");
                 candidate.push(class_name);
@@ -60,8 +60,8 @@ impl ClassPathEntry {
                     Ok(None)
                 }
             }
-            ClassPathEntry::Jar(..) => {
-                let class_file_name = class_name.replace(".", "/").to_string() + ".class";
+            Self::Jar(..) => {
+                let class_file_name = class_name.replace(".", "/") + ".class";
                 self.resolve_file(class_file_name.as_str())
             }
         }
@@ -69,7 +69,7 @@ impl ClassPathEntry {
 
     pub fn resolve_file(&self, file_name: &str) -> VMResult<Option<Vec<u8>>> {
         match self {
-            ClassPathEntry::FileSystem(path) => {
+            Self::FileSystem(path) => {
                 let mut candidate = path.clone();
                 candidate.push(file_name);
                 if candidate.exists(){
@@ -80,7 +80,7 @@ impl ClassPathEntry {
                     Ok(None)
                 }
             }
-            ClassPathEntry::Jar(archive) => {
+            Self::Jar(archive) => {
                 match archive.lock()?.by_name(file_name) {
                     Ok(mut zip) => {
                         let mut buffer: Vec<u8> = Vec::with_capacity(zip.size() as usize);
@@ -111,12 +111,12 @@ pub enum ClassPathEntryResolveError {
 
 impl From<ZipError> for ClassPathEntryResolveError {
     fn from(value: ZipError) -> Self {
-        ClassPathEntryResolveError::ZipError(value.to_string())
+        Self::ZipError(value.to_string())
     }
 }
 
 /// Error returned if searching a class inside a Jar fails
-#[derive(Error, Debug, PartialEq, Clone)]
+#[derive(Error, Debug, PartialEq, Eq, Clone)]
 pub enum JarFileError {
     /// The jar file does not exist!
     #[error("file {0} not found")]

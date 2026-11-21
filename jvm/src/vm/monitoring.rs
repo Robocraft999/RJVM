@@ -30,7 +30,7 @@ pub struct Monitor {
 }
 
 impl Monitor {
-    pub fn new(owner: Arc<ThreadMeta>, associate: MonitorAssociate) -> Self {
+    pub const fn new(owner: Arc<ThreadMeta>, associate: MonitorAssociate) -> Self {
         let state = MonitorState {
             owner: Some(owner),
             counter: 0,
@@ -200,14 +200,13 @@ impl MonitorHandler {
         ctx.thread.debug_helper.monitor_logger.push_event(associate, format!("Waiting on (at: {:?})", std::time::Instant::now()));
 
         // wait until notified or timeout
+        ctx.thread.meta.wait(counter);
         if timeout == 0 {
-            ctx.thread.meta.wait(counter);
             park();
             ctx.check_canceled();
             #[cfg(feature = "debug")]
             ctx.thread.debug_helper.monitor_logger.push_event(associate, format!("Got notified (at: {:?})", std::time::Instant::now()));
         } else {
-            ctx.thread.meta.wait(counter);
             park_timeout(Duration::from_millis(timeout));
             ctx.check_canceled();
             assert_eq!(1, counter);

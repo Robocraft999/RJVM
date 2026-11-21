@@ -37,10 +37,12 @@ impl<'a> ObjectAllocator<'a>{
             reference_type: ReferenceType::Object(RwLock::new(fields))
         };
 
+
         let arena = self.arena.lock();
         let new_object = arena.alloc(object);
 
         *current_id += 1;
+        drop(current_id);
         unsafe {
             let object_ptr: *const ReferenceValue = new_object;
             &*object_ptr
@@ -60,6 +62,7 @@ impl<'a> ObjectAllocator<'a>{
         let new_object = arena.alloc(array);
 
         *current_id += 1;
+        drop(current_id);
         unsafe {
             let object_ptr: *const ReferenceValue = new_object;
             &*object_ptr

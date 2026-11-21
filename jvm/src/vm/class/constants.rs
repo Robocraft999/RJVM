@@ -15,9 +15,6 @@ impl <'a> Class<'a>{
         match fast{
             ConstantPoolEntry::Class(..) |
             ConstantPoolEntry::FieldRef(..) |
-            ConstantPoolEntry::MethodRef(..) |
-            ConstantPoolEntry::MethodRefSigPoly(..) |
-            ConstantPoolEntry::InterfaceMethodRef(..) |
             ConstantPoolEntry::ResolvedMethodRef(..) |
             ConstantPoolEntry::String(..) |
             ConstantPoolEntry::Integer(..) |
@@ -45,7 +42,7 @@ impl <'a> Class<'a>{
                 self.constants.write()[index as usize - 1] = ConstantPoolEntry::Class(class);
             }
             ConstantPoolEntry::RawFieldRef(class_index, name_and_type_index) => {
-                let caf = resolve_class_and_field(&ctx, self.constants.read().deref(), class_index, name_and_type_index)?;
+                let caf = resolve_class_and_field(ctx, self.constants.read().deref(), class_index, name_and_type_index)?;
                 self.constants.write()[index as usize - 1] = ConstantPoolEntry::FieldRef(caf);
             }
             ConstantPoolEntry::RawMethodRef(class_index, name_and_type_index) => {
@@ -53,7 +50,7 @@ impl <'a> Class<'a>{
                 self.constants.write()[index as usize - 1] = ConstantPoolEntry::ResolvedMethodRef(resolved);
             }
             ConstantPoolEntry::RawInterfaceMethodRef(class_index, name_and_type_index) => {
-                let resolved = resolve_interface_method_ref(&ctx, self.constants.read().deref(), class_index, name_and_type_index).unwrap();
+                let resolved = resolve_interface_method_ref(ctx, self.constants.read().deref(), class_index, name_and_type_index).unwrap();
                 self.constants.write()[index as usize - 1] = ConstantPoolEntry::ResolvedMethodRef(resolved);
             }
             ConstantPoolEntry::RawMethodHandle(kind, ref_index) => {
@@ -65,7 +62,7 @@ impl <'a> Class<'a>{
                     BytecodeBehavior::REFPutStatic => {
                         let reference = self.constants.read().deref()[ref_index as usize - 1].clone();
                         let caf = match reference {
-                            ConstantPoolEntry::RawFieldRef(class_index, name_and_type_index) => resolve_class_and_field(&ctx, self.constants.read().deref(), class_index, name_and_type_index)?,
+                            ConstantPoolEntry::RawFieldRef(class_index, name_and_type_index) => resolve_class_and_field(ctx, self.constants.read().deref(), class_index, name_and_type_index)?,
                             ConstantPoolEntry::FieldRef(caf) => caf,
                             _ => return None,
                         };
@@ -73,13 +70,13 @@ impl <'a> Class<'a>{
                     }
                     _ => {
                         let reference = self.constants.read().deref()[ref_index as usize - 1].clone();
-                        let cam = match reference {
-                            ConstantPoolEntry::RawMethodRef(class_index, name_and_type_index) => resolve_class_and_method(&ctx, self.constants.read().deref(), class_index, name_and_type_index, false)?,
-                            ConstantPoolEntry::RawInterfaceMethodRef(class_index, name_and_type_index) => resolve_class_and_method(&ctx, self.constants.read().deref(), class_index, name_and_type_index, true)?,
-                            ConstantPoolEntry::MethodRef(cam) | ConstantPoolEntry::InterfaceMethodRef(cam) => cam,
+                        let resolved_method = match reference {
+                            ConstantPoolEntry::RawMethodRef(class_index, name_and_type_index) => resolve_method_ref(ctx, self.constants.read().deref(), class_index, name_and_type_index)?,
+                            ConstantPoolEntry::RawInterfaceMethodRef(class_index, name_and_type_index) => resolve_interface_method_ref(ctx, self.constants.read().deref(), class_index, name_and_type_index)?,
+                            ConstantPoolEntry::ResolvedMethodRef(resolved_method) => resolved_method,
                             _ => return None,
                         };
-                        self.constants.write()[index as usize - 1] = ConstantPoolEntry::MethodHandleMethod(kind, cam);
+                        self.constants.write()[index as usize - 1] = ConstantPoolEntry::MethodHandleMethod(kind, resolved_method);
                     }
                 }
             }
@@ -131,7 +128,7 @@ fn resolve_name_and_type(constant_pool: &ConstantPool, name_index: u16, type_ind
 
 fn resolve_class_and_name_and_type<'a>(ctx: &Context<'a, '_>, constant_pool: &ConstantPool<'a>, class_index: u16, name_and_type_index: u16) -> Option<(ClassRef<'a>, String, String)>{
     let class = match constant_pool.get(class_index as usize - 1){
-        Some(ConstantPoolEntry::RawClass(name_index)) => resolve_utf(constant_pool, *name_index).map(|class_name| ctx.get_or_resolve_class(&class_name).ok()).flatten()?,
+        Some(ConstantPoolEntry::RawClass(name_index)) => resolve_utf(constant_pool, *name_index).and_then(|class_name| ctx.get_or_resolve_class(&class_name).ok())?,
         Some(ConstantPoolEntry::Class(class)) => *class,
         _ => return None,
     };
@@ -144,21 +141,12 @@ fn resolve_class_and_name_and_type<'a>(ctx: &Context<'a, '_>, constant_pool: &Co
 }
 
 fn resolve_class_and_field<'a>(ctx: &Context<'a, '_>, constant_pool: &ConstantPool<'a>, class_index: u16, name_and_type_index: u16) -> Option<ClassAndField<'a>>{
-    let (clazz, field_name, field_type) = resolve_class_and_name_and_type(ctx, constant_pool, class_index, name_and_type_index)?;
+    let (clazz, field_name, _field_type) = resolve_class_and_name_and_type(ctx, constant_pool, class_index, name_and_type_index)?;
     Some(ClassAndField{
         class: clazz,
         field: clazz.find_field(&field_name).map(|(_, info)| info).unwrap()
     }
     )
-}
-
-fn resolve_class_and_method<'a>(ctx: &Context<'a, '_>, constant_pool: &ConstantPool<'a>, class_index: u16, name_and_type_index: u16, is_interface_method: bool) -> Option<ClassAndMethod<'a>>{
-    let (clazz, method_name, method_descriptor) = resolve_class_and_name_and_type(ctx, constant_pool, class_index, name_and_type_index)?;
-    Some(if is_interface_method{
-        clazz.resolve_interface_method_virtual(method_name.as_str(), method_descriptor.as_str()).unwrap()
-    } else {
-        clazz.resolve_method_virtual(method_name.as_str(), method_descriptor.as_str()).unwrap()
-    })
 }
 
 fn resolve_method_ref<'a>(ctx: &Context<'a, '_>, constant_pool: &ConstantPool<'a>, class_index: u16, name_and_type_index: u16) -> Option<ResolvedMethod<'a>> {
@@ -276,6 +264,12 @@ pub struct ResolvedMethod<'a> {
     pub is_sigpoly: bool,
 }
 
+impl<'a> ResolvedMethod<'a> {
+    pub const fn as_class_and_method(&self) -> ClassAndMethod<'a> {
+        ClassAndMethod { class: self.resolved_clazz, method: self.selected_method }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::class_file::constant_pool::ConstantPoolEntry;
@@ -303,7 +297,7 @@ mod tests {
                             println!("Is {}.{} not directly defined", clazz.name, name);
                         }
                     }
-                    ConstantPoolEntry::MethodRef(cam) => {
+                    ConstantPoolEntry::ResolvedMethodRef(_rm) => {
                         //println!("already resolved: {}", cam.format());
                     }
                     _ => {}

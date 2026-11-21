@@ -1,10 +1,10 @@
 use super::call_frame::CallFrame;
+use crate::VM;
+use crate::Value;
+use crate::vm::ProgramCounter;
 use crate::vm::class::class_and_member::ClassAndMethod;
 use crate::vm::class::class_and_member::ClassAndMethodId;
 use crate::vm::value::RefId;
-use crate::vm::ProgramCounter;
-use crate::Value;
-use crate::VM;
 use log::{trace, warn};
 use std::cell::RefCell;
 
@@ -17,8 +17,8 @@ pub struct CallStack{
 }
 
 impl CallStack {
-    pub fn new() -> Self{
-        CallStack{
+    pub const fn new() -> Self{
+        Self{
             frames: RefCell::new(Vec::new()),
             operand_stacks: RefCell::new(Vec::new()),
             locals_stack: RefCell::new(Vec::new()),
@@ -81,11 +81,11 @@ impl CallStack {
     }
 
     pub fn get_context_class_loader(&self) -> Option<RefId> {
-        self.class_loaders.borrow().last().unwrap().clone()
+        *self.class_loaders.borrow().last().unwrap()
     }
 
     pub fn get_class_and_method_id_cloned(&self) -> ClassAndMethodId {
-        self.frames.borrow().last().unwrap().class_and_method.clone()
+        self.frames.borrow().last().unwrap().class_and_method
     }
 
     pub fn len(&self) -> usize{
@@ -111,7 +111,7 @@ impl CallStack {
         if let Some(code) = &cam.method.attributes.code{
             instruction = cam.method.ir_code.as_ref().map(|blocks| blocks.get(pc).unwrap());
             // TODO check all tables not only the first
-            if let Some(line_number_table) = &code.attributes.line_number_tables.get(0){
+            if let Some(line_number_table) = &code.attributes.line_number_tables.first(){
                 for entry in line_number_table.line_number_table.iter().rev(){
                     if entry.start_pc < pc || (pc == 0 && entry.start_pc == 0) {
                         line_number = entry.line_number as i32;

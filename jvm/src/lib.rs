@@ -7,8 +7,8 @@ extern crate core;
 use log::LevelFilter;
 use vm::class_path::ClassPath;
 
-use crate::vm::value::Value;
 use crate::vm::VM;
+use crate::vm::value::Value;
 use vm::application::Application;
 
 mod access_flags;

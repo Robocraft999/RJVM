@@ -33,49 +33,49 @@ pub const GARBAGE_VTABLE_INDEX: isize = -3;
 pub const NONVIRTUAL_VTABLE_INDEX: isize = -2;
 
 impl MethodInfo{
-    pub fn get_args_count(&self) -> usize{
+    pub const fn get_args_count(&self) -> usize{
         self.descriptor.args.len()
     }
 
-    pub fn is_native(&self) -> bool {
+    pub const fn is_native(&self) -> bool {
         self.flags & method_flags::NATIVE > 0
     }
 
-    pub fn is_static(&self) -> bool{
+    pub const fn is_static(&self) -> bool{
         self.flags & method_flags::STATIC > 0
     }
 
-    pub fn is_abstract(&self) -> bool {
+    pub const fn is_abstract(&self) -> bool {
         self.flags & method_flags::ABSTRACT > 0
     }
 
-    pub fn is_final(&self) -> bool {
+    pub const fn is_final(&self) -> bool {
         self.flags & method_flags::FINAL > 0
     }
-    pub fn is_synchronized(&self) -> bool {
+    pub const fn is_synchronized(&self) -> bool {
         self.flags & method_flags::SYNCHRONIZED > 0
     }
 
-    pub fn is_public(&self) -> bool { self.flags & method_flags::PUBLIC > 0 }
-    pub fn is_private(&self) -> bool {
+    pub const fn is_public(&self) -> bool { self.flags & method_flags::PUBLIC > 0 }
+    pub const fn is_private(&self) -> bool {
         self.flags & method_flags::PRIVATE > 0
     }
-    pub fn is_protected(&self) -> bool { self.flags & method_flags::PROTECTED > 0 }
-    pub fn is_package_private(&self) -> bool { !self.is_private() && !self.is_public() && !self.is_protected() }
+    pub const fn is_protected(&self) -> bool { self.flags & method_flags::PROTECTED > 0 }
+    pub const fn is_package_private(&self) -> bool { !self.is_private() && !self.is_public() && !self.is_protected() }
 
     pub fn is_initializer(&self) -> bool {
         (self.name == "<init>" || self.name == "<clinit>") && self.descriptor.return_type.is_none()
     }
 
-    pub fn has_exception_handler(&self) -> bool {
+    pub const fn has_exception_handler(&self) -> bool {
         if let Some(code) = &self.attributes.code {
-            code.exception_table.len() > 0
+            !code.exception_table.is_empty()
         } else {
             false
         }
     }
 
-    pub fn get_exception_handlers(&self) -> Option<&Vec<ExceptionTableEntry>> {
+    pub const fn get_exception_handlers(&self) -> Option<&Vec<ExceptionTableEntry>> {
         if let Some(code) = &self.attributes.code {
             Some(&code.exception_table)
         } else {
@@ -84,11 +84,7 @@ impl MethodInfo{
     }
 
     pub fn get_code_block_at(&self, pc: ProgramCounter) -> Option<&LocatedIrInstruction> {
-        if let Some((ir_code)) = &self.ir_code {
-            ir_code.get(pc.0)
-        } else {
-            None
-        }
+        self.ir_code.as_ref().and_then(|ir_code| ir_code.get(pc.0))
     }
 
     pub fn next_pc(&self, pc: ProgramCounter) -> PC {
@@ -96,15 +92,15 @@ impl MethodInfo{
         ir_code.get(pc.0).unwrap().next_pc
     }
 
-    pub fn has_vtable_index(&self) -> bool {
+    pub const fn has_vtable_index(&self) -> bool {
         self.vtable_index >= 0
     }
 
-    pub fn vtable_index(&self) -> isize{
+    pub const fn vtable_index(&self) -> isize{
         self.vtable_index
     }
 
-    pub fn has_itable_index(&self) -> bool {
+    pub const fn has_itable_index(&self) -> bool {
         self.vtable_index <= ITABLE_INDEX_MAX
     }
 

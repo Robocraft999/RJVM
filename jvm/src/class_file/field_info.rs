@@ -51,7 +51,7 @@ mod tests{
 
         let mut long = short.clone();
         long.push_str("__");
-        long.push_str(native_escaped_descriptor(&descriptor).as_str());
+        long.push_str(native_escaped_descriptor(descriptor).as_str());
 
         (short, long)
     }

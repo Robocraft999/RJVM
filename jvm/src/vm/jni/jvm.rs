@@ -3,19 +3,11 @@
 #![allow(non_snake_case)]
 #![allow(private_interfaces)]
 
-use crate::class_file::fields::field_type::FieldType;
 use crate::vm::jni::types::*;
-use crate::vm::value::ReferenceType;
-use crate::vm::{VMResultType, VM};
-use log::debug;
-use parking_lot::RwLock;
-use std::ffi::{c_char, c_int, c_long, c_uchar, c_ushort, c_void, CStr, CString};
-use std::fs::{File, OpenOptions};
-use std::os::fd::{AsFd, AsRawFd, FromRawFd, IntoRawFd, OwnedFd, RawFd};
-use std::path::Path;
-use std::str::FromStr;
 use libc::size_t;
-use crate::vm::jni::{ctx, native_init_wrap};
+use log::debug;
+use std::ffi::{CString, c_char, c_int, c_long, c_uchar, c_ushort, c_void};
+use std::str::FromStr;
 
 pub const JVM_INTERFACE_VERSION: jint = 4;
 
@@ -77,7 +69,7 @@ pub unsafe extern "system-unwind" fn JVM_GetMethodParameters(env: *mut JNIEnv, m
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "system-unwind" fn JVM_GetInterfaceVersion() -> jint {
+pub const unsafe extern "system-unwind" fn JVM_GetInterfaceVersion() -> jint {
     JVM_INTERFACE_VERSION
 }
 
@@ -951,7 +943,7 @@ pub unsafe extern "system-unwind" fn JVM_GetLastErrorString(buf: *mut c_char, le
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "system-unwind" fn JVM_NativePath(path: *const c_char) -> *const c_char {
+pub const unsafe extern "system-unwind" fn JVM_NativePath(path: *const c_char) -> *const c_char {
     path
 }
 
@@ -1002,7 +994,7 @@ pub unsafe extern "system-unwind" fn JVM_Sync(fd: jint) -> jint {
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "system-unwind" fn JVM_InitializeSocketLibrary() -> jint {
+pub const unsafe extern "system-unwind" fn JVM_InitializeSocketLibrary() -> jint {
     0
 }
 

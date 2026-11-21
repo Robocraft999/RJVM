@@ -17,15 +17,15 @@ use crate::vm::constants::classes::{JAVA_LANG_INVOKE_METHOD_HANDLE, JAVA_LANG_OB
 use crate::vm::java_thread::JavaThread;
 use crate::vm::result::{VMResult, VMResultType};
 use crate::vm::value::{RefId, Reference, Value};
-use crate::vm::{Context, VM, VmError, bytecode};
-use log::{info, warn};
+use crate::vm::{Context, VmError, bytecode};
+use log::warn;
 use parking_lot::{Mutex, RwLock};
 use std::cmp::PartialEq;
 use std::collections::HashMap;
 use std::str::FromStr;
 use typed_arena::Arena;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ClassLoadingState{
     LOADED,
     PREPARED,
@@ -87,7 +87,7 @@ impl<'a> ClassManager<'a>{
             let class = self.define_array_class(ctx, class_name, array_info)?;
             Ok(self.load_class(class))
         } else {
-            let bytes = self.class_path.resolve(class_name)?.ok_or(ClassParseError::ClassResolveError(class_name.to_owned()))?;
+            let bytes = self.class_path.resolve(class_name)?.ok_or_else(|| ClassParseError::ClassResolveError(class_name.to_owned()))?;
             self.define_and_load_class(ctx, class_name, bytes)
         }
     }
@@ -171,16 +171,14 @@ impl<'a> ClassManager<'a>{
         // resolve super and interface classes
         class.superclass = if parsed_class.super_class > 0 {
             class.get_or_resolve_constant(ctx, parsed_class.super_class)
-                .map(|e| if let ConstantPoolEntry::Class(clazz) = e {Some(clazz)} else {None})
-                .flatten()
+                .and_then(|e| if let ConstantPoolEntry::Class(clazz) = e {Some(clazz)} else {None})
         } else {
             None
         };
 
         class.interfaces = parsed_class.interfaces.iter()
-            .map(|i| class.get_or_resolve_constant(ctx, *i)
+            .filter_map(|i| class.get_or_resolve_constant(ctx, *i)
                 .map(|e| if let ConstantPoolEntry::Class(clazz) = e {Some(clazz)} else {None}))
-            .flatten()
             .try_collect::<Vec<ClassRef>>()
             .ok_or_else(|| VmError::ParseError(ClassParseError::ConstantPoolError(format!("Interface of {} could not be loaded.", class.name))))?;
 
@@ -194,10 +192,7 @@ impl<'a> ClassManager<'a>{
         }
 
         // build fields and methods
-        let super_class_field_count = match &class.superclass{
-            Some(clazz) => clazz.transitive_field_count,
-            None => 0,
-        };
+        let super_class_field_count = class.superclass.as_ref().map_or(0, |clazz| clazz.transitive_field_count);
         class.fields = parsed_class.fields.iter()
             .enumerate()
             .map(|(i, raw_field)| (i, raw_field, class.get_or_resolve_constant(ctx, raw_field.name_index), class.get_or_resolve_constant(ctx, raw_field.descriptor_index)))
@@ -226,10 +221,7 @@ impl<'a> ClassManager<'a>{
         class.transitive_field_count = super_class_field_count + class.fields.len();
         class.first_field_index = super_class_field_count;
 
-        let super_class_method_count = match &class.superclass {
-            Some(clazz) => clazz.transitive_method_count,
-            None => 0,
-        };
+        let super_class_method_count = class.superclass.as_ref().map_or(0, |clazz| clazz.transitive_method_count);
         let mut default_method_indices = Vec::new();
         let is_interface = class.is_interface();
         let is_method_handle_clazz = class.name == JAVA_LANG_INVOKE_METHOD_HANDLE;

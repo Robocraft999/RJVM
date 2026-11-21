@@ -1,5 +1,5 @@
 use crate::vm::result::VMResult;
-use log::{debug, warn};
+use log::debug;
 use std::alloc::Layout;
 use std::fmt;
 use std::fmt::Formatter;
@@ -29,7 +29,7 @@ impl MemoryChunk {
             capacity, ptr as u64
         );
 
-        MemoryChunk {
+        Self {
             start: ptr as u64,
             memory: ptr,
             capacity,
@@ -62,8 +62,8 @@ impl MemoryChunk {
         }
         unsafe {
             // std::ptr::copy(data.as_ptr(), ptr as *mut u8, bytes);
-            for i in 0..bytes {
-                std::ptr::write((ptr + i as u64) as *mut u8, data[i]);
+            for (i, &byte) in data.iter().enumerate() {
+                std::ptr::write((ptr + i as u64) as *mut u8, byte);
             }
         }
         Ok(())

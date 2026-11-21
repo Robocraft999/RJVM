@@ -1,10 +1,9 @@
+use crate::vm::VmError;
 use crate::vm::constants::classes::{JAVA_LANG_OBJECT, JAVA_LANG_OBJECT_ARR};
-use crate::vm::native::{gen_delegate, invalidation, non_failing_none, non_failing_some, wrap_init, NativeMethodRegistry};
+use crate::vm::native::{NativeMethodRegistry, gen_delegate, invalidation, non_failing_none, non_failing_some, wrap_init};
 use crate::vm::result::VMPartialResult;
 use crate::vm::value::{Reference, ReferenceType, Value};
-use crate::vm::VmError;
 use log::{debug, trace};
-use parking_lot::RwLock;
 use std::hash::{DefaultHasher, Hash, Hasher};
 
 pub fn register_natives(registry: &mut NativeMethodRegistry) {
@@ -32,15 +31,16 @@ gen_delegate!(delegate_get_class, |ctx, obj_ref, _args| {
 });
 
 gen_delegate!(delegate_hashcode, |_ctx, obj_ref, _args| {
-    if let Some(obj_ref) = obj_ref{
-        let mut hasher = DefaultHasher::new();
-        obj_ref.id.hash(&mut hasher);
-        let addr = hasher.finish() as i32;
-        trace!(target: "native", "HASHCODE: {} {:?}", addr, obj_ref);
-        non_failing_some(Value::Integer(addr))
-    } else {
-        invalidation!("Expected object")
-    }
+    obj_ref.map_or_else(
+        || invalidation!("Expected object"), 
+        |obj_ref| {
+            let mut hasher = DefaultHasher::new();
+            obj_ref.id.hash(&mut hasher);
+            let addr = hasher.finish() as i32;
+            trace!(target: "native", "HASHCODE: {} {:?}", addr, obj_ref);
+            non_failing_some(Value::Integer(addr))
+        }
+    )
 });
 
 gen_delegate!(delegate_clone, |ctx, obj_ref, _args| {

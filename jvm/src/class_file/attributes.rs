@@ -1,10 +1,10 @@
-use crate::vm::result::VMResult;
 use crate::vm::VmError;
+use crate::vm::result::VMResult;
+use nom::IResult;
 use nom::combinator::map;
 use nom::error::Error;
 use nom::multi::length_count;
 use nom::number::{be_u16, be_u8};
-use nom::IResult;
 use nom_derive::{NomBE, Parse, Parser};
 
 #[derive(Debug, Clone, Default)]
@@ -46,7 +46,7 @@ gen_nom_unfucker!(BootstrapMethods, parse_bootstrap_methods);
 
 impl ClassFileAttributes {
     pub fn set(&mut self, name: &str, bytes: Vec<u8>) -> VMResult<()>{
-        Ok(match name{
+        match name{
             "InnerClasses" => self.inner_classes = Some(parse_inner_classes(&bytes)?),
             "EnclosingMethod" => self.enclosing_method = Some(parse_enclosing_method(&bytes)?),
             "Synthetic" => self.synthetic = Some(parse_synthetic(&bytes)?),
@@ -55,7 +55,8 @@ impl ClassFileAttributes {
             "RuntimeVisibleAnnotations" => self.runtime_visible_annotations.push(parse_runtime_visible_annotations(&bytes)?),
             "BootstrapMethods" => self.bootstrap_methods = Some(parse_bootstrap_methods(&bytes)?),
             invalid => return Err(VmError::ValidationError(format!("Unknown class file attribute: {}", invalid))),
-        })
+        }
+        Ok(())
     }
 }
 
@@ -120,7 +121,7 @@ pub enum ElementValue {
     Enum { type_name_index: u16, const_name_index: u16 },
     Class { class_info_index: u16 },
     Annotation { annotation_value: Annotation },
-    Array { array_value: Vec<ElementValue> },
+    Array { array_value: Vec<Self> },
 }
 
 impl Parse<&[u8]> for ElementValue {
@@ -131,11 +132,11 @@ impl Parse<&[u8]> for ElementValue {
     fn parse_be(i: &[u8]) -> IResult<&[u8], Self, Error<&[u8]>> {
         let (i, tag) = be_u8().parse(i)?;
         match tag as char{
-            'B' | 'C' | 'D' | 'F' | 'I' | 'J' | 'S' | 'Z' | 's' => map(be_u16(), |const_value_index| ElementValue::Const { const_value_index }).parse(i),
-            'e' => map((be_u16(), be_u16()), |(type_name_index, const_name_index)| ElementValue::Enum{ type_name_index, const_name_index }).parse(i),
-            'c' => map(be_u16(), |class_info_index| ElementValue::Class{ class_info_index }).parse(i),
-            '@' => map(Annotation::parse, |annotation_value| ElementValue::Annotation{ annotation_value }).parse(i),
-            '[' => map(length_count(be_u16(), ElementValue::parse), |array_value| ElementValue::Array{ array_value }).parse(i),
+            'B' | 'C' | 'D' | 'F' | 'I' | 'J' | 'S' | 'Z' | 's' => map(be_u16(), |const_value_index| Self::Const { const_value_index }).parse(i),
+            'e' => map((be_u16(), be_u16()), |(type_name_index, const_name_index)| Self::Enum{ type_name_index, const_name_index }).parse(i),
+            'c' => map(be_u16(), |class_info_index| Self::Class{ class_info_index }).parse(i),
+            '@' => map(Annotation::parse, |annotation_value| Self::Annotation{ annotation_value }).parse(i),
+            '[' => map(length_count(be_u16(), Self::parse), |array_value| Self::Array{ array_value }).parse(i),
             _ => Err(nom::Err::Error(Error::new(i, nom::error::ErrorKind::Alt))),
         }
     }

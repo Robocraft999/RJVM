@@ -1,16 +1,16 @@
-use std::ffi::{c_void, CString};
-use libc::{c_int, read, stat64, write, FIONREAD};
-use log::error;
-use crate::vm::constants::classes::JAVA_IO_IOEXCEPTION;
-use crate::vm::constants::{FILEDESCRIPTOR_fd_INDEX};
 use crate::vm::Context;
+use crate::vm::constants::FILEDESCRIPTOR_fd_INDEX;
+use crate::vm::constants::classes::JAVA_IO_IOEXCEPTION;
 use crate::vm::java_thread::JavaThread;
-use crate::vm::jni::types::{jbyte, jchar};
+use crate::vm::jni::types::jbyte;
 use crate::vm::native::wrap_init;
 use crate::vm::result::{VMPartialResult, VMResultType};
 use crate::vm::value::{Reference, Value};
+use libc::{FIONREAD, c_int, read, stat64, write};
+use log::error;
+use std::ffi::{CString, c_void};
 
-pub unsafe fn handle_available(fd: i32) -> (bool, i64) {
+pub unsafe fn handle_available(fd: i32) -> (bool, i64) { unsafe {
     let mut size: i64 = 0;
 
     let mut buf64: stat64 = std::mem::zeroed();
@@ -35,17 +35,16 @@ pub unsafe fn handle_available(fd: i32) -> (bool, i64) {
 
     if size < current {
         size = libc::lseek64(fd, 0, libc::SEEK_END);
-        if size == -1 {
-            return (false, 0)
-        } else if libc::lseek64(fd, current, libc::SEEK_SET) == -1 {
+        if size == -1 || libc::lseek64(fd, current, libc::SEEK_SET) == -1 {
             return (false, 0)
         }
     }
 
     (true, size - current)
-}
+}}
 
-pub unsafe fn handle_open(path: CString, oflags: i32, mode: i32) -> i32 {
+
+pub unsafe fn handle_open(path: CString, oflags: i32, mode: i32) -> i32 { unsafe {
     let fd = libc::open64(path.as_ptr(), oflags, mode);
     if fd != -1 {
         let mut buf64: stat64 = std::mem::zeroed();
@@ -62,9 +61,9 @@ pub unsafe fn handle_open(path: CString, oflags: i32, mode: i32) -> i32 {
         }
     }
     fd as i32
-}
+}}
 
-pub unsafe fn file_close(ctx: Context, this_ref: Reference, fd_field_index: usize) -> VMPartialResult<()> {
+pub unsafe fn file_close(ctx: Context, this_ref: Reference, fd_field_index: usize) -> VMPartialResult<()> { unsafe {
     let fd_val = this_ref.get_ref_field(fd_field_index)?;
     let fd_ref = ctx.vm.resolve_object_by_id(fd_val)?;
     let fd = fd_ref.get_int_field(FILEDESCRIPTOR_fd_INDEX)?;
@@ -77,7 +76,7 @@ pub unsafe fn file_close(ctx: Context, this_ref: Reference, fd_field_index: usiz
 
     let exception_clazz = wrap_init!(ctx, ctx.get_or_initialize_class(JAVA_IO_IOEXCEPTION)?);
 
-    if fd >= libc::STDIN_FILENO && fd <= libc::STDERR_FILENO {
+    if (libc::STDIN_FILENO..=libc::STDERR_FILENO).contains(&fd) {
         let devnull = libc::open(c"/dev/null".as_ptr(), libc::O_WRONLY);
         if devnull < 0 {
             fd_ref.set_field(FILEDESCRIPTOR_fd_INDEX, Value::Integer(fd));
@@ -104,7 +103,7 @@ pub unsafe fn file_close(ctx: Context, this_ref: Reference, fd_field_index: usiz
     }
 
     Ok(VMResultType::Successful(()))
-}
+}}
 
 pub unsafe fn handle_write(fd: i32, buf: *const jbyte, len: usize) -> isize {
     unsafe { write(fd, buf as *const c_void, len) }

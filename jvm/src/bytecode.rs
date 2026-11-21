@@ -1,22 +1,19 @@
 #![allow(non_camel_case_types)]
+#![allow(clippy::upper_case_acronyms)]
 use crate::bytecode::Instruction::*;
+use crate::class_file::methods::code::PC;
 use crate::error::ClassParseError;
 use crate::vm::VmError;
-use strum_macros::FromRepr;
-use crate::class_file::methods::code::PC;
 use crate::vm::result::VMResult;
+use strum_macros::FromRepr;
 
-pub fn printable_instructions(code_bytes: &Vec<u8>) -> Vec<Instruction>{
+pub fn printable_instructions(code_bytes: &[u8]) -> Vec<Instruction>{
     let mut instructions = Vec::new();
     //TODO add error handling
     let mut pc = 0;
-    loop{
-        if let Ok((instruction, new_pc)) = parse_instruction(code_bytes, pc){
-            instructions.push(instruction);
-            pc = new_pc
-        } else {
-            break;
-        }
+    while let Ok((instruction, new_pc)) = parse_instruction(code_bytes, pc) {
+        instructions.push(instruction);
+        pc = new_pc
     }
     instructions
 }
@@ -543,7 +540,7 @@ pub enum Instruction{
     JSR_W(i32),
 }
 
-#[derive(Debug, PartialEq, FromRepr, Clone)]
+#[derive(Debug, PartialEq, Eq, FromRepr, Clone)]
 #[repr(u8)]
 pub enum BytecodeInstruction {
     NOP         = 0x0,

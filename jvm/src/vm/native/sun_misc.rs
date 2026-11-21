@@ -1,12 +1,10 @@
-use crate::class_file::fields::field_type::{FieldType, PrimitiveType};
+use crate::vm::VmError;
 use crate::vm::constants::classes::{JAVA_LANG_BYTE_ARR_PRIM, SUN_MISC_PERF, SUN_MISC_SIGNAL, SUN_MISC_URL_CLASSPATH, SUN_MISC_VM, SUN_NIO_FS_UND};
 use crate::vm::java_thread::JavaThread;
-use crate::vm::native::{gen_delegate, invalidation, non_failing_none, non_failing_some, wrap_init, NativeMethodRegistry};
+use crate::vm::native::{NativeMethodRegistry, gen_delegate, invalidation, non_failing_none, non_failing_some, wrap_init};
 use crate::vm::result::{VMPartialResult, VMResultType};
 use crate::vm::value::{Reference, Value};
-use crate::vm::VmError;
 use log::debug;
-use parking_lot::RwLock;
 use std::env;
 
 pub fn register_natives(registry: &mut NativeMethodRegistry) {
@@ -67,7 +65,7 @@ gen_delegate!(delegate_create_long, |ctx, _obj_ref, _args| {
     let constructor = ctx.resolve_class_method(class_name, "<init>", "(JI)V")?;
     let addr = ctx.vm.unsafe_allocator.allocate_memory(8);
     let res = JavaThread::invoke_subroutine(ctx, constructor, Some(byte_buffer_ref), vec![Value::Long(addr), Value::Dummy, Value::Integer(8)])?;
-    if let VMResultType::Successful(None) = res{
+    if matches!(res, VMResultType::Successful(None)){
         non_failing_some(Value::Reference(byte_buffer_ref.id))
     } else {
         invalidation!("Error when calling constructor")

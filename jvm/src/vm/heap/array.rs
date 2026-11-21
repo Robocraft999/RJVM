@@ -1,7 +1,7 @@
-use std::slice;
-use log::{error, warn};
 use crate::vm::jni::types::{jboolean, jbyte, jchar, jdouble, jfloat, jint, jlong, jobject, jshort};
 use crate::vm::value::{RefId, Value};
+use log::{error, warn};
+use std::slice;
 
 pub enum ArrayContent {
     Ref(RawArray<jobject>),
@@ -18,63 +18,63 @@ pub enum ArrayContent {
 impl ArrayContent {
     pub fn set(&mut self, index: usize, value: Value) {
         match (self, value) {
-            (ArrayContent::Ref(raw), Value::Reference(ref_id)) => raw.set(index, ref_id.nid()),
-            (ArrayContent::Bool(raw), Value::Integer(val)) => raw.set(index, val as jboolean),
-            (ArrayContent::Byte(raw), Value::Integer(val)) => raw.set(index, val as jbyte),
-            (ArrayContent::Char(raw), Value::Integer(val)) => raw.set(index, val as jchar),
-            (ArrayContent::Short(raw), Value::Integer(val)) => raw.set(index, val as jshort),
-            (ArrayContent::Int(raw), Value::Integer(val)) => raw.set(index, val as jint),
-            (ArrayContent::Long(raw), Value::Long(val)) => raw.set(index, val as jlong),
-            (ArrayContent::Float(raw), Value::Float(val)) => raw.set(index, val as jfloat),
-            (ArrayContent::Double(raw), Value::Double(val)) => raw.set(index, val as jdouble),
+            (Self::Ref(raw), Value::Reference(ref_id)) => raw.set(index, ref_id.nid()),
+            (Self::Bool(raw), Value::Integer(val)) => raw.set(index, val as jboolean),
+            (Self::Byte(raw), Value::Integer(val)) => raw.set(index, val as jbyte),
+            (Self::Char(raw), Value::Integer(val)) => raw.set(index, val as jchar),
+            (Self::Short(raw), Value::Integer(val)) => raw.set(index, val as jshort),
+            (Self::Int(raw), Value::Integer(val)) => raw.set(index, val as jint),
+            (Self::Long(raw), Value::Long(val)) => raw.set(index, val as jlong),
+            (Self::Float(raw), Value::Float(val)) => raw.set(index, val as jfloat),
+            (Self::Double(raw), Value::Double(val)) => raw.set(index, val as jdouble),
             _ => unreachable!("Setting wrong type in array")
         }
     }
 
     pub fn get(&self, index: usize) -> Option<Value> {
         match self {
-            ArrayContent::Ref(raw) => raw.get(index).map(|n| Value::Reference(RefId(*n))),
-            ArrayContent::Bool(raw) => raw.get(index).map(|n| Value::Integer(*n as i32)),
-            ArrayContent::Byte(raw) => raw.get(index).map(|n| Value::Integer(*n as i32)),
-            ArrayContent::Char(raw) => raw.get(index).map(|n| Value::Integer(*n as i32)),
-            ArrayContent::Short(raw) => raw.get(index).map(|n| Value::Integer(*n as i32)),
-            ArrayContent::Int(raw) => raw.get(index).map(|n| Value::Integer(*n as i32)),
-            ArrayContent::Long(raw) => raw.get(index).map(|n| Value::Long(*n as i64)),
-            ArrayContent::Float(raw) => raw.get(index).map(|n| Value::Float(*n as f32)),
-            ArrayContent::Double(raw) => raw.get(index).map(|n| Value::Double(*n as f64)),
+            Self::Ref(raw) => raw.get(index).map(|n| Value::Reference(RefId(*n))),
+            Self::Bool(raw) => raw.get(index).map(|n| Value::Integer(*n as i32)),
+            Self::Byte(raw) => raw.get(index).map(|n| Value::Integer(*n as i32)),
+            Self::Char(raw) => raw.get(index).map(|n| Value::Integer(*n as i32)),
+            Self::Short(raw) => raw.get(index).map(|n| Value::Integer(*n as i32)),
+            Self::Int(raw) => raw.get(index).map(|n| Value::Integer(*n as i32)),
+            Self::Long(raw) => raw.get(index).map(|n| Value::Long(*n as i64)),
+            Self::Float(raw) => raw.get(index).map(|n| Value::Float(*n as f32)),
+            Self::Double(raw) => raw.get(index).map(|n| Value::Double(*n as f64)),
         }
     }
 
     pub const fn len(&self) -> usize {
         match self {
-            ArrayContent::Ref(raw) => raw.len(),
-            ArrayContent::Bool(raw) => raw.len(),
-            ArrayContent::Byte(raw) => raw.len(),
-            ArrayContent::Char(raw) => raw.len(),
-            ArrayContent::Short(raw) => raw.len(),
-            ArrayContent::Int(raw) => raw.len(),
-            ArrayContent::Long(raw) => raw.len(),
-            ArrayContent::Float(raw) => raw.len(),
-            ArrayContent::Double(raw) => raw.len(),
+            Self::Ref(raw) => raw.len(),
+            Self::Bool(raw) => raw.len(),
+            Self::Byte(raw) => raw.len(),
+            Self::Char(raw) => raw.len(),
+            Self::Short(raw) => raw.len(),
+            Self::Int(raw) => raw.len(),
+            Self::Long(raw) => raw.len(),
+            Self::Float(raw) => raw.len(),
+            Self::Double(raw) => raw.len(),
         }
     }
 
     pub const fn as_raw_ptr(&self) -> *const u8 {
         match self {
-            ArrayContent::Ref(raw) => raw.as_ptr() as *const u8,
-            ArrayContent::Bool(raw) => raw.as_ptr() as *const u8,
-            ArrayContent::Byte(raw) => raw.as_ptr() as *const u8,
-            ArrayContent::Char(raw) => raw.as_ptr() as *const u8,
-            ArrayContent::Short(raw) => raw.as_ptr() as *const u8,
-            ArrayContent::Int(raw) => raw.as_ptr() as *const u8,
-            ArrayContent::Long(raw) => raw.as_ptr() as *const u8,
-            ArrayContent::Float(raw) => raw.as_ptr() as *const u8,
-            ArrayContent::Double(raw) => raw.as_ptr() as *const u8,
+            Self::Ref(raw) => raw.as_ptr() as *const u8,
+            Self::Bool(raw) => raw.as_ptr() as *const u8,
+            Self::Byte(raw) => raw.as_ptr() as *const u8,
+            Self::Char(raw) => raw.as_ptr() as *const u8,
+            Self::Short(raw) => raw.as_ptr() as *const u8,
+            Self::Int(raw) => raw.as_ptr() as *const u8,
+            Self::Long(raw) => raw.as_ptr() as *const u8,
+            Self::Float(raw) => raw.as_ptr() as *const u8,
+            Self::Double(raw) => raw.as_ptr() as *const u8,
         }
     }
 
     pub fn get_as_string(&self) -> Option<String> {
-        if let ArrayContent::Char(raw) = self {
+        if let Self::Char(raw) = self {
             Some(String::from_utf16_lossy(unsafe { raw.as_slice() }))
         } else {
             None
@@ -82,16 +82,16 @@ impl ArrayContent {
     }
 
     pub fn as_ref_vec(&self) -> Option<Vec<RefId>> {
-        if let ArrayContent::Ref(raw) = self {
-            Some(unsafe { raw.as_slice() }.into_iter().map(|r| RefId(*r)).collect())
+        if let Self::Ref(raw) = self {
+            Some(unsafe { raw.as_slice() }.iter().map(|r| RefId(*r)).collect())
         } else {
             None
         }
     }
 
     pub fn as_byte_vec(&self) -> Option<Vec<u8>> {
-        if let ArrayContent::Byte(raw) = self {
-            Some(unsafe { raw.as_slice() }.into_iter().map(|r| *r as u8).collect())
+        if let Self::Byte(raw) = self {
+            Some(unsafe { raw.as_slice() }.iter().map(|r| *r as u8).collect())
         } else {
             None
         }
@@ -99,42 +99,42 @@ impl ArrayContent {
 
     pub fn as_vec(&self) -> Vec<Value> {
         match self {
-            ArrayContent::Ref(raw)    => unsafe { raw.as_slice() }.into_iter().map(|n| Value::Reference(RefId(*n))).collect(),
-            ArrayContent::Bool(raw)   => unsafe { raw.as_slice() }.into_iter().map(|n| Value::Integer(*n as i32)).collect(),
-            ArrayContent::Byte(raw)   => unsafe { raw.as_slice() }.into_iter().map(|n| Value::Integer(*n as i32)).collect(),
-            ArrayContent::Char(raw)   => unsafe { raw.as_slice() }.into_iter().map(|n| Value::Integer(*n as i32)).collect(),
-            ArrayContent::Short(raw)  => unsafe { raw.as_slice() }.into_iter().map(|n| Value::Integer(*n as i32)).collect(),
-            ArrayContent::Int(raw)    => unsafe { raw.as_slice() }.into_iter().map(|n| Value::Integer(*n as i32)).collect(),
-            ArrayContent::Long(raw)   => unsafe { raw.as_slice() }.into_iter().map(|n| Value::Long(*n as i64)).collect(),
-            ArrayContent::Float(raw)  => unsafe { raw.as_slice() }.into_iter().map(|n| Value::Float(*n as f32)).collect(),
-            ArrayContent::Double(raw) => unsafe { raw.as_slice() }.into_iter().map(|n| Value::Double(*n as f64)).collect(),
+            Self::Ref(raw)    => unsafe { raw.as_slice() }.iter().map(|n| Value::Reference(RefId(*n))).collect(),
+            Self::Bool(raw)   => unsafe { raw.as_slice() }.iter().map(|n| Value::Integer(*n as i32)).collect(),
+            Self::Byte(raw)   => unsafe { raw.as_slice() }.iter().map(|n| Value::Integer(*n as i32)).collect(),
+            Self::Char(raw)   => unsafe { raw.as_slice() }.iter().map(|n| Value::Integer(*n as i32)).collect(),
+            Self::Short(raw)  => unsafe { raw.as_slice() }.iter().map(|n| Value::Integer(*n as i32)).collect(),
+            Self::Int(raw)    => unsafe { raw.as_slice() }.iter().map(|n| Value::Integer(*n as i32)).collect(),
+            Self::Long(raw)   => unsafe { raw.as_slice() }.iter().map(|n| Value::Long(*n as i64)).collect(),
+            Self::Float(raw)  => unsafe { raw.as_slice() }.iter().map(|n| Value::Float(*n as f32)).collect(),
+            Self::Double(raw) => unsafe { raw.as_slice() }.iter().map(|n| Value::Double(*n as f64)).collect(),
         }
     }
 
     pub fn copy(&self, dst: &Self, src_offset: usize, dst_offset: usize, length: usize) {
         match (self, dst) {
-            (ArrayContent::Ref(src), ArrayContent::Ref(dst)) => src.copy_to(dst, src_offset, dst_offset, length),
-            (ArrayContent::Bool(src), ArrayContent::Bool(dst)) => src.copy_to(dst, src_offset, dst_offset, length),
-            (ArrayContent::Byte(src), ArrayContent::Byte(dst)) => src.copy_to(dst, src_offset, dst_offset, length),
-            (ArrayContent::Char(src), ArrayContent::Char(dst)) => src.copy_to(dst, src_offset, dst_offset, length),
-            (ArrayContent::Short(src), ArrayContent::Short(dst)) => src.copy_to(dst, src_offset, dst_offset, length),
-            (ArrayContent::Int(src), ArrayContent::Int(dst)) => src.copy_to(dst, src_offset, dst_offset, length),
-            (ArrayContent::Long(src), ArrayContent::Long(dst)) => src.copy_to(dst, src_offset, dst_offset, length),
-            (ArrayContent::Float(src), ArrayContent::Float(dst)) => src.copy_to(dst, src_offset, dst_offset, length),
-            (ArrayContent::Double(src), ArrayContent::Double(dst)) => src.copy_to(dst, src_offset, dst_offset, length),
+            (Self::Ref(src), Self::Ref(dst)) => src.copy_to(dst, src_offset, dst_offset, length),
+            (Self::Bool(src), Self::Bool(dst)) => src.copy_to(dst, src_offset, dst_offset, length),
+            (Self::Byte(src), Self::Byte(dst)) => src.copy_to(dst, src_offset, dst_offset, length),
+            (Self::Char(src), Self::Char(dst)) => src.copy_to(dst, src_offset, dst_offset, length),
+            (Self::Short(src), Self::Short(dst)) => src.copy_to(dst, src_offset, dst_offset, length),
+            (Self::Int(src), Self::Int(dst)) => src.copy_to(dst, src_offset, dst_offset, length),
+            (Self::Long(src), Self::Long(dst)) => src.copy_to(dst, src_offset, dst_offset, length),
+            (Self::Float(src), Self::Float(dst)) => src.copy_to(dst, src_offset, dst_offset, length),
+            (Self::Double(src), Self::Double(dst)) => src.copy_to(dst, src_offset, dst_offset, length),
             _ => unreachable!("Cannot copy between different typed arrays")
         }
     }
 
-    pub const fn is_ref(&self) -> bool { matches!(self, ArrayContent::Ref(..)) }
-    pub const fn is_bool(&self) -> bool { matches!(self, ArrayContent::Bool(..)) }
-    pub const fn is_byte(&self) -> bool { matches!(self, ArrayContent::Byte(..)) }
-    pub const fn is_char(&self) -> bool { matches!(self, ArrayContent::Char(..)) }
-    pub const fn is_short(&self) -> bool { matches!(self, ArrayContent::Short(..)) }
-    pub const fn is_int(&self) -> bool { matches!(self, ArrayContent::Int(..)) }
-    pub const fn is_long(&self) -> bool { matches!(self, ArrayContent::Long(..)) }
-    pub const fn is_float(&self) -> bool { matches!(self, ArrayContent::Float(..)) }
-    pub const fn is_double(&self) -> bool { matches!(self, ArrayContent::Double(..)) }
+    pub const fn is_ref(&self) -> bool { matches!(self, Self::Ref(..)) }
+    pub const fn is_bool(&self) -> bool { matches!(self, Self::Bool(..)) }
+    pub const fn is_byte(&self) -> bool { matches!(self, Self::Byte(..)) }
+    pub const fn is_char(&self) -> bool { matches!(self, Self::Char(..)) }
+    pub const fn is_short(&self) -> bool { matches!(self, Self::Short(..)) }
+    pub const fn is_int(&self) -> bool { matches!(self, Self::Int(..)) }
+    pub const fn is_long(&self) -> bool { matches!(self, Self::Long(..)) }
+    pub const fn is_float(&self) -> bool { matches!(self, Self::Float(..)) }
+    pub const fn is_double(&self) -> bool { matches!(self, Self::Double(..)) }
 }
 
 #[repr(C)]
@@ -144,7 +144,7 @@ pub struct RawArray<T> {
 }
 
 impl<T> RawArray<T> {
-    pub fn new(ptr: *mut T, len: usize) -> Self {
+    pub const fn new(ptr: *mut T, len: usize) -> Self {
         Self {
             ptr,
             len
@@ -155,7 +155,7 @@ impl<T> RawArray<T> {
         self.len
     }
 
-    pub unsafe fn as_slice(&self) -> &[T] {
+    pub const unsafe fn as_slice(&self) -> &[T] {
         unsafe { slice::from_raw_parts(self.ptr, self.len) }
     }
 

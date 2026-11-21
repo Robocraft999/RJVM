@@ -1,19 +1,25 @@
 use crate::class_file::fields::{primitive_type_to_class_name, primitive_type_to_descriptor};
+use crate::vm::VmError;
 use crate::vm::result::VMResult;
 use crate::vm::value::Value;
-use crate::vm::VmError;
-use lazy_regex::{lazy_regex, regex, Lazy};
+use lazy_regex::{Lazy, lazy_regex, regex};
 use regex::Regex;
 use std::str::FromStr;
 
 static PATTERN: Lazy<Regex> = lazy_regex!(r"(?<array>\[+)?(?:(?<primitive>[ZBSIJFDC])|L(?<object>[/a-zA-Z$0-9_]+);)");
 
 pub fn get_field_type_raw_parts(raw: &str) -> VMResult<(Option<&str>, Option<&str>, Option<&str>)> {
-    if let Some(cap) = PATTERN.captures(raw){
-        Ok((cap.name("object").map(|m| m.as_str()), cap.name("primitive").map(|m| m.as_str()), cap.name("array").map(|m| m.as_str())))
-    } else {
-        Err(VmError::ValidationError(format!("{} is not a valid field type", raw)))
-    }
+    PATTERN
+        .captures(raw)
+        .map_or_else(||
+                         Err(VmError::ValidationError(format!("{} is not a valid field type", raw))),
+                     |cap|
+                         Ok((
+                             cap.name("object").map(|m| m.as_str()),
+                             cap.name("primitive").map(|m| m.as_str()),
+                             cap.name("array").map(|m| m.as_str()))
+                         )
+        )
 }
 
 pub fn extract_component_type_from_array_class(array_class_descriptor: &str) -> VMResult<(FieldType, usize)> {
@@ -30,65 +36,65 @@ pub fn extract_component_type_from_array_class(array_class_descriptor: &str) -> 
 pub enum FieldType{
     Primitive(PrimitiveType),
     Object(String),
-    Array(String, Box<FieldType>),
+    Array(String, Box<Self>),
 }
 
 impl FieldType {
     pub(crate) fn to_class_name(&self) -> String {
         match self {
-            FieldType::Primitive(primitive_type) => primitive_type_to_class_name(primitive_type),
-            FieldType::Object(name) => format!("{}", name),
-            FieldType::Array(name, _) => format!("{}", name),
+            Self::Primitive(primitive_type) => primitive_type_to_class_name(primitive_type),
+            Self::Object(name) => name.to_string(),
+            Self::Array(name, _) => name.to_string(),
         }
     }
 
     pub fn to_descriptor(&self) -> String {
         match self {
-            FieldType::Primitive(primitive_type) => primitive_type_to_descriptor(primitive_type),
-            FieldType::Object(name) => format!("L{};", name),
-            FieldType::Array(name, _) => format!("{}", name),
+            Self::Primitive(primitive_type) => primitive_type_to_descriptor(primitive_type),
+            Self::Object(name) => format!("L{};", name),
+            Self::Array(name, _) => name.to_string(),
         }
     }
 
-    pub fn to_array_field_type(self, dims: usize) -> FieldType{
+    pub fn to_array_field_type(&self, dims: usize) -> Self{
         if dims == 0{
             panic!("Can't make {self:?} an array type because dims is 0");
         }
         let prefix = "[".repeat(dims);
-        match self.clone() {
+        match self {
             // Extends the primitive type to an n-dim array type
-            FieldType::Primitive(primitive_type) => {
+            Self::Primitive(primitive_type) => {
                 let name = prefix + primitive_type_to_descriptor(&primitive_type).as_str();
-                FieldType::Array(name, Box::new(self))
+                Self::Array(name, Box::new(self.clone()))
             }
             // Extends the object type to an n-dim array type
-            FieldType::Object(name) => {
+            Self::Object(name) => {
                 let name = prefix + "L" + name.as_str() + ";";
-                FieldType::Array(name, Box::new(self))
+                Self::Array(name, Box::new(self.clone()))
             }
             // Extends the m-dim array type to an (n+m)-dim array type
-            FieldType::Array(name, component_type) => FieldType::Array(prefix + name.as_str(), component_type),
+            Self::Array(name, component_type) => Self::Array(prefix + name.as_str(), component_type.clone()),
         }
     }
 
-    pub fn get_locals_length(&self) -> usize{
+    pub const fn get_locals_length(&self) -> usize{
         match self{
-            FieldType::Object(_) => 1,
-            FieldType::Array(_, _) => 1,
-            FieldType::Primitive(PrimitiveType::Boolean) => 1,
-            FieldType::Primitive(PrimitiveType::Byte) => 1,
-            FieldType::Primitive(PrimitiveType::Char) => 1,
-            FieldType::Primitive(PrimitiveType::Short) => 1,
-            FieldType::Primitive(PrimitiveType::Integer) => 1,
-            FieldType::Primitive(PrimitiveType::Long) => 2,
-            FieldType::Primitive(PrimitiveType::Float) => 1,
-            FieldType::Primitive(PrimitiveType::Double) => 2,
+            Self::Object(_) => 1,
+            Self::Array(_, _) => 1,
+            Self::Primitive(PrimitiveType::Boolean) => 1,
+            Self::Primitive(PrimitiveType::Byte) => 1,
+            Self::Primitive(PrimitiveType::Char) => 1,
+            Self::Primitive(PrimitiveType::Short) => 1,
+            Self::Primitive(PrimitiveType::Integer) => 1,
+            Self::Primitive(PrimitiveType::Long) => 2,
+            Self::Primitive(PrimitiveType::Float) => 1,
+            Self::Primitive(PrimitiveType::Double) => 2,
         }
     }
 
-    pub fn get_default_value<'a>(&self, null: Value) -> Value {
+    pub const fn get_default_value(&self, null: Value) -> Value {
         match self {
-            FieldType::Primitive(primitive) => {
+            Self::Primitive(primitive) => {
                 match primitive {
                     PrimitiveType::Boolean => Value::Integer(0),
                     PrimitiveType::Byte => Value::Integer(0),
@@ -100,16 +106,16 @@ impl FieldType {
                     PrimitiveType::Double => Value::Double(0f64),
                 }
             }
-            FieldType::Object(_) => null,
-            FieldType::Array(_, _) => null,
+            Self::Object(_) => null,
+            Self::Array(_, _) => null,
         }
     }
 
-    pub fn from_raw_parts(object: Option<&str>, primitive: Option<&str>, array: Option<&str>) -> VMResult<FieldType>{
+    pub fn from_raw_parts(object: Option<&str>, primitive: Option<&str>, array: Option<&str>) -> VMResult<Self>{
         let field_type = if let Some(obj) = object{
-            Some(FieldType::Object(String::from(obj)))
+            Some(Self::Object(String::from(obj)))
         }else if let Some(prim) = primitive{
-            Some(FieldType::Primitive(PrimitiveType::from_str(prim)?))
+            Some(Self::Primitive(PrimitiveType::from_str(prim)?))
         } else {
             None
         };
@@ -117,26 +123,22 @@ impl FieldType {
             let mut name = String::new();
             name.push_str(dims_amount_of_brackets);
             if let Some(obj) = object{
-                name.push_str("L");
+                name.push('L');
                 name.push_str(obj);
-                name.push_str(";");
+                name.push(';');
             }
             if let Some(prim) = primitive{
                 name.push_str(prim);
             }
             let component_type = field_type.ok_or_else(|| VmError::ValidationError(format!("{} is neither object nor primitive field type", name)))?;
-            Ok(FieldType::Array(name, Box::from(component_type)))
+            Ok(Self::Array(name, Box::from(component_type)))
         } else {
-            field_type.ok_or(VmError::ValidationError("Field type is neither object nor primitive".to_owned()))
+            field_type.ok_or_else(|| VmError::ValidationError("Field type is neither object nor primitive".to_owned()))
         }
     }
     
-    pub fn is_primitive(&self) -> bool {
-        if let FieldType::Primitive(_) = self {
-            true
-        } else {
-            false
-        }
+    pub const fn is_primitive(&self) -> bool {
+        matches!(self, Self::Primitive(_))
     }
 }
 
@@ -144,29 +146,28 @@ impl FromStr for FieldType{
     type Err = VmError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let (object, primitive, array) = get_field_type_raw_parts(s)?;
-        FieldType::from_raw_parts(object, primitive, array)
+        Self::from_raw_parts(object, primitive, array)
     }
 }
 
 impl PartialEq<Value> for FieldType{
     fn eq(&self, other: &Value) -> bool {
-        match (other, self) {
-            (Value::Reference(..), FieldType::Object(..)) | (Value::Reference(..), FieldType::Array(..)) => true,
-            (Value::Integer(..), FieldType::Primitive(PrimitiveType::Integer)) => true,
-            (Value::Integer(..), FieldType::Primitive(PrimitiveType::Short)) => true,
-            (Value::Integer(..), FieldType::Primitive(PrimitiveType::Byte)) => true,
-            (Value::Integer(..), FieldType::Primitive(PrimitiveType::Boolean)) => true,
-            (Value::Integer(..), FieldType::Primitive(PrimitiveType::Char)) => true,
-            (Value::Long(..), FieldType::Primitive(PrimitiveType::Long)) => true,
-            (Value::Float(..), FieldType::Primitive(PrimitiveType::Float)) => true,
-            (Value::Double(..), FieldType::Primitive(PrimitiveType::Double)) => true,
-            _ => false
-        }
+        matches!((other, self),
+            (Value::Reference(..), Self::Object(..)) |
+            (Value::Reference(..), Self::Array(..)) |
+            (Value::Integer(..),   Self::Primitive(PrimitiveType::Integer)) |
+            (Value::Integer(..),   Self::Primitive(PrimitiveType::Short)) |
+            (Value::Integer(..),   Self::Primitive(PrimitiveType::Byte)) |
+            (Value::Integer(..),   Self::Primitive(PrimitiveType::Boolean)) |
+            (Value::Integer(..),   Self::Primitive(PrimitiveType::Char)) |
+            (Value::Long(..),      Self::Primitive(PrimitiveType::Long)) |
+            (Value::Float(..),     Self::Primitive(PrimitiveType::Float)) |
+            (Value::Double(..),    Self::Primitive(PrimitiveType::Double)))
     }
 }
 
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum PrimitiveType{
     Boolean,
     Byte,

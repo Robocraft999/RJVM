@@ -1,9 +1,9 @@
+use crate::vm::VmError;
 use crate::vm::constants::classes::JAVA_LANG_CLASSLOADER;
 use crate::vm::constants::{CLASSLOADER_NATIVELIBRARY_handle_INDEX, CLASSLOADER_NATIVELIBRARY_loaded_INDEX, CLASSLOADER_NATIVELIBRARY_name_INDEX};
-use crate::vm::native::{gen_delegate, invalidation, non_failing_none, non_failing_some, wrap_init, NativeMethodRegistry};
+use crate::vm::native::{NativeMethodRegistry, gen_delegate, invalidation, non_failing_none, non_failing_some, wrap_init};
 use crate::vm::result::VMPartialResult;
 use crate::vm::value::{Reference, ReferenceType, Value};
-use crate::vm::VmError;
 use libloading::{Library, Symbol};
 use log::debug;
 
@@ -79,7 +79,7 @@ gen_delegate!(delegate_native_lib_load, |ctx, obj_ref, _args| {
 
             let vm_ptr = ptr::from_ref(ctx.thread.java_vm.as_ref().get_ref()) as *const c_void;
             debug!(target: "native", "native_lib: javavmp: {:p}", vm_ptr);
-            let reserved = std::ptr::null() as *const c_void;
+            let reserved = ptr::null() as *const c_void;
             let cif = Cif::new(vec![Type::pointer(), Type::pointer()], Type::i32()); //JNI_OnLoad
             let res: i32 = cif.call(libffi::low::CodePtr::from_ptr(func_ptr), &[Arg::new(&vm_ptr), Arg::new(&reserved)]);
             debug!(target: "native", "native_lib: res: {:x}", res);
@@ -92,12 +92,12 @@ gen_delegate!(delegate_native_lib_load, |ctx, obj_ref, _args| {
     }
 });
 
-gen_delegate!(delegate_define_class0, |ctx, obj_ref, args| {
+gen_delegate!(delegate_define_class0, |_ctx, _obj_ref, _args| {
     unimplemented!()
 });
 
 gen_delegate!(delegate_define_class1, |ctx, obj_ref, args| {
-    if let (Some(loader_ref), Some(name_val), Some(Value::Reference(b_arr_ref_id)), Some(Value::Integer(off)), Some(Value::Integer(len)), Some(source_val)) = (obj_ref, args.get(0), args.get(1), args.get(2), args.get(3), args.get(5)) {
+    if let (Some(loader_ref), Some(name_val), Some(Value::Reference(b_arr_ref_id)), Some(Value::Integer(off)), Some(Value::Integer(len)), Some(_source_val)) = (obj_ref, args.get(0), args.get(1), args.get(2), args.get(3), args.get(5)) {
         let name = ctx.vm.extract_string_from_value(*name_val)?;
         let name = name.replace(".", "/");
         // seems to be nullable
@@ -118,6 +118,6 @@ gen_delegate!(delegate_define_class1, |ctx, obj_ref, args| {
     }
 });
 
-gen_delegate!(delegate_define_class2, |ctx, obj_ref, args| {
+gen_delegate!(delegate_define_class2, |_ctx, _obj_ref, _args| {
     unimplemented!()
 });

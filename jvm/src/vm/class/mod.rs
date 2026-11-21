@@ -111,7 +111,7 @@ impl<'a> Class<'a>{
             }
         }
 
-        if candidates.len() > 0 {
+        if !candidates.is_empty() {
             return Some(candidates.into_iter().next().unwrap())
         }
 
@@ -122,13 +122,9 @@ impl<'a> Class<'a>{
         self.methods
             .iter()
             .find(|m| m.name == method_name && m.descriptor.matches(descriptor))
-            .map(|(i)| i.slot)
+            .map(|i| i.slot)
             .or_else(|| {
-                if let Some(superclass) = &self.superclass {
-                    superclass.find_method_slot(method_name, descriptor)
-                } else {
-                    None
-                }
+                self.superclass.as_ref().and_then(|superclass| superclass.find_method_slot(method_name, descriptor))
             })
     }
 
@@ -138,11 +134,7 @@ impl<'a> Class<'a>{
             .find(|m| m.slot == slot)
             .map(|m| ClassAndMethod{ class: self, method: m })
             .or_else(|| {
-                if let Some(superclass) = &self.superclass {
-                    superclass.get_method_in_slot(slot)
-                } else {
-                    None
-                }
+                self.superclass.as_ref().and_then(|superclass| superclass.get_method_in_slot(slot))
             })
     }
 
@@ -152,11 +144,7 @@ impl<'a> Class<'a>{
             .find(|f| f.name == field_name)
             .map(|f| f.slot)
             .or_else(|| {
-                if let Some(superclass) = &self.superclass{
-                    superclass.find_field_slot(field_name)
-                } else {
-                    None
-                }
+                self.superclass.as_ref().and_then(|superclass| superclass.find_field_slot(field_name))
             })
     }
 
@@ -165,11 +153,7 @@ impl<'a> Class<'a>{
             .iter()
             .find(|f| f.slot == slot)
             .or_else(|| {
-                if let Some(superclass) = &self.superclass{
-                    superclass.get_field_in_slot(slot)
-                } else {
-                    None
-                }
+                self.superclass.as_ref().and_then(|superclass| superclass.get_field_in_slot(slot))
             })
     }
 
@@ -198,47 +182,42 @@ impl<'a> Class<'a>{
             })
     }
 
-    pub fn is_interface(&self) -> bool {
+    pub const fn is_interface(&self) -> bool {
         !self.is_array() && self.flags & class_flags::INTERFACE > 0
     }
-    pub fn is_final(&self) -> bool {
+    pub const fn is_final(&self) -> bool {
         self.flags & class_flags::FINAL > 0
     }
 
-    pub fn is_array(&self) -> bool {
+    pub const fn is_array(&self) -> bool {
         self.array_info.is_some()
     }
 
     pub fn get_constant_as_value(&'a self, ctx: &Context<'a, '_>, index: u16) -> Value{
-        let optional_constant = self.get_or_resolve_constant(&ctx, index);
-        if let Some(constant) = optional_constant{
-            match constant {
+        let optional_constant = self.get_or_resolve_constant(ctx, index);
+        optional_constant.map_or(Value::Uninitialized, |constant| match constant {
                 ConstantPoolEntry::Integer(value) => Value::Integer(value),
                 ConstantPoolEntry::Long(value) => Value::Long(value),
                 ConstantPoolEntry::Float(value) => Value::Float(value),
                 ConstantPoolEntry::Double(value) => Value::Double(value),
                 ConstantPoolEntry::String(_index) => ctx.vm.null(), //FIXME resolve string and allocate
                 _ => {panic!("Constant of type {constant:?} not supported")}
-            }
-        } else {
-            Value::Uninitialized
-        }
+            })
     }
 
     pub fn get_fields(&'a self, ctx: &Context<'a, '_>) -> Vec<Value>{
         let local_values = (self.first_field_index..self.transitive_field_count)
             .map(|index| {
                 let field = self.field_at_index(index).unwrap();
-                if let Some(constant_value) = field.attributes.constant_value.clone(){
-                    self.get_constant_as_value(&ctx, constant_value.constantvalue_index)
-                } else {
-                    field.field_type.get_default_value(ctx.vm.null())
-                }
+                field.attributes.constant_value.clone().map_or_else(
+                    || field.field_type.get_default_value(ctx.vm.null()), 
+                    |constant_value| self.get_constant_as_value(ctx, constant_value.constantvalue_index)
+                )
             });
-        let mut superclass_values = match self.superclass {
-            Some(super_class) => super_class.get_fields(&ctx),
-            None => Vec::new()
-        };
+        let mut superclass_values = self.superclass.map_or_else(
+            Vec::new, 
+            |super_class| super_class.get_fields(ctx)
+        );
 
         superclass_values.extend(local_values);
         superclass_values
@@ -301,7 +280,7 @@ impl<'a> Class<'a>{
     fn needs_vtable_entry(&mut self, index: usize) -> bool {
         let is_final = self.is_final();
         let is_interface = self.is_interface();
-        let super_class = self.superclass.clone();
+        let super_class = self.superclass;
 
         let mut allocate_new: bool = true;
 
@@ -335,14 +314,12 @@ impl<'a> Class<'a>{
         let super_class = super_class.unwrap();
         // FIXME only works one layer deep
         for super_method in super_class.methods.iter() {
-            if target_method == super_method {
-                if !super_method.is_private() && true /* is_override */ {
-                    if !target_method.is_package_private() {
-                        allocate_new = false;
-                    }
-
-                    target_method.vtable_index = target_method.slot as isize;
+            if target_method == super_method && !super_method.is_private() {
+                if !target_method.is_package_private() {
+                    allocate_new = false;
                 }
+
+                target_method.vtable_index = target_method.slot as isize;
             }
         }
 
@@ -355,11 +332,9 @@ impl<'a> Class<'a>{
         if self.is_interface() {
             for target_method in self.methods.iter_mut(){
                 // interface_method_needs_itable_index
-                if !target_method.is_static() && !target_method.is_initializer() {
-                    if !target_method.has_vtable_index() {
-                        assert_eq!(target_method.vtable_index, PENDING_ITABLE_INDEX);
-                        target_method.vtable_index = ITABLE_INDEX_MAX - target_method.slot as isize;
-                    }
+                if !target_method.is_static() && !target_method.is_initializer() && !target_method.has_vtable_index() {
+                    assert_eq!(target_method.vtable_index, PENDING_ITABLE_INDEX);
+                    target_method.vtable_index = ITABLE_INDEX_MAX - target_method.slot as isize;
                 }
             }
             return;

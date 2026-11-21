@@ -1,7 +1,7 @@
-use crate::class_file::attributes::{gen_nom_unfucker, Deprecated, ElementValue, RuntimeAnnotations, Signature, Synthetic};
+use crate::class_file::attributes::{Deprecated, ElementValue, RuntimeAnnotations, Signature, Synthetic, gen_nom_unfucker};
 use crate::class_file::nom::RawAttribute;
-use crate::vm::result::VMResult;
 use crate::vm::VmError;
+use crate::vm::result::VMResult;
 use nom::number::{be_u16, be_u32};
 use nom_derive::{NomBE, Parse};
 
@@ -44,7 +44,7 @@ gen_nom_unfucker!(LocalVariableTable, parse_local_variable_table);
 
 impl MethodInfoAttributes {
     pub fn set(&mut self, name: &str, bytes: Vec<u8>) -> VMResult<()>{
-        Ok(match name{
+        match name {
             "Code" => self.code = Some(parse_code(&bytes)?),
             "Exceptions" => self.exceptions = Some(parse_exceptions(&bytes)?),
             "Synthetic" => self.synthetic = Some(parse_synthetic(&bytes)?),
@@ -53,19 +53,21 @@ impl MethodInfoAttributes {
             "RuntimeVisibleAnnotations" => self.runtime_visible_annotations.push(parse_runtime_visible_annotations(&bytes)?),
             "AnnotationDefault" => self.annotation_default = Some(parse_annotation_default_default(&bytes)?),
             invalid => return Err(VmError::ValidationError(format!("Unknown class file attribute: {}", invalid))),
-        })
+        }
+        Ok(())
     }
 }
 
 impl CodeAttributes {
     pub fn set(&mut self, name: &str, bytes: Vec<u8>) -> VMResult<()>{
-        Ok(match name{
+        match name{
             "LineNumberTable" => self.line_number_tables.push(parse_line_number_table(&bytes)?),
             "StackMapTable" => (),/*self.stack_map_table = Some(parse_stack_map_table(&bytes)?),*/
             "LocalVariableTable" => self.local_variable_tables.push(parse_local_variable_table(&bytes)?),
             "LocalVariableTypeTable" => (),
             invalid => return Err(VmError::ValidationError(format!("Unknown class file attribute: {}", invalid))),
-        })
+        }
+        Ok(())
     }
 }
 

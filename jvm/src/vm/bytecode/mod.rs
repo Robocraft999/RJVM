@@ -1,4 +1,4 @@
-use crate::bytecode::{parse_instruction, Instruction};
+use crate::bytecode::{Instruction, parse_instruction};
 use crate::class_file::methods::code::LocatedInstruction;
 use crate::vm::result::VMResult;
 

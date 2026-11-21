@@ -6,7 +6,7 @@ use crate::vm::debug::tracker::Tracker;
 mod exceptions;
 mod tracker;
 mod bytecode;
-pub(crate) mod validation;
+pub mod validation;
 mod monitors;
 
 pub struct DebugHelper{
@@ -76,7 +76,7 @@ mod loader{
 
         if let Ok(mut f) = File::open(path){
             let mut contents = String::new();
-            if let Ok(_) = f.read_to_string(&mut contents){
+            if f.read_to_string(&mut contents).is_ok(){
                 let config: Config = toml::from_str(&contents).unwrap();
                 return Some(config);
             }

@@ -1,8 +1,7 @@
 use crate::class_file::constant_pool::ConstantPoolEntry;
-use crate::vm::result::VMResult;
 use crate::vm::VmError;
+use crate::vm::result::VMResult;
 use cesu8::from_java_cesu8;
-use nom::error::ParseError;
 use nom::multi::length_count;
 use nom::number::{be_u16, be_u32, be_u8};
 use nom::{IResult, Parser};
@@ -40,7 +39,7 @@ where
     while remaining > 0 {
         let (j, entry) = ConstantPoolEntry::parse(i)?;
         i = j;
-        let is_double = if let ConstantPoolEntry::Double(_) | ConstantPoolEntry::Long(_) = entry {true} else {false};
+        let is_double = matches!(entry, ConstantPoolEntry::Double(_) | ConstantPoolEntry::Long(_));
         constant_pool.push(entry);
 
         remaining -= if is_double {
@@ -53,7 +52,7 @@ where
     Ok((i, constant_pool))
 }
 
-#[derive(Clone, Debug, PartialEq, NomBE)]
+#[derive(Clone, Debug, PartialEq, Eq, NomBE)]
 pub struct RawAccessibleInfo{
     pub access_flags: u16,
     pub name_index: u16,
@@ -62,7 +61,7 @@ pub struct RawAccessibleInfo{
     pub attributes: Vec<RawAttribute>,
 }
 
-#[derive(Clone, Debug, PartialEq, NomBE)]
+#[derive(Clone, Debug, PartialEq, Eq, NomBE)]
 pub struct RawAttribute {
     pub attribute_name_index: u16,
     #[nom(LengthCount = "be_u32()")]
@@ -80,8 +79,8 @@ pub fn parse_cesu_string(input: &[u8]) -> IResult<&[u8], String> {
 }
 
 pub fn parse_class_file<'a>(bytes: Vec<u8>) -> VMResult<RawClassFile<'a>>{
-    let bytes = unsafe { mem::transmute::<_, &'static [u8]>(bytes.as_slice()) };
-    let (_, class_file) = RawClassFile::parse(&bytes).map_err(|e| VmError::Unspecified(format!("Error when parsing raw class {}", e.to_string())))?;
+    let bytes = unsafe { mem::transmute::<&[u8], &[u8]>(bytes.as_slice()) };
+    let (_, class_file) = RawClassFile::parse(bytes).map_err(|e| VmError::Unspecified(format!("Error when parsing raw class {}", e)))?;
     assert_eq!(class_file.magic, 0xCAFEBABE);
     Ok(class_file)
 }

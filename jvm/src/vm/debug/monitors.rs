@@ -1,7 +1,7 @@
+use crate::vm::monitoring::MonitorAssociate;
+use log::{debug, info};
 use std::cell::RefCell;
 use std::collections::HashMap;
-use log::{debug, info};
-use crate::vm::monitoring::MonitorAssociate;
 
 pub struct MonitorLogger {
     logged_events: RefCell<HashMap<MonitorAssociate, Vec<String>>>,

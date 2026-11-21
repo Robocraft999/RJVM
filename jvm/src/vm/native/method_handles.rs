@@ -1,16 +1,16 @@
 #![allow(non_upper_case_globals)]
 
 use crate::access_flags::{field_flags, method_flags};
-use crate::class_file::fields::{get_class_descriptor, FieldInfo};
+use crate::class_file::fields::{FieldInfo, get_class_descriptor};
 use crate::class_file::methods::descriptor::MethodDescriptor;
 use crate::class_file::methods::{INVALID_VTABLE_INDEX, NONVIRTUAL_VTABLE_INDEX};
-use crate::vm::call_info::{resolve_special_call, resolve_virtual_call, CallInfo, CallInfoKind};
+use crate::vm::call_info::{CallInfo, CallInfoKind, resolve_special_call, resolve_virtual_call};
 use crate::vm::class::class_and_member::ClassAndMethod;
 use crate::vm::constants::classes::{JAVA_LANG_CLASS, JAVA_LANG_INVOKE_METHOD_HANDLE, JAVA_LANG_INVOKE_METHOD_TYPE, JAVA_LANG_INVOKE_MHN, JAVA_LANG_REFLECT_CONSTRUCTOR, JAVA_LANG_REFLECT_FIELD, JAVA_LANG_REFLECT_METHOD, JAVA_LANG_STRING};
 use crate::vm::constants::{LAMBDAFORM_vmentry_INDEX, MEMBERNAME_clazz_INDEX, MEMBERNAME_flags_INDEX, MEMBERNAME_name_INDEX, MEMBERNAME_type_INDEX, METHODHANDLE_form_INDEX, METHODTYPE_ptypes_INDEX, METHODTYPE_rtype_INDEX, METHOD_clazz_INDEX, METHOD_slot_INDEX};
 use crate::vm::java_error::JavaError;
 use crate::vm::java_thread::JavaThread;
-use crate::vm::native::{gen_delegate, invalidation, non_failing_none, non_failing_some, wrap_init, NativeMethodRegistry};
+use crate::vm::native::{NativeMethodRegistry, gen_delegate, invalidation, non_failing_none, non_failing_some, wrap_init};
 use crate::vm::result::{VMPartialResult, VMResult, VMResultType};
 use crate::vm::value::{Reference, ReferenceType, Value};
 use crate::vm::{Context, VmError};
@@ -73,7 +73,7 @@ gen_delegate!(delegate_link_to_static, |ctx, _obj_ref, args| {
     // this apparently just casts the simplified arguments back up to their target types
     // see: https://github.com/openjdk/jdk8u/blob/master/hotspot/src/share/vm/opto/callGenerator.cpp#L807
     // FIXME check if the membername should stay in last or should be removed
-    if let Some(Value::Reference(mname_ref_id)) = args.get(args.len() - 1) {
+    if let Some(Value::Reference(mname_ref_id)) = args.last() {
         let mname_ref = ctx.vm.resolve_object_by_id(*mname_ref_id)?;
         let typ_ref = ctx.vm.resolve_object_by_id(mname_ref.get_ref_field(MEMBERNAME_type_INDEX)?)?;
         let clazz = ctx.resolve_clazz_by_class_ref_id(mname_ref.get_ref_field(MEMBERNAME_clazz_INDEX)?)? ;
@@ -89,7 +89,7 @@ gen_delegate!(delegate_link_to_static, |ctx, _obj_ref, args| {
         let method = clazz.find_method(name.as_str(), desc.as_str()).unwrap();
         let cam = ClassAndMethod { class: clazz, method };
 
-        let args_only = args[..args.len() - 1].iter().cloned().collect::<Vec<_>>();
+        let args_only = args[..args.len() - 1].to_vec();
         let result = JavaThread::invoke_subroutine(ctx, cam, None, args_only);
         return match result {
             Ok(any) => Ok(any),
@@ -126,12 +126,12 @@ gen_delegate!(delegate_get_named_con, |_ctx, _obj_ref, args| {
 
 gen_delegate!(delegate_object_field_offset, |ctx, _obj_ref, args| {
     if let Some(Value::Reference(mname_id)) = args.get(0) {
-        if !mname_id.is_null() && let Some(payload) = ctx.vm.object_payloads.read().get(&mname_id) {
+        if !mname_id.is_null() && let Some(payload) = ctx.vm.object_payloads.read().get(mname_id) {
             let mname_ref = ctx.vm.resolve_object_by_id(*mname_id)?;
             // flags
             let flags = mname_ref.get_int_field(MEMBERNAME_flags_INDEX)?;
             if flags & IS_FIELD != 0 && flags & field_flags::STATIC as i32 == 0 {
-                non_failing_some(ctx.vm.extract_long(payload[0].clone())?)
+                non_failing_some(ctx.vm.extract_long(payload[0])?)
             } else {
                 invalidation!("member name does not represent a non-static field")
             }
@@ -171,7 +171,7 @@ gen_delegate!(delegate_get_members, |ctx, _obj_ref, args| {
 
 gen_delegate!(delegate_get_member_vminfo, |ctx, _obj_ref, args| {
     if let Some(Value::Reference(self_id)) = args.get(0){
-        if let Some(vals) = ctx.vm.object_payloads.read().get(&self_id){
+        if let Some(vals) = ctx.vm.object_payloads.read().get(self_id){
             let array = wrap_init!(ctx, ctx.new_object_array_1(vals.clone())?);
             non_failing_some(Value::Reference(array.id))
         } else {
@@ -214,7 +214,7 @@ gen_delegate!(delegate_init, |ctx, _obj_ref, args| {
 
                 let class_ref = ctx.resolve_clazz_by_class_ref_id(class_ref_id)?;
                 let cam = class_ref.get_method_in_slot(slot as usize).unwrap();
-                let info = CallInfo::new(&cam.method, &cam.class);
+                let info = CallInfo::new(cam.method, cam.class);
 
                 // clazz
                 mname_ref.set_field(MEMBERNAME_clazz_INDEX, Value::Reference(class_ref_id));
@@ -299,15 +299,15 @@ fn resolve_signature<'a>(ctx: Context<'a, '_>, sig: Reference<'a>) -> VMResult<S
             let Some(content) = content.read().as_ref_vec() else { return invalidation!("Expected References") };
             for class_ref_id in content.iter(){
                 let class_ref = ctx.vm.resolve_object_by_id(*class_ref_id)?;
-                let class_name = ctx.vm.extract_class_name_from_class_ref(&class_ref)?;
+                let class_name = ctx.vm.extract_class_name_from_class_ref(class_ref)?;
                 signature.push_str(get_class_descriptor(class_name.as_str()).as_str());
             }
-            signature.push_str(")");
+            signature.push(')');
             if rtype_ref_id.is_null(){
-                signature.push_str("V");
+                signature.push('V');
             } else {
                 let class_ref = ctx.vm.resolve_object_by_id(rtype_ref_id)?;
-                let class_name = ctx.vm.extract_class_name_from_class_ref(&class_ref)?;
+                let class_name = ctx.vm.extract_class_name_from_class_ref(class_ref)?;
                 signature.push_str(get_class_descriptor(class_name.as_str()).as_str())
             }
             Ok(signature)

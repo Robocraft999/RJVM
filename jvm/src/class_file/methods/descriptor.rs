@@ -1,5 +1,5 @@
 use crate::class_file::fields::field_type::FieldType;
-use lazy_regex::{lazy_regex, Lazy};
+use lazy_regex::{Lazy, lazy_regex};
 use regex::Regex;
 use std::hash::{Hash, Hasher};
 
@@ -48,7 +48,7 @@ impl MethodDescriptor{
         self.raw == other
     }
 
-    pub fn as_str(&self) -> &str{
+    pub const fn as_str(&self) -> &str{
         self.raw.as_str()
     }
 }

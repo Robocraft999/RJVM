@@ -1,11 +1,11 @@
 use crate::class_file::constant_pool::ConstantPoolEntry;
 use crate::class_file::field_info::{native_escape, native_escaped_descriptor};
-use crate::class_file::fields::field_type::FieldType;
 use crate::class_file::fields::FieldInfo;
+use crate::class_file::fields::field_type::FieldType;
 use crate::class_file::methods::MethodInfo;
 use crate::vm::class::{ClassId, ClassRef};
 use crate::vm::result::VMResult;
-use crate::vm::{Context, ProgramCounter, VmError, VM};
+use crate::vm::{Context, ProgramCounter, VM, VmError};
 use std::hash::Hash;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -24,14 +24,6 @@ impl Hash for ClassAndMethod<'_>{
 
 impl<'a> ClassAndMethod<'a>{
 
-    pub fn get_constant_method_ref_fast(&self, ctx: &Context<'a, '_>, index: u16) -> Option<ClassAndMethod<'a>>{
-        match self.class.get_or_resolve_constant(ctx, index){
-            Some(ConstantPoolEntry::MethodRef(cam)) |
-            Some(ConstantPoolEntry::InterfaceMethodRef(cam)) => Some(cam),
-            _ => None
-        }
-    }
-
     pub fn get_constant_field_ref(&self, ctx: &Context<'a, '_>, index: u16) -> Option<ClassAndField<'a>>{
         match self.class.get_or_resolve_constant(ctx, index){
             Some(ConstantPoolEntry::FieldRef(caf)) => Some(caf),
@@ -48,14 +40,13 @@ impl<'a> ClassAndMethod<'a>{
     }
 
     pub fn get_max_locals(&self) -> usize{
-        if let Some(code) = &self.method.attributes.code{
-            code.max_locals as usize
-        } else {
-            self.method.descriptor.args.iter().map(FieldType::get_locals_length).sum::<usize>() + if self.method.is_static() {0} else {1}
-        }
+        self.method.attributes.code.as_ref().map_or_else(
+            || self.method.descriptor.args.iter().map(FieldType::get_locals_length).sum::<usize>() + if self.method.is_static() {0} else {1}, 
+            |code| code.max_locals as usize
+        )
     }
 
-    pub fn get_max_stack_size(&self) -> usize{
+    pub const fn get_max_stack_size(&self) -> usize{
         if let Some(code) = &self.method.attributes.code{
             code.max_stack as usize
         } else {
@@ -103,12 +94,12 @@ impl<'a> ClassAndMethod<'a>{
     }
     
     pub fn try_resolve(vm: &VM<'a>, camid: &ClassAndMethodId) -> VMResult<Self> {
-        let clazz = vm.find_class_by_id(camid.class_id).ok_or(VmError::ValidationError("Class not found".to_owned()))?;
-        let cam = clazz.get_method_in_slot(camid.method_slot).ok_or(VmError::ValidationError("Method not found".to_owned()))?;
+        let clazz = vm.find_class_by_id(camid.class_id).ok_or_else(|| VmError::ValidationError("Class not found".to_owned()))?;
+        let cam = clazz.get_method_in_slot(camid.method_slot).ok_or_else(|| VmError::ValidationError("Method not found".to_owned()))?;
         Ok(cam)
     }
     
-    pub fn as_ids(&self) -> ClassAndMethodId {
+    pub const fn as_ids(&self) -> ClassAndMethodId {
         ClassAndMethodId { class_id: self.class.id, method_slot: self.method.slot }
     }
 }

@@ -2,7 +2,7 @@ use crate::class_file::attributes::BootstrapMethod;
 use crate::class_file::methods::descriptor::MethodDescriptor;
 use crate::class_file::nom::parse_cesu_string;
 use crate::vm::class::ClassRef;
-use crate::vm::class::class_and_member::{ClassAndField, ClassAndMethod};
+use crate::vm::class::class_and_member::ClassAndField;
 use crate::vm::class::constants::ResolvedMethod;
 use nom::combinator::map;
 use nom::error::Error;
@@ -20,11 +20,7 @@ pub enum ConstantPoolEntry<'a>{
     FieldRef(ClassAndField<'a>),
 
     RawMethodRef(u16, u16),
-    MethodRef(ClassAndMethod<'a>),
-    MethodRefSigPoly(ClassAndMethod<'a>, MethodDescriptor),
-
     RawInterfaceMethodRef(u16, u16),
-    InterfaceMethodRef(ClassAndMethod<'a>),
     ResolvedMethodRef(ResolvedMethod<'a>),
 
     RawString(u16),
@@ -42,7 +38,7 @@ pub enum ConstantPoolEntry<'a>{
 
     RawMethodHandle(u8, u16),
     MethodHandleField(BytecodeBehavior, ClassAndField<'a>),
-    MethodHandleMethod(BytecodeBehavior, ClassAndMethod<'a>),
+    MethodHandleMethod(BytecodeBehavior, ResolvedMethod<'a>),
 
     RawMethodType(u16),
     MethodType(MethodDescriptor),

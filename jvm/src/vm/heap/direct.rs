@@ -1,7 +1,7 @@
-use crate::vm::result::VMResult;
-use parking_lot::RwLock;
 use crate::vm::heap::memory_chunk::MemoryChunk;
 use crate::vm::jni::types::{jbyte, jchar, jdouble, jfloat, jint, jlong, jshort};
+use crate::vm::result::VMResult;
+use parking_lot::RwLock;
 
 macro_rules! gen_mem_access {
     ($name_get:ident, $name_put:ident, $simple_type:ty, $native_type:ty) => {
@@ -11,8 +11,11 @@ macro_rules! gen_mem_access {
         }
 
         pub fn $name_get(&self, ptr: i64) -> VMResult<$simple_type> {
-            let guard = self.memory.read();
-            let bytes = guard.get(ptr as u64, size_of::<$native_type>())?;
+            let bytes = {
+                let guard = self.memory.read();
+                guard.get(ptr as u64, size_of::<$native_type>())?
+            };
+
             let value = <$native_type>::from_le_bytes(bytes.try_into().unwrap()) as $simple_type;
             Ok(value)
         }
@@ -45,7 +48,7 @@ impl Unsafe {
         guard.copy(src as u64, dst as u64, amount)
     }
 
-    pub fn free_memory(&self, ptr: i64) {
+    pub fn free_memory(&self, _ptr: i64) {
         //TODO
     }
 
@@ -64,7 +67,7 @@ impl Unsafe {
 
     pub fn get_bytes(&self, ptr: i64, length: usize) -> VMResult<Vec<u8>> {
         let guard = self.memory.read();
-        Ok(guard.get(ptr as u64, length)?)
+        guard.get(ptr as u64, length)
     }
 }
 

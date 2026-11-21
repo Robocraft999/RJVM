@@ -1,9 +1,9 @@
+use crate::vm::VmError;
 use crate::vm::java_error::JavaError;
 use crate::vm::java_thread::JavaThread;
-use crate::vm::native::{gen_delegate, invalidation, non_failing_some, NativeMethodRegistry};
+use crate::vm::native::{NativeMethodRegistry, gen_delegate, invalidation, non_failing_some};
 use crate::vm::result::{VMPartialResult, VMResultType};
 use crate::vm::value::{Reference, Value};
-use crate::vm::VmError;
 
 pub fn register_natives(registry: &mut NativeMethodRegistry) {
     registry.register("java/security/AccessController", "getStackAccessControlContext", "()Ljava/security/AccessControlContext;", delegate_get_stack_access_control_context);
