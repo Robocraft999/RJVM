@@ -12,7 +12,7 @@ pub fn get_field_type_raw_parts(raw: &str) -> VMResult<(Option<&str>, Option<&st
     PATTERN
         .captures(raw)
         .map_or_else(||
-                         Err(VmError::ValidationError(format!("{} is not a valid field type", raw))),
+                         Err(VmError::ValidationError(format!("{raw} is not a valid field type"))),
                      |cap|
                          Ok((
                              cap.name("object").map(|m| m.as_str()),
@@ -43,28 +43,25 @@ impl FieldType {
     pub(crate) fn to_class_name(&self) -> String {
         match self {
             Self::Primitive(primitive_type) => primitive_type_to_class_name(primitive_type),
-            Self::Object(name) => name.to_string(),
-            Self::Array(name, _) => name.to_string(),
+            Self::Object(name) | Self::Array(name, _) => name.to_owned(),
         }
     }
 
     pub fn to_descriptor(&self) -> String {
         match self {
             Self::Primitive(primitive_type) => primitive_type_to_descriptor(primitive_type),
-            Self::Object(name) => format!("L{};", name),
-            Self::Array(name, _) => name.to_string(),
+            Self::Object(name) => format!("L{name};"),
+            Self::Array(name, _) => name.clone(),
         }
     }
 
     pub fn to_array_field_type(&self, dims: usize) -> Self{
-        if dims == 0{
-            panic!("Can't make {self:?} an array type because dims is 0");
-        }
+        assert_ne!(dims, 0, "Can't make {self:?} an array type because dims is 0");
         let prefix = "[".repeat(dims);
         match self {
             // Extends the primitive type to an n-dim array type
             Self::Primitive(primitive_type) => {
-                let name = prefix + primitive_type_to_descriptor(&primitive_type).as_str();
+                let name = prefix + primitive_type_to_descriptor(primitive_type).as_str();
                 Self::Array(name, Box::new(self.clone()))
             }
             // Extends the object type to an n-dim array type
@@ -130,7 +127,7 @@ impl FieldType {
             if let Some(prim) = primitive{
                 name.push_str(prim);
             }
-            let component_type = field_type.ok_or_else(|| VmError::ValidationError(format!("{} is neither object nor primitive field type", name)))?;
+            let component_type = field_type.ok_or_else(|| VmError::ValidationError(format!("{name} is neither object nor primitive field type")))?;
             Ok(Self::Array(name, Box::from(component_type)))
         } else {
             field_type.ok_or_else(|| VmError::ValidationError("Field type is neither object nor primitive".to_owned()))
@@ -167,7 +164,7 @@ impl PartialEq<Value> for FieldType{
 }
 
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum PrimitiveType{
     Boolean,
     Byte,
@@ -192,7 +189,7 @@ impl FromStr for PrimitiveType{
             "F" => Ok(Self::Float),
             "D" => Ok(Self::Double),
             "C" => Ok(Self::Char),
-            _ => Err(VmError::ValidationError(format!("Invalid primitive type {}", s)))
+            _ => Err(VmError::ValidationError(format!("Invalid primitive type {s}")))
         }
     }
 }

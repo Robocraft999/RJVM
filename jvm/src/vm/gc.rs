@@ -13,13 +13,13 @@ pub struct ObjectAllocator<'a>{
 impl<'a> ObjectAllocator<'a>{
     pub(crate) fn new() -> Self{
         let arena = Arena::with_capacity(1024);
-        let _null = arena.alloc(ReferenceValue{
+        let null_ref = arena.alloc(ReferenceValue{
             id: RefId(0),
             class_id: ClassId(u32::MAX),
             class_name: String::from("xXxNullxXx"),
             reference_type: ReferenceType::Object(RwLock::new(Vec::new())),
         });
-        let null_ptr: *const ReferenceValue = _null;
+        let null_ptr: *const ReferenceValue = null_ref;
         let null = unsafe{&*null_ptr};
         ObjectAllocator{
             arena: Mutex::new(arena),
@@ -33,7 +33,7 @@ impl<'a> ObjectAllocator<'a>{
         let object = ReferenceValue{
             id: RefId(*current_id),
             class_id: class.id,
-            class_name: class.name.to_owned(),
+            class_name: class.name.clone(),
             reference_type: ReferenceType::Object(RwLock::new(fields))
         };
 
@@ -54,7 +54,7 @@ impl<'a> ObjectAllocator<'a>{
         let array = ReferenceValue{
             id: RefId(*current_id),
             class_id: class.id,
-            class_name: class.name.to_owned(),
+            class_name: class.name.clone(),
             reference_type: ReferenceType::Array(RwLock::new(content)),
         };
 

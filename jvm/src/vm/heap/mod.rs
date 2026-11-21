@@ -22,14 +22,13 @@ impl Chunks {
     }
 
     pub fn allocate(&mut self, amount: usize) -> u64 {
-        match self.chunks.last_mut().unwrap().alloc(amount) {
-            Some(entry) => entry.ptr as u64,
-            None => {
-                let mut chunk = Self::new_chunk();
-                let ptr = chunk.alloc(amount).unwrap().ptr as u64;
-                self.chunks.push(chunk);
-                ptr
-            }
+        if let Some(entry) = self.chunks.last_mut().unwrap().alloc(amount) {
+            entry.ptr as u64
+        } else {
+            let mut chunk = Self::new_chunk();
+            let ptr = chunk.alloc(amount).unwrap().ptr as u64;
+            self.chunks.push(chunk);
+            ptr
         }
     }
 
@@ -59,7 +58,7 @@ impl HeapAllocator {
         RawArray::new(ptr, length)
     }
 
-    pub fn allocate_array_body(&self, clazz: ClassRef, content: Vec<Value>) -> ArrayContent {
+    pub fn allocate_array_body(&self, clazz: ClassRef, content: &[Value]) -> ArrayContent {
         clazz.array_info.as_ref().map_or_else(|| unreachable!("clazz has no array info"), |ingo| {
             let length = content.len();
             if ingo.dims > 1 {

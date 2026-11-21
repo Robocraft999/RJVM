@@ -57,7 +57,7 @@ fn unbox_param_if_needed(ctx: Context, ft: &FieldType, val: Value) -> VMResult<V
 
 gen_delegate!(delegate_new_instance0, |ctx, _obj_ref, args| {
     debug!("newInstance0");
-    debug!("{:?}", args);
+    debug!("{args:?}");
     if let Some(Value::Reference(constructor_ref_id)) = args.get(0) {
         let constructor_ref = ctx.vm.resolve_object_by_id(*constructor_ref_id)?;
         //clazz
@@ -70,17 +70,17 @@ gen_delegate!(delegate_new_instance0, |ctx, _obj_ref, args| {
                 let class = ctx.resolve_clazz_by_class_ref_id(class_ref_id)?;
                 let mut descriptor = String::from("(");
                 let parameter_refs = type_content.read().as_ref_vec();
-                for parameter_type_ref_id in parameter_refs.unwrap().iter() {
+                for parameter_type_ref_id in &parameter_refs.unwrap() {
                     let class = ctx.resolve_clazz_by_class_ref_id(*parameter_type_ref_id)?;
-                    if !class.is_array() {
-                        descriptor.push_str(&get_class_descriptor(&class.name));
-                    } else {
+                    if class.is_array() {
                         descriptor.push_str(&class.name);
+                    } else {
+                        descriptor.push_str(&get_class_descriptor(&class.name));
                     }
                 }
                 descriptor.push_str(")V");
                 if let Some(method) = class.find_method("<init>", descriptor.as_str()) {
-                    debug!("method: {:?}", method);
+                    debug!("method: {method:?}");
                     let class_and_method = ClassAndMethod {class, method};
                     let constructor_args = if let Some(Value::Reference(argument_arr_id)) = args.get(1) && !argument_arr_id.is_null() {
                         let argument_arr_ref = ctx.vm.resolve_object_by_id(*argument_arr_id)?;
@@ -101,7 +101,7 @@ gen_delegate!(delegate_new_instance0, |ctx, _obj_ref, args| {
                     // the problem is that if the class is anonymous it can't be resolved and it crashes
                     wrap_init!(ctx, ctx.ensure_initialized(class)?);
                     let object_ref = ctx.new_object_from_class(class);
-                    let res = JavaThread::invoke_subroutine(ctx, class_and_method, Some(object_ref), constructor_args);
+                    let res = JavaThread::invoke_subroutine(ctx, &class_and_method, Some(object_ref), constructor_args);
                     // invoke_frames_until returns occurred exceptions as Err(VmError::JavaException(JavaError::JavaExceptionThrown))
                     // because it doesn't know whether it is a subroutine or not
                     match res {
@@ -127,7 +127,7 @@ gen_delegate!(delegate_new_instance0, |ctx, _obj_ref, args| {
 
 gen_delegate!(delegate_invoke0, |ctx, _obj_ref, args| {
     debug!("invoke0");
-    debug!("{:?}", args);
+    debug!("{args:?}");
     if let (Some(Value::Reference(method_ref_id)), Some(Value::Reference(obj_ref_id)), Some(Value::Reference(args_arr_ref_id))) = (args.get(0), args.get(1), args.get(2)) {
         let method_ref = ctx.vm.resolve_object_by_id(*method_ref_id)?;
         let class_val = method_ref.get_field(METHOD_clazz_INDEX);
@@ -140,28 +140,30 @@ gen_delegate!(delegate_invoke0, |ctx, _obj_ref, args| {
                 let clazz = ctx.resolve_clazz_by_class_ref_id(class_ref_id)?;
                 let mut descriptor = String::from("(");
                 let parameter_refs = type_content.read().as_ref_vec();
-                for parameter_type_ref_id in parameter_refs.unwrap().iter() {
+                for parameter_type_ref_id in &parameter_refs.unwrap() {
                     let class = ctx.resolve_clazz_by_class_ref_id(*parameter_type_ref_id)?;
-                    if !class.is_array(){
-                        descriptor.push_str(&get_class_descriptor(&class.name));
-                    } else {
+                    if class.is_array() {
                         descriptor.push_str(&class.name);
+                    } else {
+                        descriptor.push_str(&get_class_descriptor(&class.name));
                     }
                 }
                 descriptor.push(')');
                 if !return_type_ref_id.is_null(){
                     let return_type = ctx.resolve_clazz_by_class_ref_id(return_type_ref_id)?;
-                    if !return_type.is_array(){
-                        descriptor.push_str(&get_class_descriptor(&return_type.name));
-                    } else {
+                    if return_type.is_array() {
                         descriptor.push_str(&return_type.name);
+                    } else {
+                        descriptor.push_str(&get_class_descriptor(&return_type.name));
                     }
                 }
                 let method_name = ctx.vm.extract_string_from_value(method_name_val)?;
                 if let Some(method) = clazz.find_method(method_name.as_str(), descriptor.as_str()) {
-                    debug!("method: {:?}", method);
+                    debug!("method: {method:?}");
                     let class_and_method = ClassAndMethod {class: clazz, method};
-                    let method_args = if !args_arr_ref_id.is_null() {
+                    let method_args = if args_arr_ref_id.is_null() {
+                        Vec::new()
+                    } else {
                         let args_arr_ref = ctx.vm.resolve_object_by_id(*args_arr_ref_id)?;
                         if let ReferenceType::Array(args_content) = &args_arr_ref.reference_type {
                             let mut args = Vec::new();
@@ -173,18 +175,16 @@ gen_delegate!(delegate_invoke0, |ctx, _obj_ref, args| {
                         } else {
                             Vec::new()
                         }
-                    } else {
-                        Vec::new()
                     };
                     wrap_init!(ctx, ctx.ensure_initialized(clazz)?);
-                    let obj_ref = if !obj_ref_id.is_null() {
+                    let obj_ref = if obj_ref_id.is_null() {
+                        None
+                    } else {
                         let obj_ref = ctx.vm.resolve_object_by_id(*obj_ref_id)?;
                         Some(obj_ref)
-                    } else {
-                        None
                     };
 
-                    let res = JavaThread::invoke_subroutine(ctx, class_and_method, obj_ref, method_args);
+                    let res = JavaThread::invoke_subroutine(ctx, &class_and_method, obj_ref, method_args);
                     // invoke_frames_until returns occurred exceptions as Err(VmError::JavaException(JavaError::JavaExceptionThrown))
                     // because it doesn't know whether it is a subroutine or not
                     return match res {

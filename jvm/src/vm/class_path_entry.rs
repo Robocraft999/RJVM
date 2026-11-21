@@ -26,7 +26,7 @@ impl ClassPathEntry {
         let mut dir = PathBuf::new();
         dir.push(path);
         if !dir.exists() || !dir.is_dir(){
-            let path = std::path::absolute(&dir).map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|_| dir.to_string_lossy().to_string());
+            let path = std::path::absolute(&dir).map_or_else(|_| dir.to_string_lossy().to_string(), |p| p.to_string_lossy().to_string());
             Err(InvalidDirectoryError{path})
         } else {
             Ok(Self::FileSystem(dir))
@@ -39,8 +39,8 @@ impl ClassPathEntry {
         if !path.exists(){
             return Err(JarFileError::NotFound(file_name))
         }
-        let file = File::open(path).map_err(|_| JarFileError::ReadingError(file_name.to_string()))?;
-        let archive = ZipArchive::new(file).map_err(|_| JarFileError::InvalidJar(file_name.to_string()))?;
+        let file = File::open(path).map_err(|_| JarFileError::ReadingError(file_name.clone()))?;
+        let archive = ZipArchive::new(file).map_err(|_| JarFileError::InvalidJar(file_name.clone()))?;
 
         Ok(Self::Jar(Mutex::new(archive)))
     }
@@ -49,7 +49,7 @@ impl ClassPathEntry {
         match self {
             Self::FileSystem(path) => {
                 let mut candidate = path.clone();
-                let class_name = class_name.replace(".", "/");
+                let class_name = class_name.replace('.', "/");
                 candidate.push(class_name);
                 candidate.set_extension("class");
                 if candidate.exists(){
@@ -61,7 +61,7 @@ impl ClassPathEntry {
                 }
             }
             Self::Jar(..) => {
-                let class_file_name = class_name.replace(".", "/") + ".class";
+                let class_file_name = class_name.replace('.', "/") + ".class";
                 self.resolve_file(class_file_name.as_str())
             }
         }

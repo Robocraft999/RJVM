@@ -9,7 +9,7 @@ pub struct ClassPath{
 impl ClassPath{
     pub fn push(&mut self, string: &str) -> VMResult<()>{
         let mut entries_to_add = Vec::new();
-        for entry in string.split(";"){
+        for entry in string.split(';'){
             let parsed_entry = ClassPathEntry::new(entry)?;
             entries_to_add.push(parsed_entry);
         }
@@ -18,7 +18,7 @@ impl ClassPath{
     }
 
     pub fn resolve(&self, class_name: &str) -> VMResult<Option<Vec<u8>>>{
-        for entry in self.entries.iter() {
+        for entry in &self.entries {
             let entry_result = entry.resolve(class_name)?;
             if let Some(class_bytes) = entry_result{
                 return Ok(Some(class_bytes))
@@ -28,7 +28,7 @@ impl ClassPath{
     }
 
     pub fn resolve_file(&self, file_name: &str) -> VMResult<Option<Vec<u8>>>{
-        for entry in self.entries.iter() {
+        for entry in &self.entries {
             let entry_result = entry.resolve_file(file_name)?;
             if let Some(class_bytes) = entry_result{
                 return Ok(Some(class_bytes))

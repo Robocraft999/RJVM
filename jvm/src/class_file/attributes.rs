@@ -45,16 +45,16 @@ gen_nom_unfucker!(RuntimeAnnotations, parse_runtime_visible_annotations);
 gen_nom_unfucker!(BootstrapMethods, parse_bootstrap_methods);
 
 impl ClassFileAttributes {
-    pub fn set(&mut self, name: &str, bytes: Vec<u8>) -> VMResult<()>{
+    pub fn set(&mut self, name: &str, bytes: &[u8]) -> VMResult<()>{
         match name{
-            "InnerClasses" => self.inner_classes = Some(parse_inner_classes(&bytes)?),
-            "EnclosingMethod" => self.enclosing_method = Some(parse_enclosing_method(&bytes)?),
-            "Synthetic" => self.synthetic = Some(parse_synthetic(&bytes)?),
-            "Signature" => self.signature = Some(parse_signature(&bytes)?),
-            "SourceFile" => self.source_file = Some(parse_source_file(&bytes)?),
-            "RuntimeVisibleAnnotations" => self.runtime_visible_annotations.push(parse_runtime_visible_annotations(&bytes)?),
-            "BootstrapMethods" => self.bootstrap_methods = Some(parse_bootstrap_methods(&bytes)?),
-            invalid => return Err(VmError::ValidationError(format!("Unknown class file attribute: {}", invalid))),
+            "InnerClasses" => self.inner_classes = Some(parse_inner_classes(bytes)?),
+            "EnclosingMethod" => self.enclosing_method = Some(parse_enclosing_method(bytes)?),
+            "Synthetic" => self.synthetic = Some(parse_synthetic(bytes)?),
+            "Signature" => self.signature = Some(parse_signature(bytes)?),
+            "SourceFile" => self.source_file = Some(parse_source_file(bytes)?),
+            "RuntimeVisibleAnnotations" => self.runtime_visible_annotations.push(parse_runtime_visible_annotations(bytes)?),
+            "BootstrapMethods" => self.bootstrap_methods = Some(parse_bootstrap_methods(bytes)?),
+            invalid => return Err(VmError::ValidationError(format!("Unknown class file attribute: {invalid}"))),
         }
         Ok(())
     }

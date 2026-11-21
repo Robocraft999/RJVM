@@ -109,12 +109,12 @@ gen_delegate!(delegate_start0, |ctx, obj_ref, _args| {
         *next_id += 1;
         current
     };
-    let vm_ptr = ctx.vm as *const VM as _;
+    let vm_ptr = std::ptr::from_ref::<VM>(ctx.vm).cast();
     let env = Box::pin(JNIEnv::new(vm_ptr));
-    let vm = unsafe { &*(vm_ptr as *const VM)};
+    let vm = unsafe { &*vm_ptr.cast::<VM>()};
     let java_vm = Box::pin(JavaVM::new());
     
-    thread::Builder::new().name(format!("T<{}>({})", id, thread_name)).spawn(move || {
+    thread::Builder::new().name(format!("T<{id}>({thread_name})")).spawn(move || {
         let mut java_thread = JavaThread::new(id, is_daemon);
         java_thread.thread_obj_id.replace(obj_id);
 
@@ -129,7 +129,7 @@ gen_delegate!(delegate_start0, |ctx, obj_ref, _args| {
 
         let result = JavaThread::thread_entry(context, camid, target_id, Vec::new());
         if let Err(err) = result {
-            error!("Thread failed with: {}", err);
+            error!("Thread failed with: {err}");
             context.vm.mark_canceled();
         }
         context.thread.meta.finish();
@@ -176,11 +176,11 @@ gen_delegate!(delegate_environ, |ctx, _obj_ref, _args| {
     let arr_clazz_2 = ctx.get_or_resolve_class(JAVA_LANG_BYTE_ARR_PRIM_2)?;
     let values: Vec<Value> = vars.iter()
         .flat_map(|(k, v)| vec![
-            Value::Reference(ctx.try_new_array(arr_clazz_1, k.as_bytes().iter().map(|c| Value::Integer(*c as i32)).collect()).unwrap().id),
-            Value::Reference(ctx.try_new_array(arr_clazz_1, v.as_bytes().iter().map(|c| Value::Integer(*c as i32)).collect()).unwrap().id),
+            Value::Reference(ctx.try_new_array(arr_clazz_1, k.as_bytes().iter().map(|c| Value::Integer(*c as i32)).collect::<Vec<Value>>().as_slice()).unwrap().id),
+            Value::Reference(ctx.try_new_array(arr_clazz_1, v.as_bytes().iter().map(|c| Value::Integer(*c as i32)).collect::<Vec<Value>>().as_slice()).unwrap().id),
         ])
         .collect();
-    let array_ref = wrap_init!(ctx, ctx.new_array(arr_clazz_2, values.clone())?);
+    let array_ref = wrap_init!(ctx, ctx.new_array(arr_clazz_2, &values)?);
     non_failing_some(Value::Reference(array_ref.id))
 });
 
@@ -188,7 +188,7 @@ gen_delegate!(delegate_environ, |ctx, _obj_ref, _args| {
 gen_delegate!(delegate_get_system_package0, |ctx, _obj_ref, args| {
     if let Some(name_val) = args.get(0) {
         let name = ctx.vm.extract_string_from_value(*name_val)?;
-        let (_prefix, _) = name.rsplit_once("/").unwrap();
+        let (_prefix, _) = name.rsplit_once('/').unwrap();
         non_failing_some(ctx.vm.null())
     } else {
         invalidation!("Expected a string argument")
@@ -203,7 +203,7 @@ gen_delegate!(delegate_new_array, |ctx, _obj_ref, args| {
         let content = vec![ctx.vm.null(); *length as usize];
         let arr_ref = wrap_init!(ctx, ctx.new_array(
             arr_clazz,
-            content.clone()
+            &content
         )?);
         non_failing_some(Value::Reference(arr_ref.id))
     } else {

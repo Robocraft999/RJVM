@@ -21,7 +21,7 @@ impl ExceptionHelper{
     
     pub fn print(&self){
         for line in self.history.borrow().iter(){
-            error!(target: "debug", "{}", line);
+            error!(target: "debug", "{line}");
         }
     }
 }

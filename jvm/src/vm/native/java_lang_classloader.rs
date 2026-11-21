@@ -19,10 +19,10 @@ pub fn register_natives(registry: &mut NativeMethodRegistry) {
 }
 
 gen_delegate!(delegate_find_loaded_class0, |ctx, _obj_ref, args| {
-    debug!("findLoadedClass0 {:?}", args);
+    debug!("findLoadedClass0 {args:?}");
     if let Some(str_object) = args.get(0) {
         let class_name = ctx.vm.extract_string_from_value(*str_object)?;
-        let class_name = class_name.replace(".", "/");
+        let class_name = class_name.replace('.', "/");
         if ctx.vm.class_manager.find_class_by_name(class_name.as_str()).is_some() {
             non_failing_some(Value::Reference(wrap_init!(ctx, ctx.new_class_object_by_name(class_name.as_str())?).id))
         } else {
@@ -34,10 +34,10 @@ gen_delegate!(delegate_find_loaded_class0, |ctx, _obj_ref, args| {
 });
 
 gen_delegate!(delegate_find_bootstrap_class, |ctx, _obj_ref, args| {
-    debug!("findBootstrapClass {:?}", args);
+    debug!("findBootstrapClass {args:?}");
     if let Some(str_object) = args.get(0) {
         let class_name = ctx.vm.extract_string_from_value(*str_object)?;
-        let class_name = class_name.replace(".", "/");
+        let class_name = class_name.replace('.', "/");
 
         ctx.thread.call_stack.class_loaders.borrow_mut().push(None);
         let res = match ctx.get_or_resolve_class(class_name.as_str()) {
@@ -52,13 +52,13 @@ gen_delegate!(delegate_find_bootstrap_class, |ctx, _obj_ref, args| {
 });
 
 gen_delegate!(delegate_find_builtin_lib, |ctx, _obj_ref, args| {
-    debug!("findBuiltinLib {:?}", args);
+    debug!("findBuiltinLib {args:?}");
     //FIXME here we have to check if the library with the given name is builtin -> exports the function JNI_OnLoad_<libname>
     non_failing_some(ctx.vm.null())
 });
 
 gen_delegate!(delegate_native_lib_load, |ctx, obj_ref, _args| {
-    debug!("nativeLib::load {:?}", obj_ref);
+    debug!("nativeLib::load {obj_ref:?}");
     if let Some(obj_ref) = obj_ref {
         //handle
         obj_ref.set_field(CLASSLOADER_NATIVELIBRARY_handle_INDEX, Value::Long(1));
@@ -74,15 +74,15 @@ gen_delegate!(delegate_native_lib_load, |ctx, obj_ref, _args| {
             let lib = Library::new(name).unwrap();
             let sym: Symbol<*const ()> = lib.get(b"JNI_OnLoad").unwrap();
 
-            let func_ptr = *sym as * const c_void;
+            let func_ptr = (*sym).cast::<c_void>();
             ctx.vm.native_method_registry.add_loaded_library(lib);
 
-            let vm_ptr = ptr::from_ref(ctx.thread.java_vm.as_ref().get_ref()) as *const c_void;
-            debug!(target: "native", "native_lib: javavmp: {:p}", vm_ptr);
+            let vm_ptr = ptr::from_ref(ctx.thread.java_vm.as_ref().get_ref()).cast::<c_void>();
+            debug!(target: "native", "native_lib: javavmp: {vm_ptr:p}");
             let reserved = ptr::null() as *const c_void;
             let cif = Cif::new(vec![Type::pointer(), Type::pointer()], Type::i32()); //JNI_OnLoad
             let res: i32 = cif.call(libffi::low::CodePtr::from_ptr(func_ptr), &[Arg::new(&vm_ptr), Arg::new(&reserved)]);
-            debug!(target: "native", "native_lib: res: {:x}", res);
+            debug!(target: "native", "native_lib: res: {res:x}");
         }
         obj_ref.set_field(CLASSLOADER_NATIVELIBRARY_loaded_INDEX, Value::from(true));
 
@@ -99,7 +99,7 @@ gen_delegate!(delegate_define_class0, |_ctx, _obj_ref, _args| {
 gen_delegate!(delegate_define_class1, |ctx, obj_ref, args| {
     if let (Some(loader_ref), Some(name_val), Some(Value::Reference(b_arr_ref_id)), Some(Value::Integer(off)), Some(Value::Integer(len)), Some(_source_val)) = (obj_ref, args.get(0), args.get(1), args.get(2), args.get(3), args.get(5)) {
         let name = ctx.vm.extract_string_from_value(*name_val)?;
-        let name = name.replace(".", "/");
+        let name = name.replace('.', "/");
         // seems to be nullable
         // let source = ctx.vm.extract_string_from_value(*source_val)?;
         let b_arr_ref = ctx.vm.resolve_object_by_id(*b_arr_ref_id)?;

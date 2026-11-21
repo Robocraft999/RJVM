@@ -42,7 +42,7 @@ gen_delegate!(delegate_find_signal, |ctx, _obj_ref, args| {
             "TERM" => 15,
             _      => -1
         };
-        debug!("Signal name: {} {}", name, result);
+        debug!("Signal name: {name} {result}");
         if result > 0{
             return non_failing_some(Value::Integer(result))
         }
@@ -64,7 +64,7 @@ gen_delegate!(delegate_create_long, |ctx, _obj_ref, _args| {
     let byte_buffer_ref = wrap_init!(ctx, ctx.new_object(class_name)?);
     let constructor = ctx.resolve_class_method(class_name, "<init>", "(JI)V")?;
     let addr = ctx.vm.unsafe_allocator.allocate_memory(8);
-    let res = JavaThread::invoke_subroutine(ctx, constructor, Some(byte_buffer_ref), vec![Value::Long(addr), Value::Dummy, Value::Integer(8)])?;
+    let res = JavaThread::invoke_subroutine(ctx, &constructor, Some(byte_buffer_ref), vec![Value::Long(addr), Value::Dummy, Value::Integer(8)])?;
     if matches!(res, VMResultType::Successful(None)){
         non_failing_some(Value::Reference(byte_buffer_ref.id))
     } else {
@@ -81,6 +81,6 @@ gen_delegate!(delegate_und_getcwd, |ctx, _obj_ref, _args| {
     debug!("getcwd -> '{}'", current_working_dir.display());
     let bytes = current_working_dir.into_os_string().as_encoded_bytes().iter().map(|b| Value::Integer(*b as i32)).collect::<Vec<_>>();
     let byte_arr_clazz = ctx.get_or_resolve_class(JAVA_LANG_BYTE_ARR_PRIM)?;
-    let path_ref = wrap_init!(ctx, ctx.new_array(byte_arr_clazz, bytes.clone())?);
+    let path_ref = wrap_init!(ctx, ctx.new_array(byte_arr_clazz, &bytes)?);
     non_failing_some(Value::Reference(path_ref.id))
 });

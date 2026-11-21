@@ -6,9 +6,9 @@ const METHOD_COUNT: usize = 3 + 5;
 pub type JNIInvokeInterface = [*const c_void; METHOD_COUNT];
 pub const METHODS: *const JNIInvokeInterface = &TABLE as _;
 const TABLE: JNIInvokeInterface = [
-    std::ptr::null() as _,
-    std::ptr::null() as _,
-    std::ptr::null() as _,
+    std::ptr::null(),
+    std::ptr::null(),
+    std::ptr::null(),
     JNIInvokeInterface_::DestroyJavaVM as _,
     JNIInvokeInterface_::AttachCurrentThread as _,
     JNIInvokeInterface_::DetachCurrentThread as _,

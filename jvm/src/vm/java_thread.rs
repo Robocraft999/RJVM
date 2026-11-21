@@ -60,21 +60,21 @@ impl ThreadMeta {
     }
 
     pub fn block(&self) {
-        *self.thread_state.write() = ThreadState::Blocked
+        *self.thread_state.write() = ThreadState::Blocked;
     }
     pub fn unblock(&self) {
-        *self.thread_state.write() = ThreadState::Running
+        *self.thread_state.write() = ThreadState::Running;
     }
 
     pub fn sleep(&self) {
-        *self.thread_state.write() = ThreadState::Sleeping
+        *self.thread_state.write() = ThreadState::Sleeping;
     }
     pub fn woken(&self) {
-        *self.thread_state.write() = ThreadState::Running
+        *self.thread_state.write() = ThreadState::Running;
     }
 
     pub fn wait(&self, count: usize) {
-        *self.thread_state.write() = ThreadState::Waiting(count)
+        *self.thread_state.write() = ThreadState::Waiting(count);
     }
     pub fn notified(&self) {
         let mut state = self.thread_state.write();
@@ -83,14 +83,14 @@ impl ThreadMeta {
     }
 
     pub fn park(&self) {
-        *self.thread_state.write() = ThreadState::Parked
+        *self.thread_state.write() = ThreadState::Parked;
     }
     pub fn unpark(&self) {
-        *self.thread_state.write() = ThreadState::Running
+        *self.thread_state.write() = ThreadState::Running;
     }
 
     pub fn finish(&self) {
-        *self.thread_state.write() = ThreadState::Finished
+        *self.thread_state.write() = ThreadState::Finished;
     }
     pub fn is_finished(&self) -> bool {
         *self.thread_state.read() == ThreadState::Finished
@@ -129,23 +129,23 @@ impl JavaThread {
         }
     }
 
-    pub fn invoke_subroutine<'a>(ctx: Context<'a, '_>, class_and_method: ClassAndMethod<'a>, object: Option<Reference<'a>>, args: Vec<Value>) -> VMPartialResult<Option<Value>>{
+    pub fn invoke_subroutine<'a>(ctx: Context<'a, '_>, class_and_method: &ClassAndMethod<'a>, object: Option<Reference<'a>>, args: Vec<Value>) -> VMPartialResult<Option<Value>>{
         let current_index = ctx.thread.call_stack.len() as isize -1;
         ctx.create_and_push_call_frame(class_and_method, object, args, false);
         Self::invoke_frames_until(ctx, current_index)
     }
 
-    pub fn thread_entry<'a>(ctx: Context<'a, '_>, camid: ClassAndMethodId, obj_id: RefId, args: Vec<Value>) -> VMResult<()> {
+    pub fn thread_entry(ctx: Context, camid: ClassAndMethodId, obj_id: RefId, args: Vec<Value>) -> VMResult<()> {
         let current_index = ctx.thread.call_stack.len() as isize -1;
         let class_and_method = ClassAndMethod::try_resolve(ctx.vm, &camid)?;
         let obj = ctx.vm.resolve_object_by_id(obj_id)?;
-        ctx.create_and_push_call_frame(class_and_method, Some(obj), args, false);
+        ctx.create_and_push_call_frame(&class_and_method, Some(obj), args, false);
         let VMResultType::Successful(None) = Self::invoke_frames_until(ctx, current_index)? else { return Err(VmError::Unspecified("Thread exited unsuccessfully".to_owned())) };
         Ok(())
     }
 
-    /// Returns only Err() or Ok(Successful())
-    pub fn invoke_frames_until<'a>(ctx: Context<'a, '_>, stop_index: isize) -> VMPartialResult<Option<Value>> {
+    /// Returns only `Err()` or Ok(Successful())
+    pub fn invoke_frames_until(ctx: Context, stop_index: isize) -> VMPartialResult<Option<Value>> {
         loop {
             let frame_amount = ctx.thread.call_stack.len();
 
@@ -155,7 +155,7 @@ impl JavaThread {
                 let thrown_class_name = ctx.vm.resolve_object_by_id(*throwable_ref_id)?.class_name.clone();
                 if frame_amount as isize - 1 == stop_index {
                     #[cfg(feature = "debug")]
-                    ctx.thread.debug_helper.exception_helper.push(format!("Subroutine could not handle {} thrown by function {} with message: {}", thrown_class_name, origin, message));
+                    ctx.thread.debug_helper.exception_helper.push(format!("Subroutine could not handle {thrown_class_name} thrown by function {origin} with message: {message}"));
                     return Err(VmError::JavaException(JavaError::JavaExceptionThrown(thrown_class_name, message.to_owned(), origin.to_owned())));
                 }
 
@@ -163,7 +163,7 @@ impl JavaThread {
                 let class_and_method = ClassAndMethod::try_resolve(ctx.vm, &camid)?;
                 if class_and_method.method.is_native(){
                     if class_and_method.method.is_synchronized() {
-                        let obj = if !class_and_method.method.is_static() { Some(ctx.thread.call_stack.load_local(0).unwrap()) } else { None };
+                        let obj = if class_and_method.method.is_static() { None } else { Some(ctx.thread.call_stack.load_local(0).unwrap()) };
                         match obj {
                             None => ctx.vm.monitor_handler.exit_method(ctx, camid)?,
                             Some(Value::Reference(obj_id)) => ctx.vm.monitor_handler.exit_ref(ctx, obj_id)?,
@@ -184,7 +184,7 @@ impl JavaThread {
                 }
                 let current_pc = &ctx.thread.call_stack.get_pc();
                 //[unchecked] class already loaded by method
-                if let Some(handler_pc) = class_and_method.resolve_exception_handler(&ctx, current_pc, thrown_class_name.as_str()){
+                if let Some(handler_pc) = class_and_method.resolve_exception_handler(&ctx, *current_pc, thrown_class_name.as_str()){
                     ctx.thread.call_stack.set_pc(handler_pc);
                     ctx.thread.call_stack.clear_operand_stack();
                     ctx.thread.call_stack.push_operand_value(Value::Reference(*throwable_ref_id));
@@ -194,7 +194,7 @@ impl JavaThread {
                     clear_exception = true;
                 } else {
                     if class_and_method.method.is_synchronized() {
-                        let obj = if !class_and_method.method.is_static() { Some(ctx.thread.call_stack.load_local(0).unwrap()) } else { None };
+                        let obj = if class_and_method.method.is_static() { None } else { Some(ctx.thread.call_stack.load_local(0).unwrap()) };
                         match obj {
                             None => ctx.vm.monitor_handler.exit_method(ctx, camid)?,
                             Some(Value::Reference(obj_id)) => ctx.vm.monitor_handler.exit_ref(ctx, obj_id)?,
@@ -223,7 +223,7 @@ impl JavaThread {
 
             let is_synchronized = class_and_method.method.is_synchronized();
             let is_static = class_and_method.method.is_static();
-            let obj = if !is_static { Some(ctx.thread.call_stack.load_local(0).unwrap()) } else { None };
+            let obj = if is_static { None } else { Some(ctx.thread.call_stack.load_local(0).unwrap()) };
             if ctx.thread.call_stack.get_pc().0 == 0 && is_synchronized {
                 match obj {
                     None => ctx.vm.monitor_handler.enter_method_or_block(ctx, camid)?,
@@ -244,9 +244,9 @@ impl JavaThread {
             let debug_cam = class_and_method.clone();
 
             let call_result = if class_and_method.method.is_native(){
-                Self::execute_native(ctx, class_and_method)?
+                Self::execute_native(ctx, &class_and_method)?
             } else {
-                executor::execute(ctx, class_and_method)?
+                executor::execute(ctx, &class_and_method)?
             };
 
             match call_result {
@@ -280,7 +280,6 @@ impl JavaThread {
                 VMResultType::ExceptionThrown => {
                     // thrown exception should be in self.caught_exception
                     // nothing more to do here
-                    continue;
                 }
                 // should only be returned by non-native functions
                 VMResultType::Interrupted(_) => {
@@ -295,7 +294,7 @@ impl JavaThread {
         }
     }
 
-    fn execute_native<'a>(ctx: Context<'a, '_>, class_and_method: ClassAndMethod<'a>) -> VMPartialResult<Option<Value>> {
+    fn execute_native<'a>(ctx: Context<'a, '_>, class_and_method: &ClassAndMethod<'a>) -> VMPartialResult<Option<Value>> {
         //let call_frame = self.call_stack.pop_call_frame();
 
         let object = if class_and_method.method.is_static() {
@@ -316,11 +315,11 @@ impl JavaThread {
         };
         let args = ctx.thread.call_stack.locals_stack.borrow().last().unwrap()
             .iter()
-            .cloned()
+            .copied()
             .skip(if object.is_none() {0} else {1})
             .take_while(|value| value != &Value::Uninitialized)
             .collect::<Vec<_>>();
-        let try_native = NativeMethodRegistry::invoke(ctx, &class_and_method, object, args);
+        let try_native = NativeMethodRegistry::invoke(ctx, class_and_method, object, args);
         debug!("TTT native[{}] returned: {:?}", class_and_method.format(), try_native);
         try_native.unwrap_or_else(|| {
             debug!("native not found");

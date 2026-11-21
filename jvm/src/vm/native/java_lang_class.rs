@@ -50,10 +50,10 @@ gen_delegate!(delegate_get_primitive_class, |ctx, _obj, args| {
 });
 
 gen_delegate!(delegate_get_component_type, |ctx, class_ref, args| {
-    debug!("getComponentType \n'{:?}'\n'{:?}'", class_ref, args);
+    debug!("getComponentType \n'{class_ref:?}'\n'{args:?}'");
     let class_name = ctx.vm.extract_class_name_from_class_ref(class_ref.unwrap())?;
     //let field_type = field_type_from_str(class_name.as_str());
-    debug!("getComponentType '{:?}'", class_name);
+    debug!("getComponentType '{class_name:?}'");
 
     let array_class = ctx.get_or_resolve_class(class_name.as_str())?;
     if let Some(array_info) = &array_class.array_info{
@@ -79,10 +79,10 @@ gen_delegate!(delegate_get_declared_fields0, |ctx, class_ref, _args| {
     debug!("getDeclaredFields");
     if let Some(class_ref) = class_ref {
         let class_name = ctx.vm.extract_class_name_from_class_ref(class_ref)?;
-        debug!("class name: {}", class_name);
+        debug!("class name: {class_name}");
         let clazz = ctx.get_or_resolve_class(class_name.as_str())?;
         let mut content = Vec::new();
-        for field in clazz.fields.iter(){
+        for field in &clazz.fields{
             let java_field = wrap_init!(ctx, ctx.new_object(JAVA_LANG_REFLECT_FIELD)?);
             //name
             java_field.set_field(FIELD_name_INDEX, Value::Reference(wrap_init!(ctx, ctx.new_string_object(field.name.as_str())?).id));
@@ -97,7 +97,7 @@ gen_delegate!(delegate_get_declared_fields0, |ctx, class_ref, _args| {
             content.push(Value::Reference(java_field.id));
         }
         let arr_clazz = ctx.get_or_resolve_class(JAVA_LANG_REFLECT_FIELD_ARR)?;
-        let fields_arr_ref = wrap_init!(ctx, ctx.new_array(arr_clazz, content.clone())?);
+        let fields_arr_ref = wrap_init!(ctx, ctx.new_array(arr_clazz, &content)?);
         non_failing_some(Value::Reference(fields_arr_ref.id))
     } else {
         //FIXME i dont know if this should be none
@@ -111,7 +111,7 @@ gen_delegate!(delegate_get_declared_constructors0, |ctx, class_ref, args| {
         let clazz = ctx.extract_class_from_class_object(class_ref)?;
         let java_constructor_class = wrap_init!(ctx, ctx.get_or_initialize_class(JAVA_LANG_REFLECT_CONSTRUCTOR)?);
         let mut content = Vec::new();
-        for constructor in clazz.get_constructors(*public_only == 1).iter(){
+        for constructor in &clazz.get_constructors(*public_only == 1) {
             let java_constructor_ref = ctx.new_object_from_class(java_constructor_class);
 
             // clazz
@@ -121,7 +121,7 @@ gen_delegate!(delegate_get_declared_constructors0, |ctx, class_ref, args| {
             java_constructor_ref.set_field(CONSTRUCTOR_slot_INDEX, Value::Integer(constructor.slot as i32));
 
             let mut parameters = Vec::new();
-            for field_type in constructor.descriptor.args.iter(){
+            for field_type in &constructor.descriptor.args {
                 let parameter_class_ref = wrap_init!(ctx, ctx.new_class_object_from_field_type(field_type)?);
                 parameters.push(Value::Reference(parameter_class_ref.id));
             }
@@ -138,9 +138,9 @@ gen_delegate!(delegate_get_declared_constructors0, |ctx, class_ref, args| {
                 }
             }
             // parameterTypes
-            java_constructor_ref.set_field(CONSTRUCTOR_parameterTypes_INDEX, Value::Reference(wrap_init!(ctx, ctx.new_class_array_1(parameters.clone())?).id));
+            java_constructor_ref.set_field(CONSTRUCTOR_parameterTypes_INDEX, Value::Reference(wrap_init!(ctx, ctx.new_class_array_1(&parameters)?).id));
             // exceptionTypes
-            java_constructor_ref.set_field(CONSTRUCTOR_exceptionTypes_INDEX, Value::Reference(wrap_init!(ctx, ctx.new_class_array_1(exceptions.clone())?).id));
+            java_constructor_ref.set_field(CONSTRUCTOR_exceptionTypes_INDEX, Value::Reference(wrap_init!(ctx, ctx.new_class_array_1(&exceptions)?).id));
 
             // modifiers
             java_constructor_ref.set_field(CONSTRUCTOR_modifiers_INDEX, Value::Integer(constructor.flags as i32));
@@ -148,7 +148,7 @@ gen_delegate!(delegate_get_declared_constructors0, |ctx, class_ref, args| {
             content.push(Value::Reference(java_constructor_ref.id));
         }
         let arr_clazz = ctx.get_or_resolve_class(JAVA_LANG_REFLECT_CONSTRUCTOR_ARR)?;
-        let contructor_arr_ref = wrap_init!(ctx, ctx.new_array(arr_clazz, content.clone())?);
+        let contructor_arr_ref = wrap_init!(ctx, ctx.new_array(arr_clazz, &content)?);
         non_failing_some(Value::Reference(contructor_arr_ref.id))
     } else {
         invalidation!("Expected Class object and boolean")
@@ -160,7 +160,7 @@ gen_delegate!(delegate_get_declared_methods0, |ctx, class_ref, args| {
     if let (Some(class_ref), Some(Value::Integer(public_only))) = (class_ref, args.get(0)){
         let clazz = ctx.extract_class_from_class_object(class_ref)?;
         let mut content = Vec::new();
-        for method in clazz.get_methods(*public_only == 1).iter(){
+        for method in &clazz.get_methods(*public_only == 1) {
             let java_method_ref = wrap_init!(ctx, ctx.new_object(JAVA_LANG_REFLECT_METHOD)?);
 
             // clazz
@@ -179,7 +179,7 @@ gen_delegate!(delegate_get_declared_methods0, |ctx, class_ref, args| {
                 Value::Reference(wrap_init!(ctx, ctx.new_class_object("void", ctx.vm.class_manager.get_primitive_class(&ctx, "void"))?).id)
             };
             let mut parameters = Vec::new();
-            for field_type in method.descriptor.args.iter(){
+            for field_type in &method.descriptor.args {
                 let parameter_class = wrap_init!(ctx, ctx.new_class_object_from_field_type(field_type)?);
                 parameters.push(Value::Reference(parameter_class.id));
             }
@@ -200,10 +200,10 @@ gen_delegate!(delegate_get_declared_methods0, |ctx, class_ref, args| {
             java_method_ref.set_field(METHOD_returnType_INDEX, return_type);
 
             // parameterTypes
-            java_method_ref.set_field(METHOD_parameterTypes_INDEX, Value::Reference(wrap_init!(ctx, ctx.new_class_array_1(parameters.clone())?).id));
+            java_method_ref.set_field(METHOD_parameterTypes_INDEX, Value::Reference(wrap_init!(ctx, ctx.new_class_array_1(&parameters)?).id));
 
             // exceptionTypes
-            java_method_ref.set_field(METHOD_exceptionTypes_INDEX, Value::Reference(wrap_init!(ctx, ctx.new_class_array_1(exceptions.clone())?).id));
+            java_method_ref.set_field(METHOD_exceptionTypes_INDEX, Value::Reference(wrap_init!(ctx, ctx.new_class_array_1(&exceptions)?).id));
 
             // modifiers
             java_method_ref.set_field(METHOD_modifiers_INDEX, Value::Integer(method.flags as i32));
@@ -211,7 +211,7 @@ gen_delegate!(delegate_get_declared_methods0, |ctx, class_ref, args| {
             content.push(Value::Reference(java_method_ref.id));
         }
         let arr_clazz = ctx.get_or_resolve_class(JAVA_LANG_REFLECT_METHOD_ARR)?;
-        let method_arr_ref = wrap_init!(ctx, ctx.new_array(arr_clazz, content.clone())?);
+        let method_arr_ref = wrap_init!(ctx, ctx.new_array(arr_clazz, &content)?);
         non_failing_some(Value::Reference(method_arr_ref.id))
     } else {
         invalidation!("Expected Class object and boolean")
@@ -222,11 +222,11 @@ gen_delegate!(delegate_get_interfaces0, |ctx, class_ref, _args| {
     if let Some(class_ref) = class_ref{
         let clazz = ctx.extract_class_from_class_object(class_ref)?;
         let mut interfaces = Vec::with_capacity(clazz.interfaces.len());
-        for interface_clazz in clazz.interfaces.iter() {
+        for interface_clazz in &clazz.interfaces {
             let interface_clazz_ref = wrap_init!(ctx, ctx.new_class_object_by_class(interface_clazz)?);
             interfaces.push(Value::Reference(interface_clazz_ref.id));
         }
-        let arr_ref = wrap_init!(ctx, ctx.new_class_array_1(interfaces.clone())?);
+        let arr_ref = wrap_init!(ctx, ctx.new_class_array_1(&interfaces)?);
         non_failing_some(Value::Reference(arr_ref.id))
     } else {
         invalidation!("Expected Class object")
@@ -276,7 +276,7 @@ gen_delegate!(delegate_get_enclosing_method0, |ctx, class_ref, _args| {
             } else {
                 return invalidation!("Expected NameAndType for EnclosingClass")
             };
-            let res = wrap_init!(ctx, ctx.new_object_array_1(vec![class_val, method_name, method_type])?);
+            let res = wrap_init!(ctx, ctx.new_object_array_1(&[class_val, method_name, method_type])?);
             non_failing_some(Value::Reference(res.id))
         } else {
             non_failing_some(ctx.vm.null())
@@ -310,7 +310,7 @@ gen_delegate!(delegate_get_declared_classes0, |ctx, class_ref, _args| {
         let clazz = ctx.extract_class_from_class_object(obj)?;
         let mut inner = Vec::new();
         if let Some(inner_classes) = &clazz.attributes.inner_classes {
-            for inner_classes_entry in inner_classes.classes.iter() {
+            for inner_classes_entry in &inner_classes.classes {
                 if inner_classes_entry.outer_class_info_index == 0 || inner_classes_entry.inner_class_info_index == 0 {
                     continue;
                 }
@@ -322,7 +322,7 @@ gen_delegate!(delegate_get_declared_classes0, |ctx, class_ref, _args| {
                 }
             }
         }
-        let array_ref = wrap_init!(ctx, ctx.new_class_array_1(inner.clone())?);
+        let array_ref = wrap_init!(ctx, ctx.new_class_array_1(&inner)?);
         non_failing_some(Value::Reference(array_ref.id))
     } else {
         invalidation!("Expected Class object")
@@ -332,7 +332,7 @@ gen_delegate!(delegate_get_declared_classes0, |ctx, class_ref, _args| {
 gen_delegate!(delegate_for_name0, |ctx, _class_object, args| {
     debug!("forName0");
     let exception = |name: &str| {
-        let exception_message = format!("Class '{}' was not found", name);
+        let exception_message = format!("Class '{name}' was not found");
         let exception_class = wrap_init!(ctx, ctx.get_or_initialize_class("java/lang/ClassNotFoundException")?);
         JavaThread::throw(
             ctx,
@@ -345,14 +345,14 @@ gen_delegate!(delegate_for_name0, |ctx, _class_object, args| {
     if let Some(name) = args.get(0) && !name.is_null(){
         let Some(Value::Reference(class_loader_ref_id)) = args.get(2) else { return invalidation!("expected a classloader ref or null"); };
         let name = ctx.vm.extract_string_from_value(*name)?;
-        let name = name.replace(".", "/");
+        let name = name.replace('.', "/");
         let loader = if class_loader_ref_id.is_null() { None } else { Some(*class_loader_ref_id) };
         ctx.thread.call_stack.class_loaders.borrow_mut().push(loader);
         let res = match ctx.get_or_resolve_class(&name){
             Ok(..) => {
                 non_failing_some(Value::Reference(wrap_init!(ctx, ctx.new_class_object_by_name(&name)?).id))
             },
-            Err(VmError::ParseError(ClassParseError::EntryResolveError(_))) | Err(VmError::ParseError(ClassParseError::ClassResolveError(_))) => {
+            Err(VmError::ParseError(ClassParseError::EntryResolveError(_) | ClassParseError::ClassResolveError(_))) => {
                 exception(name.as_str())
             }
             Err(err) => Err(err)
@@ -365,7 +365,7 @@ gen_delegate!(delegate_for_name0, |ctx, _class_object, args| {
 });
 
 gen_delegate!(delegate_is_interface, |ctx, class_ref, _args| {
-    debug!("isInterface {:?}", class_ref);
+    debug!("isInterface {class_ref:?}");
     if let Some(class_ref) = class_ref {
         let clazz = ctx.extract_class_from_class_object(class_ref)?;
         non_failing_some(Value::from(clazz.is_interface()))
@@ -375,7 +375,7 @@ gen_delegate!(delegate_is_interface, |ctx, class_ref, _args| {
 });
 
 gen_delegate!(delegate_is_array, |ctx, class_ref, _args| {
-    debug!("isArray {:?}", class_ref);
+    debug!("isArray {class_ref:?}");
     if let Some(class_ref) = class_ref {
         let clazz = ctx.extract_class_from_class_object(class_ref)?;
         non_failing_some(Value::from(clazz.is_array()))
@@ -385,7 +385,7 @@ gen_delegate!(delegate_is_array, |ctx, class_ref, _args| {
 });
 
 gen_delegate!(delegate_is_primitive, |ctx, class_ref, _args| {
-    debug!("isPrimitive {:?}", class_ref);
+    debug!("isPrimitive {class_ref:?}");
     if let Some(class_ref) = class_ref {
         let name = ctx.vm.extract_class_name_from_class_ref(class_ref)?;
         non_failing_some(Value::Integer(match name.as_str() {
@@ -399,7 +399,7 @@ gen_delegate!(delegate_is_primitive, |ctx, class_ref, _args| {
 });
 
 gen_delegate!(delegate_is_assignable_from, |ctx, class_ref, args| {
-    debug!("isAssignableFrom\nthis: {:?}\nfrom: {:?}", class_ref, args);
+    debug!("isAssignableFrom\nthis: {class_ref:?}\nfrom: {args:?}");
     if let (Some(class_ref), Some(Value::Reference(other_id))) = (class_ref, args.get(0)) {
         let this_class = ctx.extract_class_from_class_object(class_ref)?;
         let from_class = ctx.resolve_clazz_by_class_ref_id(*other_id)?;

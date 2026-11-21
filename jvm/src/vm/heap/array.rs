@@ -61,15 +61,15 @@ impl ArrayContent {
 
     pub const fn as_raw_ptr(&self) -> *const u8 {
         match self {
-            Self::Ref(raw) => raw.as_ptr() as *const u8,
-            Self::Bool(raw) => raw.as_ptr() as *const u8,
-            Self::Byte(raw) => raw.as_ptr() as *const u8,
-            Self::Char(raw) => raw.as_ptr() as *const u8,
-            Self::Short(raw) => raw.as_ptr() as *const u8,
-            Self::Int(raw) => raw.as_ptr() as *const u8,
-            Self::Long(raw) => raw.as_ptr() as *const u8,
-            Self::Float(raw) => raw.as_ptr() as *const u8,
-            Self::Double(raw) => raw.as_ptr() as *const u8,
+            Self::Ref(raw) => raw.as_ptr().cast::<u8>(),
+            Self::Bool(raw) => raw.as_ptr(),
+            Self::Byte(raw) => raw.as_ptr().cast::<u8>(),
+            Self::Char(raw) => raw.as_ptr().cast::<u8>(),
+            Self::Short(raw) => raw.as_ptr().cast::<u8>(),
+            Self::Int(raw) => raw.as_ptr().cast::<u8>(),
+            Self::Long(raw) => raw.as_ptr().cast::<u8>(),
+            Self::Float(raw) => raw.as_ptr().cast::<u8>(),
+            Self::Double(raw) => raw.as_ptr().cast::<u8>(),
         }
     }
 
@@ -180,7 +180,7 @@ impl<T> RawArray<T> {
         if index < self.len {
             unsafe { self.set_unchecked(index, value) }
         } else {
-            error!("[RawArray]: Setting out of bounds")
+            error!("[RawArray]: Setting out of bounds");
         }
     }
 
@@ -191,7 +191,7 @@ impl<T> RawArray<T> {
         if offset + length - 1 < self.len {
             unsafe { self.ptr.add(offset).copy_from(from, length) }
         } else {
-            error!("[RawArray]: Array is to small for requested copy from")
+            error!("[RawArray]: Array is to small for requested copy from");
         }
     }
 
@@ -202,7 +202,7 @@ impl<T> RawArray<T> {
         if src_offset + length - 1 < self.len && dst_offset + length - 1 < to.len {
             unsafe { self.ptr.add(src_offset).copy_to(to.ptr.add(dst_offset), length) }
         } else {
-            error!("[RawArray]: Either array is to small for requested copy")
+            error!("[RawArray]: Either array is to small for requested copy");
         }
     }
 
@@ -213,7 +213,7 @@ impl<T> RawArray<T> {
         if offset + length - 1 < self.len {
             unsafe { self.ptr.add(offset).copy_to(to, length) }
         } else {
-            error!("[RawArray]: Array is to small for requested copy to")
+            error!("[RawArray]: Array is to small for requested copy to");
         }
     }
 

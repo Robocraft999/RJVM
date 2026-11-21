@@ -135,7 +135,7 @@ impl JNIEnv {
     }
 
     pub const fn vm(&self) -> &VM<'_> {
-        unsafe{&*(self.vm as *const VM)}
+        unsafe{&*self.vm.cast::<VM>()}
     }
 }
 impl !Unpin for JNIEnv{}
@@ -251,7 +251,7 @@ macro_rules! gen_prim_array_methods {
             let arr_clazz = ctx.get_or_resolve_class(arr_class_name.as_str()).unwrap();
             let array_ref = native_init_wrap!(env, ctx.new_array(
                 arr_clazz,
-                content.clone()
+                &content
             ));
             array_ref.id.nid() as $native_arr_type
         }
@@ -447,8 +447,8 @@ impl JNINativeInterface_ {
     }
     pub unsafe extern "system-unwind" fn FindClass(env: *mut JNIEnv, name: *const c_char) -> jclass {
         let name = unsafe{CStr::from_ptr(name)}.to_str().map_err(|e| VmError::Native(e.to_string())).unwrap();
-        let name = name.replace(".", "/");
-        debug!(target: "native", "NATIVE: FindClass: '{}'", name);
+        let name = name.replace('.', "/");
+        debug!(target: "native", "NATIVE: FindClass: '{name}'");
         if name.is_empty(){
             0 as jclass
         } else {
@@ -496,10 +496,10 @@ impl JNINativeInterface_ {
         let ctx = ctx!(env);
         debug!(target: "native", "NATIVE: ThrowNew");
 
-        let msg = if !msg.is_null() {
-            unsafe { CStr::from_ptr(msg).to_owned().into_string().map_err(|e| VmError::Native(e.to_string())).unwrap() }
-        } else {
+        let msg = if msg.is_null() {
             String::new()
+        } else {
+            unsafe { CStr::from_ptr(msg).to_owned().into_string().map_err(|e| VmError::Native(e.to_string())).unwrap() }
         };
 
         let clazz = ctx.resolve_class_object_by_jclass(clazz);
@@ -535,7 +535,7 @@ impl JNINativeInterface_ {
         let vm: &VM = unsafe{(*env).vm()};
         let old = thread().caught_exception.replace(None);
         if let Some(e) = old{
-            warn!(target: "native", "an Exception was cleared: {:?}", e)
+            warn!(target: "native", "an Exception was cleared: {e:?}");
         }
     }
     pub fn FatalError(env: *mut JNIEnv, msg: *const c_char){
@@ -550,7 +550,7 @@ impl JNINativeInterface_ {
         if result != 0 {
             let ctx = ctx!(env);
             let res = ctx.vm.resolve_object_by_jobject(result);
-            warn!(target: "native", "NATIVE: PopLocalFrame: result is not null: {}", result);
+            warn!(target: "native", "NATIVE: PopLocalFrame: result is not null: {result}");
         }
         result
     }
@@ -565,7 +565,7 @@ impl JNINativeInterface_ {
         unimplemented!()
     }
     pub fn DeleteLocalRef(env: *mut JNIEnv, obj: jobject){
-        debug!(target: "native", "NATIVE: DeleteLocalRef: {}", obj);
+        debug!(target: "native", "NATIVE: DeleteLocalRef: {obj}");
     }
     pub fn IsSameObject(env: *mut JNIEnv, obj1: jobject, obj2: jobject) -> jboolean{
         unimplemented!()
@@ -574,7 +574,7 @@ impl JNINativeInterface_ {
         unimplemented!()
     }
     pub fn EnsureLocalCapacity(env: *mut JNIEnv, capacity: jint) -> jint{
-        debug!(target: "native", "NATIVE: EnsureLocalCapacity: amount:{}", capacity);
+        debug!(target: "native", "NATIVE: EnsureLocalCapacity: amount: {capacity}");
         //TODO
         JNI_OK
     }
@@ -589,10 +589,10 @@ impl JNINativeInterface_ {
         native_init_wrap!(env, ctx.ensure_initialized(cam.class));
         let obj_ref = ctx.new_object_from_class(cam.class);
         debug!("NewObjectV: {} ({:?})", cam.format(), args);
-        let res = match JavaThread::invoke_subroutine(ctx, cam, Some(obj_ref), args) {
+        let res = match JavaThread::invoke_subroutine(ctx, &cam, Some(obj_ref), args) {
             Ok(result) => result,
             Err(e) => {
-                error!(target: "native", "Java error: {:?}", e);
+                error!(target: "native", "Java error: {e:?}");
                 ctx.vm.native_method_registry.mark_exception();
                 return 0;
             }
@@ -638,7 +638,7 @@ impl JNINativeInterface_ {
         let obj_ref = ctx.vm.resolve_object_by_jobject(obj).unwrap();
         let obj_class = ctx.vm.find_class_by_id(obj_ref.class_id).unwrap();
         let class_ref = ctx.resolve_class_object_by_jclass(clazz);
-        let instance_of = ctx.vm.is_instance_of(obj_class, class_ref);
+        let instance_of = VM::is_instance_of(obj_class, class_ref);
         if instance_of {JNI_TRUE} else {JNI_FALSE}
     }
 
@@ -661,11 +661,11 @@ impl JNINativeInterface_ {
 
         let obj_ref = vm.resolve_object_by_jobject(obj).unwrap();
         debug!("CallObjectMethodV: {} ({:?})", class_and_method.format(), args);
-        match JavaThread::invoke_subroutine(ctx, class_and_method, Some(obj_ref), args) {
+        match JavaThread::invoke_subroutine(ctx, &class_and_method, Some(obj_ref), args) {
             Ok(VMResultType::Successful(result)) => Some(result),
             Ok(_) => None,
             Err(e) => {
-                error!(target: "native", "Java error: {:?}", e);
+                error!(target: "native", "Java error: {e:?}");
                 ctx.thread.debug_helper.print();
                 vm.native_method_registry.mark_exception();
                 None
@@ -712,9 +712,9 @@ impl JNINativeInterface_ {
     }
 
     pub unsafe extern "C-unwind" fn CallNonvirtualObjectMethod(env: *mut JNIEnv, obj: jobject, clazz: jclass, methodID: jmethodID, params: ...) -> jobject {
-        unsafe { Self::CallNonvirtualObjectMethodV(env, obj, clazz, methodID, params) }
+        unsafe { Self::CallNonvirtualObjectMethodV(env, obj, clazz, methodID, &params) }
     }
-    pub unsafe extern "system-unwind" fn CallNonvirtualObjectMethodV(env: *mut JNIEnv, obj: jobject, clazz: jclass, methodID: jmethodID, args: VaList) -> jobject {
+    pub unsafe extern "system-unwind" fn CallNonvirtualObjectMethodV(env: *mut JNIEnv, obj: jobject, clazz: jclass, methodID: jmethodID, args: &VaList) -> jobject {
         unimplemented!("CallNonvirtualObjectMethodV")
     }
     pub unsafe extern "system-unwind" fn CallNonvirtualObjectMethodA(env: *mut JNIEnv, obj: jobject, clazz: jclass, methodID: jmethodID, args: *const jvalue) -> jobject {
@@ -731,9 +731,9 @@ impl JNINativeInterface_ {
     gen_nonvirtual_call_type_methods!(CallNonvirtualDoubleMethod, CallNonvirtualDoubleMethodV, CallNonvirtualDoubleMethodA, Value::Double, jdouble);
 
     pub unsafe extern "C-unwind" fn CallNonvirtualVoidMethod(env: *mut JNIEnv, obj: jobject, clazz: jclass, methodID: jmethodID, params: ...) {
-        unsafe { Self::CallNonvirtualVoidMethodV(env, obj, clazz, methodID, params) }
+        unsafe { Self::CallNonvirtualVoidMethodV(env, obj, clazz, methodID, &params) }
     }
-    pub unsafe extern "system-unwind" fn CallNonvirtualVoidMethodV(env: *mut JNIEnv, obj: jobject, clazz: jclass, methodID: jmethodID, args: VaList) {
+    pub unsafe extern "system-unwind" fn CallNonvirtualVoidMethodV(env: *mut JNIEnv, obj: jobject, clazz: jclass, methodID: jmethodID, args: &VaList) {
         unimplemented!("CallNonvirtualVoidMethodV")
     }
     pub unsafe extern "system-unwind" fn CallNonvirtualVoidMethodA(env: *mut JNIEnv, obj: jobject, clazz: jclass, methodID: jmethodID, args: *const jvalue) {
@@ -819,11 +819,11 @@ impl JNINativeInterface_ {
         let ctx = Context { vm, thread: thread() };
 
         debug!("CallStaticTypeMethodV: {} ({:?})", class_and_method.format(), args);
-        match JavaThread::invoke_subroutine(ctx, class_and_method, None, args) {
+        match JavaThread::invoke_subroutine(ctx, &class_and_method, None, args) {
             Ok(VMResultType::Successful(result)) => Some(result),
             Ok(_) => None,
             Err(e) => {
-                error!(target: "native", "Java error: {:?}", e);
+                error!(target: "native", "Java error: {e:?}");
                 ctx.thread.debug_helper.print();
                 vm.native_method_registry.mark_exception();
                 None
@@ -920,7 +920,7 @@ impl JNINativeInterface_ {
         let raw_slice = unsafe { slice::from_raw_parts(unicode, len as usize) };
         let unicode_str = String::from_utf16_lossy(raw_slice);
 
-        debug!(target: "native", "NATIVE: NewString: '{}' , {:?}", unicode_str, raw_slice);
+        debug!(target: "native", "NATIVE: NewString: '{unicode_str}' , {raw_slice:?}");
         let ctx = ctx!(env);
         let str = ctx.try_new_string_object(unicode_str.as_str()).map_err(|e| VmError::Native(e.to_string())).unwrap();
         str.id.nid()
@@ -933,10 +933,10 @@ impl JNINativeInterface_ {
     pub unsafe extern "system-unwind" fn GetStringChars(env: *mut JNIEnv, str: jstring, isCopy: *mut jboolean) -> *const jchar{
         let vm: &VM = unsafe{(*env).vm()};
         let string = vm.extract_string_from_value(Value::Reference(RefId(str))).unwrap();
-        debug!(target: "native", "NATIVE: GetStringChars: {}", string);
+        debug!(target: "native", "NATIVE: GetStringChars: {string}");
         //FIXME potential dangling pointer
         let boxed_string = Box::new(string.encode_utf16().collect::<Vec<u16>>());
-        Box::leak(boxed_string).as_ptr() as *const jchar
+        Box::leak(boxed_string).as_ptr().cast::<jchar>()
     }
     pub const unsafe extern "system-unwind" fn ReleaseStringChars(env: *mut JNIEnv, str: jstring, chars: *const jchar){
         //nothing
@@ -961,13 +961,13 @@ impl JNINativeInterface_ {
     pub unsafe extern "system-unwind" fn GetStringUTFChars(env: *mut JNIEnv, str: jstring, isCopy: *mut jboolean) -> *const c_char{
         let vm: &VM = unsafe{(*env).vm()};
         let string = vm.extract_string_from_value(Value::Reference(RefId(str))).unwrap();
-        debug!(target: "native", "NATIVE: GetStringUTFChars: {}", string);
+        debug!(target: "native", "NATIVE: GetStringUTFChars: {string}");
         //FIXME potential dangling pointer
         let boxed_string = Box::new(string.as_bytes().to_vec());
         if !isCopy.is_null() {
             unsafe { (*isCopy) = JNI_TRUE; }
         }
-        Box::leak(boxed_string).as_ptr() as *const c_char
+        Box::leak(boxed_string).as_ptr().cast::<c_char>()
     }
     pub const unsafe extern "system-unwind" fn ReleaseStringUTFChars(env: *mut JNIEnv, str: jstring, chars: *const c_char){
         //nothing
@@ -992,7 +992,7 @@ impl JNINativeInterface_ {
         let arr_clazz = ctx.get_or_resolve_class(format!("[L{};", clazz.name).as_str()).unwrap();
         let array_ref = native_init_wrap!(env, ctx.new_array(
             arr_clazz,
-            content.clone()
+            &content
         ));
         array_ref.id.nid() as jobjectArray
     }
@@ -1053,7 +1053,7 @@ impl JNINativeInterface_ {
 
     pub unsafe extern "system-unwind" fn GetJavaVM(env: *mut JNIEnv, vm_ptr: *mut *const JavaVM) -> jint{
         unsafe {
-            *vm_ptr = thread().java_vm.as_ref().get_ref() as *const JavaVM;
+            *vm_ptr = ptr::from_ref::<JavaVM>(thread().java_vm.as_ref().get_ref());
             debug!(target: "native", "NATIVE: GetJavaVM: {:?} {:p}", *vm_ptr, *vm_ptr);
         }
         JNI_OK
@@ -1071,7 +1071,7 @@ impl JNINativeInterface_ {
             .map(|c| c as jchar)
             .collect::<Vec<_>>();
         unsafe {
-            buf.copy_from_nonoverlapping(chars.as_ptr(), length as usize)
+            buf.copy_from_nonoverlapping(chars.as_ptr(), length as usize);
         }
     }
 
@@ -1087,7 +1087,7 @@ impl JNINativeInterface_ {
             .map(|c| c as c_char)
             .collect::<Vec<_>>();
         unsafe {
-            buf.copy_from_nonoverlapping(chars.as_ptr(), length as usize)
+            buf.copy_from_nonoverlapping(chars.as_ptr(), length as usize);
         }
     }
 
@@ -1114,15 +1114,15 @@ impl JNINativeInterface_ {
 
         if let ReferenceType::Array(content) = &array_ref.reference_type {
             match &*content.write() {
-                ArrayContent::Ref(raw) => unsafe { raw.unchecked_copy_from(carray as *const jobject, 0, raw.len()) },
-                ArrayContent::Bool(raw) => unsafe { raw.unchecked_copy_from(carray as *const jboolean, 0, raw.len()) },
-                ArrayContent::Byte(raw) => unsafe { raw.unchecked_copy_from(carray as *const jbyte, 0, raw.len()) },
-                ArrayContent::Char(raw) => unsafe { raw.unchecked_copy_from(carray as *const jchar, 0, raw.len()) },
-                ArrayContent::Short(raw) => unsafe { raw.unchecked_copy_from(carray as *const jshort, 0, raw.len()) },
-                ArrayContent::Int(raw) => unsafe { raw.unchecked_copy_from(carray as *const jint, 0, raw.len()) },
-                ArrayContent::Long(raw) => unsafe { raw.unchecked_copy_from(carray as *const jlong, 0, raw.len()) },
-                ArrayContent::Float(raw) => unsafe { raw.unchecked_copy_from(carray as *const jfloat, 0, raw.len()) },
-                ArrayContent::Double(raw) => unsafe { raw.unchecked_copy_from(carray as *const jdouble, 0, raw.len()) },
+                ArrayContent::Ref(raw) => unsafe { raw.unchecked_copy_from(carray.cast::<jobject>(), 0, raw.len()) },
+                ArrayContent::Bool(raw) => unsafe { raw.unchecked_copy_from(carray.cast::<jboolean>(), 0, raw.len()) },
+                ArrayContent::Byte(raw) => unsafe { raw.unchecked_copy_from(carray.cast::<jbyte>(), 0, raw.len()) },
+                ArrayContent::Char(raw) => unsafe { raw.unchecked_copy_from(carray.cast::<jchar>(), 0, raw.len()) },
+                ArrayContent::Short(raw) => unsafe { raw.unchecked_copy_from(carray.cast::<jshort>(), 0, raw.len()) },
+                ArrayContent::Int(raw) => unsafe { raw.unchecked_copy_from(carray.cast::<jint>(), 0, raw.len()) },
+                ArrayContent::Long(raw) => unsafe { raw.unchecked_copy_from(carray.cast::<jlong>(), 0, raw.len()) },
+                ArrayContent::Float(raw) => unsafe { raw.unchecked_copy_from(carray.cast::<jfloat>(), 0, raw.len()) },
+                ArrayContent::Double(raw) => unsafe { raw.unchecked_copy_from(carray.cast::<jdouble>(), 0, raw.len()) },
             }
         }
     }
@@ -1132,7 +1132,7 @@ impl JNINativeInterface_ {
     }
 
     pub unsafe extern "system-unwind" fn DeleteWeakGlobalRef(env: *mut JNIEnv, obj: jweak) {
-        debug!(target: "native", "NATIVE: DeleteWeakGlobalRef: unimplemented")
+        debug!(target: "native", "NATIVE: DeleteWeakGlobalRef: unimplemented");
     }
 
     pub unsafe extern "system-unwind" fn ExceptionCheck(env: *mut JNIEnv) -> jboolean{
@@ -1145,7 +1145,7 @@ impl JNINativeInterface_ {
         let class_name = "java/nio/DirectByteBuffer";
         let byte_buffer_ref = native_init_wrap!(env, ctx.new_object(class_name));
         let constructor = ctx.resolve_class_method(class_name, "<init>", "(JI)V").unwrap();
-        let res = JavaThread::invoke_subroutine(ctx, constructor, Some(byte_buffer_ref), vec![Value::Long(address as i64), Value::Dummy, Value::Integer(capacity as i32)]).unwrap();
+        let res = JavaThread::invoke_subroutine(ctx, &constructor, Some(byte_buffer_ref), vec![Value::Long(address as i64), Value::Dummy, Value::Integer(capacity as i32)]).unwrap();
         if matches!(res, VMResultType::Successful(None)){
             byte_buffer_ref.id.nid()
         } else {
@@ -1204,7 +1204,7 @@ impl JNIInvokeInterface_ {
     }
     pub unsafe extern "system-unwind" fn GetEnv(vm: *mut JavaVM, penv: *mut *const c_void, version: jint) -> jint{
         unsafe {
-            *penv = thread().jni_env.as_ref().get_ref() as *const JNIEnv as _;
+            *penv = ptr::from_ref::<JNIEnv>(thread().jni_env.as_ref().get_ref()).cast();
             //println!("{:?} {:p}", *penv, *penv);
         }
         JNI_OK

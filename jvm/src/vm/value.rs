@@ -27,14 +27,14 @@ impl Debug for Value{
                 if rv.is_null(){
                     write!(f, "VNull")
                 } else {
-                    write!(f,"{:?}", rv)
+                    write!(f,"{rv:?}")
                 }
             },
             Self::Uninitialized => write!(f, "VUninitialized"),
-            Self::Integer(value) => write!(f, "VInt ({})", value),
-            Self::Long(value) => write!(f, "VLong ({})", value),
-            Self::Float(value) => write!(f, "VFloat ({:.8})", value),
-            Self::Double(value) => write!(f, "VDouble ({:.8})", value),
+            Self::Integer(value) => write!(f, "VInt ({value})"),
+            Self::Long(value) => write!(f, "VLong ({value})"),
+            Self::Float(value) => write!(f, "VFloat ({value:.8})"),
+            Self::Double(value) => write!(f, "VDouble ({value:.8})"),
             Self::Dummy => write!(f, "VDummy")
         }
     }
@@ -52,10 +52,10 @@ impl Value{
                 }
             },
             Self::Uninitialized => "VUninitialized".to_string(),
-            Self::Integer(value) => format!("VInt ({})", value),
-            Self::Long(value) => format!("VLong ({})", value),
-            Self::Float(value) => format!("VFloat ({:.8})", value),
-            Self::Double(value) => format!("VDouble ({:.8})", value),
+            Self::Integer(value) => format!("VInt ({value})"),
+            Self::Long(value) => format!("VLong ({value})"),
+            Self::Float(value) => format!("VFloat ({value:.8})"),
+            Self::Double(value) => format!("VDouble ({value:.8})"),
             Self::Dummy => "VDummy".to_string(),
         }
     }
@@ -64,7 +64,7 @@ impl Value{
         if let Self::Integer(value) = self{
             Ok(*value)
         } else {
-            Err(VmError::ValidationError(format!("Expected integer but found {:?}", self)))
+            Err(VmError::ValidationError(format!("Expected integer but found {self:?}")))
         }
     }
 
@@ -72,7 +72,7 @@ impl Value{
         if let Self::Long(value) = self{
             Ok(*value)
         } else {
-            Err(VmError::ValidationError(format!("Expected long but found {:?}", self)))
+            Err(VmError::ValidationError(format!("Expected long but found {self:?}")))
         }
     }
 
@@ -80,7 +80,7 @@ impl Value{
         if let Self::Float(value) = self{
             Ok(*value)
         } else {
-            Err(VmError::ValidationError(format!("Expected float but found {:?}", self)))
+            Err(VmError::ValidationError(format!("Expected float but found {self:?}")))
         }
     }
 
@@ -88,19 +88,19 @@ impl Value{
         if let Self::Double(value) = self{
             Ok(*value)
         } else {
-            Err(VmError::ValidationError(format!("Expected double but found {:?}", self)))
+            Err(VmError::ValidationError(format!("Expected double but found {self:?}")))
         }
     }
     
     pub const fn get_computational_type(&self) -> i32{
         match self {
-            Self::Uninitialized => -1,
-            Self::Reference(_) => 1,
-            Self::Integer(_) => 1,
-            Self::Long(_) => 2,
-            Self::Float(_) => 1,
-            Self::Double(_) => 2,
+            Self::Uninitialized | 
             Self::Dummy => -1,
+            Self::Reference(_) | 
+            Self::Integer(_) | 
+            Self::Float(_) => 1,
+            Self::Long(_) | 
+            Self::Double(_) => 2,
         }
     }
 
@@ -123,10 +123,10 @@ impl From<bool> for Value{
 pub struct RefId(pub u32);
 
 impl RefId {
-    pub const fn is_null(&self) -> bool {
+    pub const fn is_null(self) -> bool {
         self.0 == 0
     }
-    pub const fn nid(&self) -> jobject { self.0 as jobject }
+    pub const fn nid(self) -> jobject { self.0 as jobject }
 }
 
 macro_rules! gen_typed_get_field {
@@ -161,10 +161,10 @@ impl ReferenceValue{
     pub fn set_field(&self, index: usize, value: Value) {
         match &self.reference_type {
             ReferenceType::Object(fields) => {
-                fields.write()[index] = value
+                fields.write()[index] = value;
             }
             ReferenceType::Array(..) => {unimplemented!("This reference represents an array, please use 'set_element()'")}
-        };
+        }
     }
 
     pub fn get_field(&self, index: usize) -> Value{
@@ -186,9 +186,9 @@ impl ReferenceValue{
         match &self.reference_type {
             ReferenceType::Object(..) => {unimplemented!("This reference represents an object, please use 'set_field()'")}
             ReferenceType::Array(content) => {
-                content.write().set(index, value)
+                content.write().set(index, value);
             }
-        };
+        }
     }
 
     pub fn get_element(&self, index: usize) -> Value{
@@ -227,7 +227,7 @@ impl ReferenceValue{
         self.id.is_null()
     }
 
-    pub fn print<'a>(&self, vm: &VM<'a>) -> String {
+    pub fn print(&self, vm: &VM) -> String {
         format!("VRef [ id: {:?}, class: {}:{}, type: {}, components: [{}] ]",
                 self.id.0,
                 self.class_name, self.class_id.0,
@@ -236,7 +236,7 @@ impl ReferenceValue{
         )
     }
 
-    fn get_components_printable<'a>(&self, vm: &VM<'a>) -> Vec<String>{
+    fn get_components_printable(&self, vm: &VM) -> Vec<String>{
         let object = |field: &Value| match field {
             Value::Reference(id) => {
                 if id.is_null() { return "Null".to_owned(); }
@@ -251,7 +251,7 @@ impl ReferenceValue{
                     format!("{:?}:{}:{:?}", rv.id.0, rv.class_name, rv.class_id.0)
                 }
             }
-            _ => format!("{:?}", field)
+            _ => format!("{field:?}")
         };
         match &self.reference_type {
             ReferenceType::Object(fields) => {
@@ -272,16 +272,16 @@ impl ReferenceValue{
                 if content.is_char() {
                     vec![content.get_as_string().unwrap()]
                 } else if content.is_byte() {
-                    content.as_vec().iter().map(|e| if let Value::Integer(val) = e {format!("{:02x}", val)} else {format!("{e:?}")}).collect()
+                    content.as_vec().iter().map(|e| if let Value::Integer(val) = e {format!("{val:02x}")} else {format!("{e:?}")}).collect()
                 } else {
                     let mut vec = Vec::new();
                     let mut null_counter = 0;
-                    for value in content.as_vec().iter(){
+                    for value in &content.as_vec() {
                         if value.is_null() {
                             null_counter += 1;
                         } else {
                             if null_counter > 0{
-                                vec.push(format!("{}xNull", null_counter));
+                                vec.push(format!("{null_counter}xNull"));
                                 null_counter = 0;
                             }
                             vec.push(object(value));
@@ -289,7 +289,7 @@ impl ReferenceValue{
                     }
                     drop(content);
                     if null_counter > 0{
-                        vec.push(format!("{}xNull", null_counter));
+                        vec.push(format!("{null_counter}xNull"));
                     }
                     vec
                 }

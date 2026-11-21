@@ -13,7 +13,7 @@ pub fn printable_instructions(code_bytes: &[u8]) -> Vec<Instruction>{
     let mut pc = 0;
     while let Ok((instruction, new_pc)) = parse_instruction(code_bytes, pc) {
         instructions.push(instruction);
-        pc = new_pc
+        pc = new_pc;
     }
     instructions
 }
@@ -73,7 +73,7 @@ pub fn parse_instruction(code_bytes: &[u8], mut pc: usize) -> Result<(Instructio
                 let low     = parse_i4(code_bytes, &mut pc)?;
                 let high    = parse_i4(code_bytes, &mut pc)?;
                 let mut targets = Vec::new();
-                for _ in 0..(high-low +1){
+                for _ in 0..=(high - low){
                     let offset = parse_i4(code_bytes, &mut pc)?;
                     let target_pc = (instruction_pc as i32 + offset) as PC;
                     targets.push(target_pc);

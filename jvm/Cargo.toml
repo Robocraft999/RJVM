@@ -14,7 +14,7 @@ typed-arena = "2.0.2"
 log = "0.4.22"
 simple_logger = { version = "5.0.0", features = ["threads"] }
 regex = "1.10.6"
-lazy-regex = "3.4.1"
+lazy-regex = "3.6.2"
 cesu8 = "1.1.0"
 libloading = "0.8"
 libffi = "5.0.0"
@@ -34,3 +34,6 @@ o1 = []
 o2 = ["o1"]
 o3 = ["o2"]
 default = ["o3"]
+
+[lints]
+workspace = true

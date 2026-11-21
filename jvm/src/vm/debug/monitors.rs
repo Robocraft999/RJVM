@@ -27,9 +27,9 @@ impl MonitorLogger {
     pub fn print(&self) {
         info!(target: "debug", "Monitor Tracker:");
         for (id, events) in self.logged_events.borrow().iter() {
-            info!(target: "debug", "Events for: {:?}", id);
-            for event in events.iter() {
-                debug!(target: "debug", "  ~ {}", event);
+            info!(target: "debug", "Events for: {id:?}");
+            for event in events {
+                debug!(target: "debug", "  ~ {event}");
             }
         }
     }

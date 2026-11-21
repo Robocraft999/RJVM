@@ -106,8 +106,8 @@ impl <'a> Class<'a>{
     pub fn get_utf_constant(&self, index: u16) -> VMResult<String> {
         match self.get_constant(index) {
             Some(ConstantPoolEntry::Utf8(string)) => Ok(string),
-            Some(entry) => Err(VmError::ParseError(ClassParseError::ConstantPoolError(format!("CP entry at {} is not of type UTF8 but: {:?}", index, entry)))),
-            None => Err(VmError::ParseError(ClassParseError::ConstantPoolError(format!("CP entry at {} is not present", index)))),
+            Some(entry) => Err(VmError::ParseError(ClassParseError::ConstantPoolError(format!("CP entry at {index} is not of type UTF8 but: {entry:?}")))),
+            None => Err(VmError::ParseError(ClassParseError::ConstantPoolError(format!("CP entry at {index} is not present")))),
         }
     }
 }

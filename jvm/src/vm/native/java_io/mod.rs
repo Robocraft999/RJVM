@@ -43,7 +43,7 @@ gen_delegate!(delegate_write_bytes, |ctx, obj_ref, args| {
                 if offset + amount -1 < raw.len() as i32 {
                     promote_exception!(util::write_bytes(ctx, fis_ref, raw.as_ptr(), *offset, *amount, *should_append, FILEOUTPUTSTREAM_fd_INDEX)?);
                 } else {
-                    error!(target: "native", "write_bytes: out of range")
+                    error!(target: "native", "write_bytes: out of range");
                 }
                 non_failing_none()
             } else {
@@ -160,7 +160,7 @@ gen_delegate!(delegate_get_boolean_attribute, |ctx, _obj_ref, args| {
                 attributes |= BA_DIRECTORY;
             }
         }
-        debug!(target: "native", "HILFE {:?} ({}), {}", path, attributes, attributes & BA_EXISTS);
+        debug!(target: "native", "HILFE {} ({}), {}", path.display(), attributes, attributes & BA_EXISTS);
         non_failing_some(Value::Integer(attributes))
     } else {
         invalidation!("Expected file as parameter")
@@ -186,7 +186,7 @@ gen_delegate!(delegate_last_modified_time, |ctx, _obj_ref, args| {
         let string_val = path_ref.get_field(FILE_path_INDEX);
         let path = ctx.vm.extract_string_from_value(string_val)?;
         let path = Path::new(&path);
-        let last_modified = path.metadata().map(|m| m.modified().unwrap().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis() as i64).unwrap_or(0);
+        let last_modified = path.metadata().map_or(0, |m| m.modified().unwrap().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis() as i64);
         non_failing_some(Value::Long(last_modified))
     } else {
         invalidation!("Expected file as parameter")
@@ -238,7 +238,7 @@ gen_delegate!(delegate_list, |ctx, _obj_ref, args| {
             .try_collect::<Vec<_>>()?;
 
         let arr_clazz = ctx.get_or_resolve_class(JAVA_LANG_STRING_ARR)?;
-        let arr = ctx.try_new_array(arr_clazz, strings)?;
+        let arr = ctx.try_new_array(arr_clazz, &strings)?;
         non_failing_some(Value::Reference(arr.id))
     } else {
         invalidation!("Expected File Parameter")

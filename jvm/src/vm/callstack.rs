@@ -68,11 +68,11 @@ impl CallStack {
     }
 
     pub fn load_local(&self, index: usize) -> Option<Value>{
-        self.locals_stack.borrow().last().unwrap().get(index).cloned() //TODO same as above
+        self.locals_stack.borrow().last().unwrap().get(index).copied() //TODO same as above
     }
 
     pub fn set_pc(&self, val: u16){
-        trace!("Setting PC to: {}", val);
+        trace!("Setting PC to: {val}");
         *self.pcs.borrow_mut().last_mut().unwrap() = ProgramCounter(val);
     }
 
@@ -119,7 +119,7 @@ impl CallStack {
                     }
                 }
             }
-        };
+        }
         format!("Method: {}:{} at {:?} ({:?})", cam.format(), line_number, pc, instruction)
     }
 }

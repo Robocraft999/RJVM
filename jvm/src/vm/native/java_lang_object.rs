@@ -37,7 +37,7 @@ gen_delegate!(delegate_hashcode, |_ctx, obj_ref, _args| {
             let mut hasher = DefaultHasher::new();
             obj_ref.id.hash(&mut hasher);
             let addr = hasher.finish() as i32;
-            trace!(target: "native", "HASHCODE: {} {:?}", addr, obj_ref);
+            trace!(target: "native", "HASHCODE: {addr} {obj_ref:?}");
             non_failing_some(Value::Integer(addr))
         }
     )
@@ -48,21 +48,21 @@ gen_delegate!(delegate_clone, |ctx, obj_ref, _args| {
     if let Some(obj_ref) = obj_ref{
         match &obj_ref.reference_type {
             ReferenceType::Array(content) => {
-                debug!("Cloning array: {:?}", obj_ref);
+                debug!("Cloning array: {obj_ref:?}");
                 let arr_class = ctx.vm.find_class_by_id(obj_ref.class_id).unwrap();
-                let new_array_ref = wrap_init!(ctx, ctx.new_array(arr_class, content.read().as_vec())?);
+                let new_array_ref = wrap_init!(ctx, ctx.new_array(arr_class, &*content.read().as_vec())?);
                 #[cfg(feature = "debug")]
-                ctx.thread.debug_helper.tracker.push_object_event(new_array_ref.id, format!("Cloned from:\n    {:?}", obj_ref));
+                ctx.thread.debug_helper.tracker.push_object_event(new_array_ref.id, format!("Cloned from:\n    {obj_ref:?}"));
                 non_failing_some(Value::Reference(new_array_ref.id))
             }
             ReferenceType::Object(content) => {
-                debug!("Cloning object: {:?}", obj_ref);
+                debug!("Cloning object: {obj_ref:?}");
                 let clazz = ctx.vm.find_class_by_id(obj_ref.class_id).unwrap();
                 let new_object_ref = ctx.new_object_from_class(clazz);
                 #[cfg(feature = "debug")]
-                ctx.thread.debug_helper.tracker.push_object_event(new_object_ref.id, format!("Cloned from:\n    {:?}", obj_ref));
+                ctx.thread.debug_helper.tracker.push_object_event(new_object_ref.id, format!("Cloned from:\n    {obj_ref:?}"));
                 if let ReferenceType::Object(new_content) = &new_object_ref.reference_type{
-                    *new_content.write() = content.read().clone();
+                    (*new_content.write()).clone_from(&content.read());
                 }
                 non_failing_some(Value::Reference(new_object_ref.id))
             }

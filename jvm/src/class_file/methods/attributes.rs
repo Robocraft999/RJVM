@@ -43,29 +43,29 @@ gen_nom_unfucker!(StackMapTable, parse_stack_map_table);
 gen_nom_unfucker!(LocalVariableTable, parse_local_variable_table);
 
 impl MethodInfoAttributes {
-    pub fn set(&mut self, name: &str, bytes: Vec<u8>) -> VMResult<()>{
+    pub fn set(&mut self, name: &str, bytes: &[u8]) -> VMResult<()>{
         match name {
-            "Code" => self.code = Some(parse_code(&bytes)?),
-            "Exceptions" => self.exceptions = Some(parse_exceptions(&bytes)?),
-            "Synthetic" => self.synthetic = Some(parse_synthetic(&bytes)?),
-            "Signature" => self.signature = Some(parse_signature(&bytes)?),
-            "Deprecated" => self.deprecated = Some(parse_deprecated(&bytes)?),
-            "RuntimeVisibleAnnotations" => self.runtime_visible_annotations.push(parse_runtime_visible_annotations(&bytes)?),
-            "AnnotationDefault" => self.annotation_default = Some(parse_annotation_default_default(&bytes)?),
-            invalid => return Err(VmError::ValidationError(format!("Unknown class file attribute: {}", invalid))),
+            "Code" => self.code = Some(parse_code(bytes)?),
+            "Exceptions" => self.exceptions = Some(parse_exceptions(bytes)?),
+            "Synthetic" => self.synthetic = Some(parse_synthetic(bytes)?),
+            "Signature" => self.signature = Some(parse_signature(bytes)?),
+            "Deprecated" => self.deprecated = Some(parse_deprecated(bytes)?),
+            "RuntimeVisibleAnnotations" => self.runtime_visible_annotations.push(parse_runtime_visible_annotations(bytes)?),
+            "AnnotationDefault" => self.annotation_default = Some(parse_annotation_default_default(bytes)?),
+            invalid => return Err(VmError::ValidationError(format!("Unknown class file attribute: {invalid}"))),
         }
         Ok(())
     }
 }
 
 impl CodeAttributes {
-    pub fn set(&mut self, name: &str, bytes: Vec<u8>) -> VMResult<()>{
+    pub fn set(&mut self, name: &str, bytes: &[u8]) -> VMResult<()>{
         match name{
-            "LineNumberTable" => self.line_number_tables.push(parse_line_number_table(&bytes)?),
+            "LineNumberTable" => self.line_number_tables.push(parse_line_number_table(bytes)?),
             "StackMapTable" => (),/*self.stack_map_table = Some(parse_stack_map_table(&bytes)?),*/
-            "LocalVariableTable" => self.local_variable_tables.push(parse_local_variable_table(&bytes)?),
+            "LocalVariableTable" => self.local_variable_tables.push(parse_local_variable_table(bytes)?),
             "LocalVariableTypeTable" => (),
-            invalid => return Err(VmError::ValidationError(format!("Unknown class file attribute: {}", invalid))),
+            invalid => return Err(VmError::ValidationError(format!("Unknown class file attribute: {invalid}"))),
         }
         Ok(())
     }

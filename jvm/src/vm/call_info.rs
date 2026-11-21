@@ -146,7 +146,7 @@ pub fn resolve_virtual_call2<'a>(receiver_class: ClassRef<'a>, resolved_class: C
         assert!(resolved_method.has_itable_index());
         let vtable_index = resolved_method.itable_index();
         assert!(vtable_index >= 0);
-        let selected_method = receiver_class.get_itable_entry(&resolved_class.id, vtable_index as usize)?;
+        let selected_method = receiver_class.get_itable_entry(resolved_class.id, vtable_index as usize)?;
         // found a default method so the defined method should be in the itable of the resolved class
         Some(CallInfo::new_interface(resolved_class, resolved_class, resolved_method, selected_method, vtable_index))
     } else {
@@ -164,10 +164,10 @@ pub fn resolve_virtual_call2<'a>(receiver_class: ClassRef<'a>, resolved_class: C
 }
 
 pub fn resolve_special_call<'a>(resolved_class: ClassRef<'a>, method_name: &str, method_signature: &str) -> CallInfo<'a> {
-    let cam = if !resolved_class.is_interface() {
-        resolved_class.resolve_method_virtual(method_name, method_signature).unwrap()
-    } else {
+    let cam = if resolved_class.is_interface() {
         resolved_class.resolve_interface_method_virtual(method_signature, method_signature).unwrap()
+    } else {
+        resolved_class.resolve_method_virtual(method_name, method_signature).unwrap()
     };
     let resolved_method = cam.method;
 
@@ -189,21 +189,21 @@ LinkResolver::resolve_virtual_call(CallInfo& result, Handle recv, KlassHandle re
 pub fn resolve_interface_call<'a>(receiver_class: ClassRef<'a>, resolved_class: ClassRef<'a>, resolved_method: &'a MethodInfo) -> Option<CallInfo<'a>> {
     assert!(resolved_class.is_interface() && !resolved_method.is_private());
 
-    if !resolved_method.has_itable_index() {
+    if resolved_method.has_itable_index() {
+        let vtable_index = resolved_method.itable_index();
+        let selected_method = receiver_class.get_itable_entry(resolved_class.id, vtable_index as usize)?;
+
+        // FIXME selected method should be actual receiver
+        if selected_method.has_itable_index() {
+            Some(CallInfo::new_interface(resolved_class, resolved_class, resolved_method, selected_method, vtable_index))
+        } else {
+            Some(CallInfo::new_virtual(resolved_class, receiver_class, resolved_method, selected_method, vtable_index))
+        }
+    } else {
         let vtable_index = resolved_method.vtable_index();
         let selected_method = receiver_class.get_vtable_entry(vtable_index as usize)?;
         assert_eq!(vtable_index, selected_method.vtable_index);
         Some(CallInfo::new_virtual(resolved_class, receiver_class, resolved_method, selected_method, vtable_index))
-    } else {
-        let vtable_index = resolved_method.itable_index();
-        let selected_method = receiver_class.get_itable_entry(&resolved_class.id, vtable_index as usize)?;
-
-        // FIXME selected method should be actual receiver
-        if !selected_method.has_itable_index() {
-            Some(CallInfo::new_virtual(resolved_class, receiver_class, resolved_method, selected_method, vtable_index))
-        } else {
-            Some(CallInfo::new_interface(resolved_class, resolved_class, resolved_method, selected_method, vtable_index))
-        }
     }
 }
 

@@ -78,8 +78,8 @@ pub fn parse_cesu_string(input: &[u8]) -> IResult<&[u8], String> {
     Ok((remaining, string))
 }
 
-pub fn parse_class_file<'a>(bytes: Vec<u8>) -> VMResult<RawClassFile<'a>>{
-    let bytes = unsafe { mem::transmute::<&[u8], &[u8]>(bytes.as_slice()) };
+pub fn parse_class_file<'a>(bytes: &[u8]) -> VMResult<RawClassFile<'a>>{
+    let bytes = unsafe { mem::transmute::<&[u8], &[u8]>(bytes) };
     let (_, class_file) = RawClassFile::parse(bytes).map_err(|e| VmError::Unspecified(format!("Error when parsing raw class {}", e)))?;
     assert_eq!(class_file.magic, 0xCAFEBABE);
     Ok(class_file)
@@ -124,7 +124,7 @@ mod tests {
         println!("{:?}", &FULL_CLASS[..10]);
         let (remaining, class_file) = RawClassFile::parse(FULL_CLASS)?;
         assert_eq!(remaining, &vec![]);
-        println!("result {:#?}", class_file);
+        println!("result {class_file:#?}");
         Ok(())
     }
 }

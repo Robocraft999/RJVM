@@ -64,7 +64,7 @@ pub fn primitive_type_to_descriptor(primitive_type: &PrimitiveType) -> String {
 }
 
 /**
-* class_name without L{class_name};
+* `class_name` without `L{class_name}`;
 */
 pub fn get_class_descriptor(class_name: &str) -> String{
     match class_name {
@@ -80,7 +80,7 @@ pub fn get_class_descriptor(class_name: &str) -> String{
         "void" => "V".to_owned(),
         // already class / array
         _ => {
-            if class_name.starts_with("[") {
+            if class_name.starts_with('[') {
                 class_name.to_owned()
             } else {
                 "L".to_string() + class_name + ";"

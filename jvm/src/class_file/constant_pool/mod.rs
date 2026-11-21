@@ -79,7 +79,7 @@ impl Parse<&[u8]> for ConstantPoolEntry<'_> {
 
 pub type ConstantPool<'a> = Vec<ConstantPoolEntry<'a>>;
 
-#[derive(Debug, FromRepr, PartialEq, Clone)]
+#[derive(Debug, FromRepr, PartialEq, Eq, Clone)]
 #[repr(u8)]
 pub enum BytecodeBehavior {
     REFGetField = 1,

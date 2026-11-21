@@ -56,13 +56,13 @@ impl BytecodeHelper {
 
     pub fn print(&self) {
         for (i, (name, bytecode)) in self.cached_bytecode.borrow().iter().enumerate() {
-            let path = format!("resources/debug/bytecode/{}_{}.class", i, name.replace("/", "."));
+            let path = format!("resources/debug/bytecode/{}_{}.class", i, name.replace('/', "."));
             //let path = "resources/debug/bytecode/dump.class";
             println!("{}", path.as_str());
             let mut dump_file = File::options().write(true).create(true).truncate(true).open(path.as_str()).unwrap();
 
             if dump_file.write_all(bytecode).is_err() {
-                warn!("Failed to write to dump file for class: {}", name);
+                warn!("Failed to write to dump file for class: {name}");
             }
 
             dump_file.flush().unwrap();

@@ -22,15 +22,15 @@ gen_nom_unfucker!(Deprecated, parse_deprecated);
 gen_nom_unfucker!(RuntimeAnnotations, parse_runtime_visible_annotations);
 
 impl FieldInfoAttributes {
-    pub fn set(&mut self, name: &str, bytes: Vec<u8>) -> VMResult<()>{
+    pub fn set(&mut self, name: &str, bytes: &[u8]) -> VMResult<()>{
         match name {
-            "ConstantValue" => self.constant_value = Some(parse_constant_value(&bytes)?),
-            "Synthetic" => self.synthetic = Some(parse_synthetic(&bytes)?),
-            "Signature" => self.signature = Some(parse_signature(&bytes)?),
-            "Deprecated" => self.deprecated = Some(parse_deprecated(&bytes)?),
-            "RuntimeVisibleAnnotations" => self.runtime_visible_annotations.push(parse_runtime_visible_annotations(&bytes)?),
-            invalid => return Err(VmError::ValidationError(format!("Unknown class file attribute: {}", invalid))),
-        };
+            "ConstantValue" => self.constant_value = Some(parse_constant_value(bytes)?),
+            "Synthetic" => self.synthetic = Some(parse_synthetic(bytes)?),
+            "Signature" => self.signature = Some(parse_signature(bytes)?),
+            "Deprecated" => self.deprecated = Some(parse_deprecated(bytes)?),
+            "RuntimeVisibleAnnotations" => self.runtime_visible_annotations.push(parse_runtime_visible_annotations(bytes)?),
+            invalid => return Err(VmError::ValidationError(format!("Unknown class file attribute: {invalid}"))),
+        }
         Ok(())
     }
 }

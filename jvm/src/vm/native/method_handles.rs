@@ -53,15 +53,14 @@ gen_delegate!(delegate_invoke, |ctx, obj_ref, args| {
                 assert!(cam.method.flags & method_flags::STATIC > 0);
                 let mut delegate_args = vec![Value::Reference(mh_ref.id)];
                 delegate_args.extend(args);
-                let result = JavaThread::invoke_subroutine(ctx, cam, None, delegate_args);
+                let result = JavaThread::invoke_subroutine(ctx, &cam, None, delegate_args);
                 return match result{
                     Ok(any) => Ok(any),
                     Err(VmError::JavaException(JavaError::JavaExceptionThrown(..))) => Ok(VMResultType::ExceptionThrown),
                     Err(e) => Err(e),
                 };
-            } else {
-                todo!()
             }
+            todo!()
         }
         unimplemented!()
     } else {
@@ -78,7 +77,7 @@ gen_delegate!(delegate_link_to_static, |ctx, _obj_ref, args| {
         let typ_ref = ctx.vm.resolve_object_by_id(mname_ref.get_ref_field(MEMBERNAME_type_INDEX)?)?;
         let clazz = ctx.resolve_clazz_by_class_ref_id(mname_ref.get_ref_field(MEMBERNAME_clazz_INDEX)?)? ;
         let name = ctx.vm.extract_string_from_value(mname_ref.get_field(MEMBERNAME_name_INDEX))?;
-        debug!(target: "native", "LTS: {}", name);
+        debug!(target: "native", "LTS: {name}");
 
         let desc = ctx.extract_descriptor_from_method_type(typ_ref)?;
         let desc = MethodDescriptor::new(desc);
@@ -90,7 +89,7 @@ gen_delegate!(delegate_link_to_static, |ctx, _obj_ref, args| {
         let cam = ClassAndMethod { class: clazz, method };
 
         let args_only = args[..args.len() - 1].to_vec();
-        let result = JavaThread::invoke_subroutine(ctx, cam, None, args_only);
+        let result = JavaThread::invoke_subroutine(ctx, &cam, None, args_only);
         return match result {
             Ok(any) => Ok(any),
             Err(VmError::JavaException(JavaError::JavaExceptionThrown(..))) => Ok(VMResultType::ExceptionThrown),
@@ -172,7 +171,7 @@ gen_delegate!(delegate_get_members, |ctx, _obj_ref, args| {
 gen_delegate!(delegate_get_member_vminfo, |ctx, _obj_ref, args| {
     if let Some(Value::Reference(self_id)) = args.get(0){
         if let Some(vals) = ctx.vm.object_payloads.read().get(self_id){
-            let array = wrap_init!(ctx, ctx.new_object_array_1(vals.clone())?);
+            let array = wrap_init!(ctx, ctx.new_object_array_1(vals)?);
             non_failing_some(Value::Reference(array.id))
         } else {
             invalidation!("No vminfo payload found")
@@ -248,7 +247,7 @@ fn member_name_init_method<'a>(ctx: Context<'a, '_>, mname: Reference<'a>, info:
         }
         CallInfoKind::Vtable => {
             vmindex = info.index;
-            assert!(vmindex >= 0, "Invalid vtable index: {} in {:?}", vmindex, m);
+            assert!(vmindex >= 0, "Invalid vtable index: {vmindex} in {m:?}");
             flags |= IS_METHOD | (REF_invokeVirtual << REFERENCE_KIND_SHIFT);
         }
         CallInfoKind::Direct => {
@@ -297,7 +296,7 @@ fn resolve_signature<'a>(ctx: Context<'a, '_>, sig: Reference<'a>) -> VMResult<S
         if let ReferenceType::Array(content) = &args_ref.reference_type{
             let mut signature = String::from("(");
             let Some(content) = content.read().as_ref_vec() else { return invalidation!("Expected References") };
-            for class_ref_id in content.iter(){
+            for class_ref_id in &content{
                 let class_ref = ctx.vm.resolve_object_by_id(*class_ref_id)?;
                 let class_name = ctx.vm.extract_class_name_from_class_ref(class_ref)?;
                 signature.push_str(get_class_descriptor(class_name.as_str()).as_str());
@@ -308,7 +307,7 @@ fn resolve_signature<'a>(ctx: Context<'a, '_>, sig: Reference<'a>) -> VMResult<S
             } else {
                 let class_ref = ctx.vm.resolve_object_by_id(rtype_ref_id)?;
                 let class_name = ctx.vm.extract_class_name_from_class_ref(class_ref)?;
-                signature.push_str(get_class_descriptor(class_name.as_str()).as_str())
+                signature.push_str(get_class_descriptor(class_name.as_str()).as_str());
             }
             Ok(signature)
         } else {
@@ -353,10 +352,10 @@ gen_delegate!(delegate_resolve, |ctx, _obj_ref, args| {
                     }
                     REF_invokeInterface => {
                         let cam = clazz.resolve_interface_method_virtual(name.as_str(), sig.as_str()).unwrap();
-                        if !cam.method.has_itable_index(){
-                            CallInfo::new_virtual(clazz, cam.class, cam.method, cam.method, cam.method.vtable_index())
-                        } else {
+                        if cam.method.has_itable_index() {
                             CallInfo::new_interface(clazz, cam.class, cam.method, cam.method, cam.method.itable_index())
+                        } else {
+                            CallInfo::new_virtual(clazz, cam.class, cam.method, cam.method, cam.method.vtable_index())
                         }
                     }
                     REF_invokeVirtual => {
@@ -373,7 +372,7 @@ gen_delegate!(delegate_resolve, |ctx, _obj_ref, args| {
                 member_name_init_field(ctx, self_ref, field_info)?;
             }
             other => todo!("Unsupported mh type: {:b}", other)
-        };
+        }
 
         //TODO see: https://github.com/openjdk/jdk8u/blob/master/hotspot/src/share/vm/prims/methodHandles.cpp#L609
 

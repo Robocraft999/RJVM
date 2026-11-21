@@ -101,7 +101,7 @@ impl<'a> VM<'a>{
         }
     }
     
-    pub fn get_class_method(&self, class: ClassRef<'a>, method_name: &str, descriptor: &str) -> VMResult<ClassAndMethod<'a>>{
+    pub fn get_class_method(class: ClassRef<'a>, method_name: &str, descriptor: &str) -> VMResult<ClassAndMethod<'a>>{
         class
             .find_method(method_name, descriptor)
             .map(|method| ClassAndMethod{ class, method})
@@ -109,7 +109,7 @@ impl<'a> VM<'a>{
     }
 
     pub fn get_static_class_object(&self, id: ClassId) -> Option<Reference<'a>>{
-        self.static_class_objects.read().get(&id).cloned()
+        self.static_class_objects.read().get(&id).copied()
     }
 
     pub fn extract_string_from_value(&self, value: Value) -> VMResult<String>{
@@ -118,7 +118,7 @@ impl<'a> VM<'a>{
             let chars = string_ref.get_field(STRING_value_INDEX);
             return self.extract_string_from_char_arr(chars);
         }
-        Err(VmError::ValidationError(format!( "Expected String Object but found: {:?}", value)))
+        Err(VmError::ValidationError(format!( "Expected String Object but found: {value:?}")))
     }
 
     pub fn extract_string_from_ref(&self, string_ref: Reference<'a>) -> VMResult<String> {
@@ -134,7 +134,7 @@ impl<'a> VM<'a>{
                 return content.read().get_as_string().ok_or_else(|| VmError::ValidationError("Not a Char array".to_owned()));
             }
         }
-        Err(VmError::ValidationError(format!( "Expected CharArray but found: {:?}", chars)))
+        Err(VmError::ValidationError(format!( "Expected CharArray but found: {chars:?}")))
     }
 
     pub fn extract_boolean(&self, value: Value) -> VMResult<Value> {
@@ -220,7 +220,7 @@ impl<'a> VM<'a>{
     pub fn extract_class_name_from_class_ref(&self, object: Reference<'a>) -> VMResult<String> {
         let name_object = object.get_field(CLASS_name_INDEX);
         let name = self.extract_string_from_value(name_object)?;
-        let name = name.replace(".", "/");
+        let name = name.replace('.', "/");
         Ok(name)
     }
 
@@ -232,14 +232,14 @@ impl<'a> VM<'a>{
 
     // object access
     pub fn resolve_object_by_id(&self, id: RefId) -> VMResult<Reference<'a>> {
-        self.objects_by_id.read().get(&id).copied().ok_or_else(|| VmError::ValidationError(format!("Object not found: {:?}", id)))
+        self.objects_by_id.read().get(&id).copied().ok_or_else(|| VmError::ValidationError(format!("Object not found: {id:?}")))
     }
 
     pub fn try_get_class(&self, class_name: &str) -> VMResult<ClassRef<'a>>{
-        self.find_class_by_name(class_name).ok_or_else(|| VmError::ClassNotLoadedError(format!("[try_get_class]: Class not loaded: {}", class_name)))
+        self.find_class_by_name(class_name).ok_or_else(|| VmError::ClassNotLoadedError(format!("[try_get_class]: Class not loaded: {class_name}")))
     }
 
-    pub fn is_instance_of(&self, class: ClassRef<'a>, of_class: ClassRef<'a>) -> bool{
+    pub fn is_instance_of(class: ClassRef<'a>, of_class: ClassRef<'a>) -> bool{
         let mut instance_of = false;
         let mut to_check = vec![class];
         while let Some(next_class) = to_check.pop() {
@@ -298,7 +298,7 @@ impl !Unpin for VM<'_>{}
 
 impl Drop for VM<'_>{
     fn drop(&mut self) {
-        error!("VM drop: {:p}", self);
+        error!("VM drop: {self:p}");
     }
 }
 
@@ -333,16 +333,16 @@ impl<'a> Context<'a, '_> {
         } else {
             Value::Reference(get_or_init!(self.new_class_object("void", self.vm.class_manager.get_primitive_class(self, "void"))?).id)
         };
-        let b_args_arr = Value::Reference(get_or_init!(self.new_class_array_1(b_args_classes)?).id);
+        let b_args_arr = Value::Reference(get_or_init!(self.new_class_array_1(b_args_classes.as_slice())?).id);
         let helper = self.resolve_class_method(
             JAVA_LANG_INVOKE_MHN,
             "findMethodHandleType",
             "(Ljava/lang/Class;[Ljava/lang/Class;)Ljava/lang/invoke/MethodType;"
         ).unwrap();
-        JavaThread::invoke_subroutine(*self, helper, None, vec![b_ret_type, b_args_arr])
+        JavaThread::invoke_subroutine(*self, &helper, None, vec![b_ret_type, b_args_arr])
     }
 
-    pub fn new_method_handle(&self, pool_holder: ClassRef<'a>, kind: BytecodeBehavior, resolved_method: ResolvedMethod<'a>, method_type_ref: Reference<'a>) -> VMPartialResult<Option<Value>>{
+    pub fn new_method_handle(&self, pool_holder: ClassRef<'a>, kind: BytecodeBehavior, resolved_method: &ResolvedMethod<'a>, method_type_ref: Reference<'a>) -> VMPartialResult<Option<Value>>{
         get_or_init!(self.ensure_initialized(resolved_method.resolved_clazz)?);
         let callee = Value::Reference(get_or_init!(self.new_class_object_by_class(resolved_method.resolved_clazz)?).id);
         let caller = Value::Reference(get_or_init!(self.new_class_object_by_class(pool_holder)?).id);
@@ -354,7 +354,7 @@ impl<'a> Context<'a, '_> {
             "linkMethodHandleConstant",
             "(Ljava/lang/Class;ILjava/lang/Class;Ljava/lang/String;Ljava/lang/Object;)Ljava/lang/invoke/MethodHandle;"
         ).unwrap();
-        JavaThread::invoke_subroutine(*self, helper, None, vec![caller, ref_kind, callee, name, typ])
+        JavaThread::invoke_subroutine(*self, &helper, None, vec![caller, ref_kind, callee, name, typ])
     }
 
     pub fn get_or_resolve_class(&self, class_name: &str) -> VMResult<ClassRef<'a>>{
@@ -374,7 +374,7 @@ impl<'a> Context<'a, '_> {
     pub fn resolve_class_method(&self, class_name: &str, method_name: &str, descriptor: &str) -> VMResult<ClassAndMethod<'a>>{
         let result = self.get_or_resolve_class(class_name);
         result.and_then(|class| {
-            self.vm.get_class_method(class, method_name, descriptor)
+            VM::get_class_method(class, method_name, descriptor)
         })
     }
 
@@ -387,25 +387,24 @@ impl<'a> Context<'a, '_> {
     }
 
     pub fn ensure_initialized(&self, clazz: ClassRef<'a>) -> VMPartialResult<()> {
-        if self.vm.class_manager.expect_class_state(clazz.id, ClassLoadingState::INITIALIZED) {
+        if self.vm.class_manager.expect_class_state(clazz.id, &ClassLoadingState::INITIALIZED) {
             return Ok(VMResultType::Successful(()));
         }
         let to_init = self.vm.class_manager.get_classes_to_initialize(clazz)?;
-        if !to_init.is_empty(){
+        if to_init.is_empty() {
+            Ok(VMResultType::Successful(()))
+        } else {
             let count = to_init.iter()
-                .map(|clazz| {
+                .filter_map(|clazz| {
                     self.vm.class_manager.update_class_state(clazz, ClassLoadingState::INITIALIZING);
                     self.init_class(clazz)
                 })
-                .filter(Option::is_some)
                 .count();
             if count > 0{
                 Ok(VMResultType::Interrupted(count))
             } else {
                 Ok(VMResultType::Successful(()))
             }
-        } else {
-            Ok(VMResultType::Successful(()))
         }
     }
 
@@ -415,14 +414,14 @@ impl<'a> Context<'a, '_> {
             let static_object = self.new_object_from_class(class);
             let prev = self.vm.static_class_objects.write().insert(class.id, static_object);
             if prev.is_some() {
-                println!("Oh Oh")
+                println!("Oh Oh");
             }
             if let Some(clinit_method) = class.find_method("<clinit>", "()V"){
                 let class_and_method = ClassAndMethod{
                     class,
                     method: clinit_method,
                 };
-                self.create_and_push_call_frame(class_and_method, Some(static_object), Vec::new(), false);
+                self.create_and_push_call_frame(&class_and_method, Some(static_object), Vec::new(), false);
                 return Some(());
             }
         }
@@ -454,7 +453,7 @@ impl<'a> Context<'a, '_> {
         get_or_init_special!(self.get_or_initialize_class(class_name)?, |class| Ok(VMResultType::Successful(self.new_object_from_class(class))))
     }
 
-    pub fn new_array(&self, class: ClassRef<'a>, content: Vec<Value>) -> VMPartialResult<Reference<'a>>{
+    pub fn new_array(&self, class: ClassRef<'a>, content: &[Value]) -> VMPartialResult<Reference<'a>>{
         //FIXME verify if this is correct / maybe have to init the component type
         let content = self.vm.heap_allocator.allocate_array_body(class, content);
         let obj = self.vm.object_allocator.allocate_array(class, content);
@@ -472,7 +471,7 @@ impl<'a> Context<'a, '_> {
         )*/
     }
 
-    pub fn try_new_array(&self, class: ClassRef<'a>, content: Vec<Value>) -> VMResult<Reference<'a>>{
+    pub fn try_new_array(&self, class: ClassRef<'a>, content: &[Value]) -> VMResult<Reference<'a>>{
         let result = self.new_array(class, content)?;
         if let VMResultType::Successful(object) = result {
             Ok(object)
@@ -481,12 +480,12 @@ impl<'a> Context<'a, '_> {
         }
     }
 
-    pub fn new_class_array_1(&self, content: Vec<Value>) -> VMPartialResult<Reference<'a>>{
+    pub fn new_class_array_1(&self, content: &[Value]) -> VMPartialResult<Reference<'a>>{
         let arr_clazz = self.get_or_resolve_class(JAVA_LANG_CLASS_ARR)?;
         self.new_array(arr_clazz, content)
     }
 
-    pub fn new_object_array_1(&self, content: Vec<Value>) -> VMPartialResult<Reference<'a>>{
+    pub fn new_object_array_1(&self, content: &[Value]) -> VMPartialResult<Reference<'a>>{
         let arr_clazz = self.get_or_resolve_class(JAVA_LANG_OBJECT_ARR)?;
         self.new_array(arr_clazz, content)
     }
@@ -517,7 +516,7 @@ impl<'a> Context<'a, '_> {
         let char_array: Vec<Value> = string.chars().map(|c| Value::Integer(c as i32)).collect();
 
         let arr_clazz = self.get_or_resolve_class(JAVA_LANG_CHAR_ARR_PRIM)?;
-        let char_array = Value::Reference(get_or_init!(self.new_array(arr_clazz, char_array)?).id);
+        let char_array = Value::Reference(get_or_init!(self.new_array(arr_clazz, char_array.as_slice())?).id);
 
         let string_clazz = self.get_or_resolve_class(JAVA_LANG_STRING)?;
         let string_object = self.new_object_from_class(string_clazz);
@@ -533,10 +532,12 @@ impl<'a> Context<'a, '_> {
 
     // FIXME use only ClassRef instead
     fn new_class_object(&self, class_name: &str, class_id: ClassId) -> VMPartialResult<Reference<'a>>{
-        if !self.vm.class_objects.read().contains_key(&class_id){
+        if self.vm.class_objects.read().contains_key(&class_id) {
+            Ok(VMResultType::Successful(self.vm.class_objects.read()[&class_id]))
+        } else {
             let class_clazz = self.get_or_resolve_class(JAVA_LANG_CLASS)?;
             let class_object = self.new_object_from_class(class_clazz);
-            let string_object = get_or_init!(self.new_string_object(class_name.replace("/", ".").as_str())?);
+            let string_object = get_or_init!(self.new_string_object(class_name.replace('/', ".").as_str())?);
 
             //name
             class_object.set_field(CLASS_name_INDEX, Value::Reference(string_object.id));
@@ -551,8 +552,6 @@ impl<'a> Context<'a, '_> {
 
             self.vm.class_objects.write().insert(class_id, class_object);
             Ok(VMResultType::Successful(class_object))
-        } else {
-            Ok(VMResultType::Successful(self.vm.class_objects.read()[&class_id]))
         }
     }
 
@@ -586,7 +585,7 @@ impl<'a> Context<'a, '_> {
     pub fn extract_class_from_class_object(&self, object: Reference<'a>) -> VMResult<ClassRef<'a>>{
         let name_object = object.get_field(CLASS_name_INDEX);
         let name = self.vm.extract_string_from_value(name_object)?;
-        let name = name.replace(".", "/");
+        let name = name.replace('.', "/");
         // FIXME class objects cant be created without the class being loaded so find_class_by_name should be sufficient
         let class = self.get_or_resolve_class(name.as_str());
         match class {
@@ -605,10 +604,10 @@ impl<'a> Context<'a, '_> {
         let mut desc = String::from("(");
         if let ReferenceType::Array(content) = &ptypes_array_ref.reference_type {
             let param_refs = content.read().as_vec();
-            for p in param_refs.iter() {
+            for p in &param_refs {
                 let Value::Reference(param_class_ref_id) = p else { return Err(VmError::ValidationError("Expected a reference".to_string())); };
                 let param_class_name = &self.resolve_clazz_by_class_ref_id(*param_class_ref_id)?.name;
-                trace!(target: "native", "{}", param_class_name);
+                trace!(target: "native", "{param_class_name}");
                 desc += get_class_descriptor(param_class_name.as_str()).as_str();
             }
         }
@@ -623,41 +622,41 @@ impl<'a> Context<'a, '_> {
         Ok(desc)
     }
 
-    pub fn create_and_push_call_frame(&self, class_and_method: ClassAndMethod<'a>, object: Option<Reference<'a>>, args: Vec<Value>, should_push_return: bool){
+    pub fn create_and_push_call_frame(&self, class_and_method: &ClassAndMethod<'a>, object: Option<Reference<'a>>, args: Vec<Value>, should_push_return: bool){
         let mut locals = vec![Value::Uninitialized; class_and_method.get_max_locals()];
-        let offset = if !class_and_method.method.is_static(){
+        let offset = if class_and_method.method.is_static() {
+            0
+        } else {
             locals[0] = Value::Reference(object.unwrap().id);
             #[cfg(feature = "validation")]
             {
                 // FIXME prints error when initializing an anonymous class
                 FieldType::Object(class_and_method.class.name.clone()).validate(locals[0], *self).unwrap_or_else(|e| {
-                    error!("{}", e);
+                    error!("{e}");
                     self.thread.call_stack.print_call_stack(self.vm);
                     self.thread.debug_helper.print();
                     panic!()
                 });
             }
             1
-        } else {
-            0
         };
-        if !class_and_method.method.is_sig_poly {
+        if class_and_method.method.is_sig_poly {
+            locals.resize(offset + args.len(), Value::Uninitialized);
+            trace!(target: "debug", "cam: {}, ({}), args:\n    {:?}", class_and_method.format(), locals.len(), args);
+        } else {
             #[cfg(feature = "validation")]
             {
                 let provided_args_count = args.iter().filter(|a| !matches!(a, Value::Dummy)).count();
                 assert_eq!(class_and_method.method.get_args_count(), provided_args_count, "[Validation]: Invalid Argument Count. Expected: {}, Got: {}", class_and_method.method.get_args_count(), provided_args_count);
                 for (i, provided_arg) in args.iter().filter(|a| !matches!(a, Value::Dummy)).enumerate(){
                     class_and_method.method.descriptor.args[i].validate(*provided_arg, *self).unwrap_or_else(|e| {
-                        error!("{}", e);
+                        error!("{e}");
                         self.thread.call_stack.print_call_stack(self.vm);
                         self.thread.debug_helper.print();
                         panic!()
                     });
                 }
             }
-        } else {
-            locals.resize(offset + args.len(), Value::Uninitialized);
-            trace!(target: "debug", "cam: {}, ({}), args:\n    {:?}", class_and_method.format(), locals.len(), args);
         }
 
         for (dest, src) in locals[offset..].iter_mut().zip(args) {

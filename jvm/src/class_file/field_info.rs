@@ -34,7 +34,7 @@ mod tests{
         assert_eq!("", native_escape(""));
         assert_eq!("A", native_escape("A"));
         assert_eq!("hello_test_Test123", native_escape("hello/test/Test123"));
-        assert_eq!("hello_Pr_000fcfer", native_escape("hello/Prüfer"))
+        assert_eq!("hello_Pr_000fcfer", native_escape("hello/Prüfer"));
     }
 
     #[test]

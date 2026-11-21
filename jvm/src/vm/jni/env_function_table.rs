@@ -6,10 +6,10 @@ const METHOD_COUNT: usize = 4 + 229;
 pub type JNINativeInterface = [*const c_void; METHOD_COUNT];
 pub const METHODS: *const JNINativeInterface = &TABLE as _;
 const TABLE: JNINativeInterface = [
-    std::ptr::null() as _,
-    std::ptr::null() as _,
-    std::ptr::null() as _,
-    std::ptr::null() as _,
+    std::ptr::null(),
+    std::ptr::null(),
+    std::ptr::null(),
+    std::ptr::null(),
 
     //4
     JNINativeInterface_::GetVersion as _,

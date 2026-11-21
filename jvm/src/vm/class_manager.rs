@@ -67,23 +67,21 @@ impl<'a> ClassManager<'a>{
     pub fn get_or_resolve_class(&self, ctx: &Context<'a, '_>, class_name: &str) -> VMResult<ClassRef<'a>>{
         if let Some(loaded_class) = self.find_class_by_name(class_name){
             Ok(loaded_class)
+        } else if let Some(class_loader_id) = ctx.thread.call_stack.get_context_class_loader() {
+            let class_loader_ref = ctx.vm.resolve_object_by_id(class_loader_id)?;
+            let class_loader_clazz = ctx.vm.find_class_by_id(class_loader_ref.class_id).unwrap();
+            let load_method = class_loader_clazz.resolve_method_virtual("loadClass", "(Ljava/lang/String;)Ljava/lang/Class;").unwrap();
+            let name_ref = ctx.try_new_string_object(class_name.replace('/', ".").as_str())?;
+            let VMResultType::Successful(Some(Value::Reference(class_ref_id))) = JavaThread::invoke_subroutine(*ctx, &load_method, Some(class_loader_ref), vec![Value::Reference(name_ref.id)])? else { return Err(VmError::ValidationError("Class loader did not load the class".to_owned())); };
+            let res = ctx.resolve_clazz_by_class_ref_id(class_ref_id).unwrap();
+            Ok(res)
         } else {
-            if let Some(class_loader_id) = ctx.thread.call_stack.get_context_class_loader() {
-                let class_loader_ref = ctx.vm.resolve_object_by_id(class_loader_id)?;
-                let class_loader_clazz = ctx.vm.find_class_by_id(class_loader_ref.class_id).unwrap();
-                let load_method = class_loader_clazz.resolve_method_virtual("loadClass", "(Ljava/lang/String;)Ljava/lang/Class;").unwrap();
-                let name_ref = ctx.try_new_string_object(class_name.replace("/", ".").as_str())?;
-                let VMResultType::Successful(Some(Value::Reference(class_ref_id))) = JavaThread::invoke_subroutine(*ctx, load_method, Some(class_loader_ref), vec![Value::Reference(name_ref.id)])? else { return Err(VmError::ValidationError("Class loader did not load the class".to_owned())); };
-                let res = ctx.resolve_clazz_by_class_ref_id(class_ref_id).unwrap();
-                Ok(res)
-            } else {
-                self.resolve_class(ctx, class_name)
-            }
+            self.resolve_class(ctx, class_name)
         }
     }
 
     fn resolve_class(&self, ctx: &Context<'a, '_>, class_name: &str) -> VMResult<ClassRef<'a>>{
-        if let Some(array_info) = self.try_create_array_class(class_name) {
+        if let Some(array_info) = Self::try_create_array_class(class_name) {
             let class = self.define_array_class(ctx, class_name, array_info)?;
             Ok(self.load_class(class))
         } else {
@@ -121,7 +119,7 @@ impl<'a> ClassManager<'a>{
     }
 
     pub fn define_class(&self, ctx: &Context<'a, '_>, class_name: Option<&str>, bytes: Vec<u8>) -> VMResult<Class<'a>>{
-        let parsed_class = parse_class_file(bytes.clone())?;
+        let parsed_class = parse_class_file(bytes.as_slice())?;
         let next_id = *self.next_id.read();
         *self.next_id.write() += 1;
 
@@ -142,7 +140,7 @@ impl<'a> ClassManager<'a>{
         }?;
 
         if self.classes_by_name.read().contains_key(&class_name){
-            warn!("Duplicate class name {}", class_name);
+            warn!("Duplicate class name {class_name}");
         }
 
         // shallow class
@@ -183,9 +181,9 @@ impl<'a> ClassManager<'a>{
             .ok_or_else(|| VmError::ParseError(ClassParseError::ConstantPoolError(format!("Interface of {} could not be loaded.", class.name))))?;
 
         // build class attributes
-        for ra in parsed_class.attributes.into_iter(){
+        for ra in parsed_class.attributes {
             if let Some(ConstantPoolEntry::Utf8(name)) = class.get_or_resolve_constant(ctx, ra.attribute_name_index){
-                class.attributes.set(name.as_str(), ra.info).unwrap();
+                class.attributes.set(name.as_str(), ra.info.as_slice()).unwrap();
             } else {
                 warn!("Attribute of {} ({}) could not be loaded.", class.name, ra.attribute_name_index);
             }
@@ -199,9 +197,9 @@ impl<'a> ClassManager<'a>{
             .map(|optional| match optional {
                 (i, raw_field, Some(ConstantPoolEntry::Utf8(name)), Some(ConstantPoolEntry::Utf8(descriptor))) => {
                     let mut field_attributes = FieldInfoAttributes::default();
-                    for ra in raw_field.attributes.iter(){
+                    for ra in &raw_field.attributes {
                         if let Some(ConstantPoolEntry::Utf8(name)) = class.get_or_resolve_constant(ctx, ra.attribute_name_index){
-                            field_attributes.set(name.as_str(), ra.info.clone()).unwrap();
+                            field_attributes.set(name.as_str(), ra.info.as_slice()).unwrap();
                         }
                     }
                     let field_type = FieldType::from_str(descriptor.as_str()).ok()?;
@@ -231,16 +229,16 @@ impl<'a> ClassManager<'a>{
             .map(|optional| match optional {
                 (i, raw_field, Some(ConstantPoolEntry::Utf8(name)), Some(ConstantPoolEntry::Utf8(descriptor))) => {
                     let mut method_attributes = MethodInfoAttributes::default();
-                    for ra in raw_field.attributes.iter(){
+                    for ra in &raw_field.attributes {
                         if let Some(ConstantPoolEntry::Utf8(name)) = class.get_or_resolve_constant(ctx, ra.attribute_name_index){
-                            method_attributes.set(name.as_str(), ra.info.clone()).unwrap();
+                            method_attributes.set(name.as_str(), ra.info.as_slice()).unwrap();
                         }
                     }
                     if let Some(code) = &mut method_attributes.code {
                         let mut code_attributes = CodeAttributes::default();
-                        for ra in code.raw_attributes.iter(){
+                        for ra in &code.raw_attributes {
                             if let Some(ConstantPoolEntry::Utf8(name)) = class.get_or_resolve_constant(ctx, ra.attribute_name_index){
-                                code_attributes.set(name.as_str(), ra.info.clone()).unwrap();
+                                code_attributes.set(name.as_str(), ra.info.as_slice()).unwrap();
                             }
                         }
                         code.attributes = code_attributes;
@@ -281,7 +279,7 @@ impl<'a> ClassManager<'a>{
         class.itable = ITable::initialize(&mut class);
 
         let class_ref = unsafe {
-            let class_ptr: *const Class<'a> = &class;
+            let class_ptr: *const Class<'a> = &raw const class;
             &*class_ptr
         };
 
@@ -307,7 +305,7 @@ impl<'a> ClassManager<'a>{
         let mut class = Class {
             id: ClassId(next_id),
             name: class_name.to_owned(),
-            constants: Default::default(),
+            constants: RwLock::default(),
             flags: access,
             superclass: Some(obj_clazz),
             this_index: 0,
@@ -323,7 +321,7 @@ impl<'a> ClassManager<'a>{
             first_method_index: obj_clazz.transitive_method_count,
             class_loader: component_clazz.class_loader,
             array_info: Some(array_info),
-            attributes: Default::default(),
+            attributes: ClassFileAttributes::default(),
         };
 
         class.vtable = VTable::initialize(&mut class);
@@ -374,10 +372,10 @@ impl<'a> ClassManager<'a>{
             self.classes_by_id.write().insert(class_ref.id, class_ref);
             self.classes_by_name.write().insert(name.to_owned(), class_ref);
         }
-        Ok(self.primitive_class_ids.read().get(name).cloned().unwrap())
+        Ok(self.primitive_class_ids.read().get(name).copied().unwrap())
     }
     
-    /// Use this carefully! The is no ClassRef for this id
+    /// Use this carefully! The is no `ClassRef` for this id
     pub fn get_primitive_class(&self, ctx: &Context<'a, '_>, name: &str) -> ClassId {
         let Ok(id) = self.get_or_create_primitive_class(ctx, name) else {
             unreachable!()
@@ -402,7 +400,7 @@ impl<'a> ClassManager<'a>{
             }
         }*/ // FIXME check if we can do that (background is, that we want to be able to initialize a class as far as possible before having to load necessary classes)
         to_initialize.push(class);
-        Ok(to_initialize.into_iter().filter(|c| self.expect_class_state(c.id, ClassLoadingState::LOADED)).collect())
+        Ok(to_initialize.into_iter().filter(|c| self.expect_class_state(c.id, &ClassLoadingState::LOADED)).collect())
     }
 
     pub fn update_class_state(&self, clazz: ClassRef, new_state: ClassLoadingState){
@@ -411,7 +409,7 @@ impl<'a> ClassManager<'a>{
         guard.insert(clazz.id, new_state);
     }
 
-    fn try_create_array_class(&self, class_name: &str) -> Option<ArrayInfo>{
+    fn try_create_array_class(class_name: &str) -> Option<ArrayInfo> {
         if let Ok((component_type, dims)) = extract_component_type_from_array_class(class_name){
             let array_info = ArrayInfo{
                 dims,
@@ -423,19 +421,17 @@ impl<'a> ClassManager<'a>{
         }
     }
 
-    pub fn find_class_by_name(&self, class_name: &str) -> Option<ClassRef<'a>>{
+    pub fn find_class_by_name(&self, class_name: &str) -> Option<ClassRef<'a>> {
         //self.classes.iter().find(|c| c.name == class_name)
-        self.classes_by_name.read().get(class_name).cloned()
+        self.classes_by_name.read().get(class_name).copied()
     }
 
-    pub fn find_class_by_id(&self, class_id: ClassId) -> Option<ClassRef<'a>>{
-        self.classes_by_id.read().get(&class_id).cloned()
+    pub fn find_class_by_id(&self, class_id: ClassId) -> Option<ClassRef<'a>> {
+        self.classes_by_id.read().get(&class_id).copied()
     }
 
-    pub fn expect_class_state(&self, class_id: ClassId, state: ClassLoadingState) -> bool{
+    pub fn expect_class_state(&self, class_id: ClassId, state: &ClassLoadingState) -> bool {
         self.class_loading_states.read()
-            .get(&class_id)
-            .map(|s| s == &state)
-            .unwrap_or(false)
+            .get(&class_id) == Some(state)
     }
 }

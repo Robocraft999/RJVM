@@ -21,7 +21,7 @@ impl Tracker {
             use crate::vm::debug::loader;
             let config = loader::load_config();
             if let Some(config) = config {
-                tracked_object_ids.extend(config.tracker.ids.iter().cloned().map(RefId));
+                tracked_object_ids.extend(config.tracker.ids.iter().copied().map(RefId));
                 tracked_method_descs.extend(config.tracker.descs);
             }
         }
@@ -64,16 +64,16 @@ impl Tracker {
     pub fn print(&self) {
         info!(target: "debug", "Object Tracker:");
         for (id, events) in self.logged_object_events.borrow().iter() {
-            info!(target: "debug", "Events for: {:?}", id);
-            for event in events.iter() {
-                debug!(target: "debug", "  ~ {}", event);
+            info!(target: "debug", "Events for: {id:?}");
+            for event in events {
+                debug!(target: "debug", "  ~ {event}");
             }
         }
         info!(target: "debug", "Method Tracker:");
         for (sig, events) in self.logged_method_events.borrow().iter() {
-            info!(target: "debug", "Events for: {}", sig);
-            for event in events.iter() {
-                debug!(target: "debug", "  ~ {}", event);
+            info!(target: "debug", "Events for: {sig}");
+            for event in events {
+                debug!(target: "debug", "  ~ {event}");
             }
         }
     }

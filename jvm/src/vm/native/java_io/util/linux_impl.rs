@@ -14,7 +14,7 @@ pub unsafe fn handle_available(fd: i32) -> (bool, i64) { unsafe {
     let mut size: i64 = 0;
 
     let mut buf64: stat64 = std::mem::zeroed();
-    let result = libc::fstat64(fd, &mut buf64);
+    let result = libc::fstat64(fd, &raw mut buf64);
     if result != -1 {
         let mode = buf64.st_mode;
         if mode & libc::S_IFCHR > 0 || mode & libc::S_IFIFO > 0 || mode & libc::S_IFSOCK > 0 {
@@ -44,18 +44,17 @@ pub unsafe fn handle_available(fd: i32) -> (bool, i64) { unsafe {
 }}
 
 
-pub unsafe fn handle_open(path: CString, oflags: i32, mode: i32) -> i32 { unsafe {
+pub unsafe fn handle_open(path: &CString, oflags: i32, mode: i32) -> i32 { unsafe {
     let fd = libc::open64(path.as_ptr(), oflags, mode);
     if fd != -1 {
         let mut buf64: stat64 = std::mem::zeroed();
-        let result = libc::fstat64(fd, &mut buf64);
-        if result != -1 {
-            if buf64.st_mode & libc::S_IFDIR > 0 {
-                error!("Cannot open a dir");
-                libc::close(fd);
-                return -1;
-            }
-        } else {
+        let result = libc::fstat64(fd, &raw mut buf64);
+        if result == -1 {
+            libc::close(fd);
+            return -1;
+        } 
+        if buf64.st_mode & libc::S_IFDIR > 0 {
+            error!("Cannot open a dir");
             libc::close(fd);
             return -1;
         }
@@ -86,10 +85,9 @@ pub unsafe fn file_close(ctx: Context, this_ref: Reference, fd_field_index: usiz
                 "open /dev/null failed".to_owned(),
                 "io: file_close".to_owned()
             );
-        } else {
-            libc::dup2(devnull, fd);
-            libc::close(fd);
         }
+        libc::dup2(devnull, fd);
+        libc::close(fd);
     } else {
         let res = libc::close(fd);
         if res == -1 {
@@ -106,9 +104,9 @@ pub unsafe fn file_close(ctx: Context, this_ref: Reference, fd_field_index: usiz
 }}
 
 pub unsafe fn handle_write(fd: i32, buf: *const jbyte, len: usize) -> isize {
-    unsafe { write(fd, buf as *const c_void, len) }
+    unsafe { write(fd, buf.cast::<c_void>(), len) }
 }
 
 pub unsafe fn handle_read(fd: i32, buf: *mut jbyte, len: usize)  -> isize {
-    unsafe { read(fd, buf as *mut c_void, len) }
+    unsafe { read(fd, buf.cast::<c_void>(), len) }
 }

@@ -34,12 +34,8 @@ pub fn set_fd(ctx: Context, this_ref: Reference, fd_field_index: usize, fd: i32)
 pub fn file_open(ctx: Context, this_ref: Reference, path_val: Value, fd_field_index: usize, flags: i32) -> VMPartialResult<()> {
     let path = ctx.vm.extract_string_from_value(path_val)?;
 
-    let fd = unsafe { imp::handle_open(CString::from_str(path.as_str()).unwrap(), flags, 0o666) };
-    if fd != -1 {
-        set_fd(ctx, this_ref, fd_field_index, fd)?;
-
-        Ok(VMResultType::Successful(()))
-    } else {
+    let fd = unsafe { imp::handle_open(&CString::from_str(path.as_str()).unwrap(), flags, 0o666) };
+    if fd == -1 {
         let exception_clazz = wrap_init!(ctx, ctx.get_or_initialize_class(JAVA_IO_FILE_NOT_FOUND_EXCEPTION)?);
         JavaThread::throw(
             ctx,
@@ -47,6 +43,10 @@ pub fn file_open(ctx: Context, this_ref: Reference, path_val: Value, fd_field_in
             path,
             "io: file_open".to_owned()
         )
+    } else {
+        set_fd(ctx, this_ref, fd_field_index, fd)?;
+
+        Ok(VMResultType::Successful(()))
     }
 }
 

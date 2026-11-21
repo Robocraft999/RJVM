@@ -71,7 +71,7 @@ impl<'a> Class<'a>{
             }
             let super_class = current_class.superclass?;
             if super_class.superclass.is_some(){
-                current_class = super_class
+                current_class = super_class;
             } else {
                 current_class = current_class.interfaces.first()?;
             }
@@ -302,7 +302,7 @@ impl<'a> Class<'a>{
             }
         }
 
-        if !super_class.is_some() {
+        if super_class.is_none() {
             return allocate_new;
         }
 
@@ -313,7 +313,7 @@ impl<'a> Class<'a>{
         // https://github.com/openjdk/jdk8u/blob/master/hotspot/src/share/vm/oops/klassVtable.cpp#L341
         let super_class = super_class.unwrap();
         // FIXME only works one layer deep
-        for super_method in super_class.methods.iter() {
+        for super_method in &super_class.methods {
             if target_method == super_method && !super_method.is_private() {
                 if !target_method.is_package_private() {
                     allocate_new = false;
@@ -330,7 +330,7 @@ impl<'a> Class<'a>{
 
         // assign_itable_indices_for_interface
         if self.is_interface() {
-            for target_method in self.methods.iter_mut(){
+            for target_method in &mut self.methods{
                 // interface_method_needs_itable_index
                 if !target_method.is_static() && !target_method.is_initializer() && !target_method.has_vtable_index() {
                     assert_eq!(target_method.vtable_index, PENDING_ITABLE_INDEX);
@@ -340,12 +340,12 @@ impl<'a> Class<'a>{
             return;
         }
         let interfaces = self.interfaces.clone();
-        for interface in interfaces.iter() {
-            for interface_method in interface.methods.iter() {
+        for interface in &interfaces {
+            for interface_method in &interface.methods {
                 if interface_method.has_itable_index() {
                     //let cam = self.resolve_interface_method_virtual(interface_method.name.as_str(), interface_method.descriptor.as_str()).unwrap();
                     // FIXME only one layer deep
-                    for target_method in self.methods.iter_mut(){
+                    for target_method in &mut self.methods{
                         if target_method == interface_method {
                             target_method.vtable_index = ITABLE_INDEX_MAX - target_method.slot as isize;
                         }

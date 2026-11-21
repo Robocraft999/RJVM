@@ -1,5 +1,6 @@
 use crate::class_file::methods::{ITABLE_INDEX_MAX, MethodInfo, NONVIRTUAL_VTABLE_INDEX, PENDING_ITABLE_INDEX};
 use crate::vm::class::{Class, ClassId, ClassRef};
+use std::cmp::Ordering;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
@@ -19,12 +20,14 @@ impl VTable {
     }
 
     pub fn put_method_at(&mut self, method: MethodInfo, index: usize) {
-        if self.len() == index {
-            self.table.push(method)
-        } else if index < self.len() {
-            self.table[index] = method;
-        } else {
-            unreachable!()
+        match index.cmp(&self.len()) {
+            Ordering::Less => {
+                self.table[index] = method;
+            }
+            Ordering::Equal => {
+                self.table.push(method);
+            }
+            Ordering::Greater => unreachable!()
         }
     }
 
@@ -32,11 +35,11 @@ impl VTable {
         self.table.get(index)
     }
 
-    pub const fn index_of(&self, method: &MethodInfo) -> Option<isize> {
-        if !method.has_vtable_index() {
-            None
-        } else {
+    pub const fn index_of(method: &MethodInfo) -> Option<isize> {
+        if method.has_vtable_index() {
             Some(method.vtable_index())
+        } else {
+            None
         }
     }
 
@@ -171,7 +174,7 @@ impl ITable {
         itable.entries = vec![Vec::new(); num_interfaces];
 
         for (i, transitive_interface) in transitive_interfaces.iter().enumerate() {
-            itable.initialize_for_interface(clazz, i, transitive_interface)
+            itable.initialize_for_interface(clazz, i, transitive_interface);
         }
 
         itable
@@ -195,7 +198,7 @@ impl ITable {
                     // if not public -> fill with illegal access error
                 } else {
                     let ime_num = m.itable_index() as usize;
-                    methods[ime_num] = Some(target)
+                    methods[ime_num] = Some(target);
                 }
             }
         }
@@ -204,7 +207,7 @@ impl ITable {
     }
 }
 
-impl<'a> Class<'a> {
+impl Class<'_> {
     pub fn find_vtable_entry(&self, name: &str, descriptor: &str) -> Option<&MethodInfo> {
         self.vtable.table.iter().find(|m| m.name == name && m.descriptor.as_str() == descriptor)
     }
@@ -213,8 +216,8 @@ impl<'a> Class<'a> {
         self.vtable.method_at(index)
     }
 
-    pub fn get_itable_entry(&self, interface_id: &ClassId, index: usize) -> Option<&MethodInfo> {
-        let interface_index = self.itable.interface_to_index.get(interface_id)?;
+    pub fn get_itable_entry(&self, interface_id: ClassId, index: usize) -> Option<&MethodInfo> {
+        let interface_index = self.itable.interface_to_index.get(&interface_id)?;
         self.itable.entries[*interface_index].get(index).flatten_ref()
     }
 }

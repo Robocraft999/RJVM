@@ -93,7 +93,7 @@ impl <'a> NativeMethodRegistry<'a> {
             method_name: method_name.to_string(),
             method_descriptor: MethodDescriptor::new(method_descriptor.to_string()),
             delegate
-        })
+        });
     }
 
     fn add_loaded_library(&self, lib: Library) {
@@ -111,9 +111,9 @@ impl <'a> NativeMethodRegistry<'a> {
             for lib in res.iter(){
                 unsafe {
                     let ptr = if let Ok(sym) = lib.get::<*const ()>(short.as_bytes()){
-                        CodePtr::from_ptr(*sym as * const c_void)
+                        CodePtr::from_ptr((*sym).cast::<c_void>())
                     } else if let Ok(sym) = lib.get::<*const ()>(long.as_bytes()){
-                        CodePtr::from_ptr(*sym as * const c_void)
+                        CodePtr::from_ptr((*sym).cast::<c_void>())
                     } else { continue };
                     if let Ok(mut res2) = self.extern_methods.write() {
                         res2.insert(class_and_method.clone(), ExternNativeMethod::new(ptr, &class_and_method.method.descriptor));
@@ -165,7 +165,7 @@ impl <'a> NativeMethodRegistry<'a> {
                 if ctx.thread.meta.id == 0 {
                     info!("METHOD_NAME (extern native): {}", cam.format());
                 }
-                let jni_result = extern_native.call(cam, class_object_or_this, args);
+                let jni_result = extern_native.call(cam, class_object_or_this, args.as_slice());
                 let result = jni_result.map(|val| unsafe { match (cam.method.descriptor.return_type.clone().unwrap(), val){
                             (FieldType::Primitive(PrimitiveType::Boolean), jvalue { z }) => Value::Integer(z as i32),
                             (FieldType::Primitive(PrimitiveType::Byte), jvalue { b }) => Value::Integer(b as i32),
@@ -184,9 +184,8 @@ impl <'a> NativeMethodRegistry<'a> {
                     } else {
                         Some(Ok(VMResultType::Successful(result)))
                     };
-                } else {
-                    unreachable!("Could not acquire lock for exception in native")
                 }
+                unreachable!("Could not acquire lock for exception in native");
             }
         }
         None

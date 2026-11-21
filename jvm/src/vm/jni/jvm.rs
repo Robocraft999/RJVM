@@ -937,7 +937,7 @@ pub unsafe extern "system-unwind" fn JVM_GetLastErrorString(buf: *mut c_char, le
     let last_error = std::io::Error::last_os_error().to_string();
     let error_string = CString::from_str(last_error.as_str()).unwrap();
     unsafe{
-        *buf = *error_string.as_ptr()
+        *buf = *error_string.as_ptr();
     }
     (error_string.count_bytes() + 1) as jint
 }
@@ -1087,7 +1087,7 @@ pub unsafe extern "system-unwind" fn JVM_GetHostName(name: *mut c_char, namelen:
 pub unsafe extern "system-unwind" fn JVM_RawMonitorCreate() -> *const c_void {
     debug!(target: "native", "JVM_RawMonitorCreate");
     let data = Box::new("Monitor");
-    Box::leak(data).as_ptr() as _
+    Box::leak(data).as_ptr().cast()
 }
 
 #[unsafe(no_mangle)]

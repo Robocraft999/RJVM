@@ -8,7 +8,7 @@ use libffi::high::CodePtr;
 use libffi::middle::{Arg, Cif, Type};
 use std::ffi::c_void;
 
-fn primitive_type_to_native(primitive_type: &PrimitiveType) -> Type {
+fn primitive_type_to_native(primitive_type: PrimitiveType) -> Type {
     match primitive_type {
         PrimitiveType::Boolean => Type::c_uchar(),
         PrimitiveType::Byte => Type::c_schar(),
@@ -23,15 +23,14 @@ fn primitive_type_to_native(primitive_type: &PrimitiveType) -> Type {
 
 fn field_type_to_native(field_type: &FieldType) -> Type{
     match field_type {
-        FieldType::Object(..) => Type::pointer(),
-        FieldType::Array(..) => Type::pointer(),
-        FieldType::Primitive(pt) => primitive_type_to_native(pt)
+        FieldType::Object(..) | FieldType::Array(..) => Type::pointer(),
+        FieldType::Primitive(pt) => primitive_type_to_native(*pt)
     }
 }
 
 fn descriptor_to_cif(method_descriptor: &MethodDescriptor) -> Cif {
     // first arg is always JNIEnv, second arg is this / class depending on whether static
-    let args: Vec<Type> = vec![Type::pointer(), primitive_type_to_native(&PrimitiveType::Integer)]
+    let args: Vec<Type> = vec![Type::pointer(), primitive_type_to_native(PrimitiveType::Integer)]
         .into_iter()
         .chain(method_descriptor.args.iter().map(field_type_to_native))
         .collect();
@@ -74,14 +73,14 @@ impl ExternNativeMethod {
         Self { ptr, cif }
     }
 
-    pub fn call<'a>(&self, class_and_method: &ClassAndMethod, object: Reference<'a>, args: Vec<Value>) -> Option<jvalue>{
+    pub fn call(&self, class_and_method: &ClassAndMethod, object: Reference, args: &[Value]) -> Option<jvalue>{
         let env: *const JNIEnv = thread().jni_env.as_ref().get_ref();
         let second = object.id.nid() as jobject;
         let mut jni_args = vec![Arg::new(&env), Arg::new(&second)];
-        jni_args.extend(values_to_jni_args(&args));
+        jni_args.extend(values_to_jni_args(args));
         unsafe {
             match class_and_method.method.descriptor.return_type{
-                Some(FieldType::Object(..)) | Some(FieldType::Array(..)) => {
+                Some(FieldType::Object(..) | FieldType::Array(..)) => {
                     let object_id: jobject = self.cif.call(self.ptr, jni_args.as_slice());
                     Some(jvalue {l: object_id})
                 }

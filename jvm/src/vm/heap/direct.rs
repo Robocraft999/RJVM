@@ -35,7 +35,7 @@ impl Unsafe {
 
     pub fn allocate_memory(&self, amount: usize) -> i64 {
         let mut guard = self.memory.write();
-        guard.alloc(amount).map(|entry| entry.ptr as i64).unwrap_or(-1)
+        guard.alloc(amount).map_or(-1, |entry| entry.ptr as i64)
     }
 
     pub fn set_memory(&self, ptr: i64, amount: usize, byte: u8) -> VMResult<()> {
@@ -78,7 +78,7 @@ mod tests {
     #[test]
     fn test_allocate_memory() {
         let unsafe_allocator = Unsafe::new();
-        assert_ne!(unsafe_allocator.allocate_memory(8), -1)
+        assert_ne!(unsafe_allocator.allocate_memory(8), -1);
     }
 
     #[test]

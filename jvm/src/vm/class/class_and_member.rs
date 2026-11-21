@@ -41,7 +41,7 @@ impl<'a> ClassAndMethod<'a>{
 
     pub fn get_max_locals(&self) -> usize{
         self.method.attributes.code.as_ref().map_or_else(
-            || self.method.descriptor.args.iter().map(FieldType::get_locals_length).sum::<usize>() + if self.method.is_static() {0} else {1}, 
+            || self.method.descriptor.args.iter().map(FieldType::get_locals_length).sum::<usize>() + if self.method.is_static() {0} else {1},
             |code| code.max_locals as usize
         )
     }
@@ -54,9 +54,9 @@ impl<'a> ClassAndMethod<'a>{
         }
     }
 
-    pub fn resolve_exception_handler(&self, ctx: &Context<'a, '_>, current_pc: &ProgramCounter, thrown_class_name: &str) -> Option<u16> {
+    pub fn resolve_exception_handler(&self, ctx: &Context<'a, '_>, current_pc: ProgramCounter, thrown_class_name: &str) -> Option<u16> {
         if let Some(code) = &self.method.attributes.code {
-            for handler in code.exception_table.iter() {
+            for handler in &code.exception_table {
                 let can_handle = match handler.catch_type {
                     0 => true,
                     index => {

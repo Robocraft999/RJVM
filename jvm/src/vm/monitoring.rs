@@ -128,13 +128,13 @@ impl MonitorHandler {
         let monitor = {
             let state = self.handler_state.lock();
 
-            state.get(&associate).ok_or_else(|| VmError::ValidationError(format!("Monitor for {:?} does not exist", associate))).cloned()
+            state.get(&associate).ok_or_else(|| VmError::ValidationError(format!("Monitor for {associate:?} does not exist"))).cloned()
         }?;
 
         // has to own the monitor to exit
         let mut state_guard = monitor.monitor_state.lock();
         if !matches!(&state_guard.owner, Some(meta) if meta == &ctx.thread.meta) {
-            return Err(VmError::ValidationError(format!("Cannot exit monitor owned by: {:?} with {:?}. (monitor: {:?})", &state_guard.owner, &ctx.thread.meta, state_guard.associate)))
+            return Err(VmError::ValidationError(format!("Cannot exit monitor owned by: {:?} with {:?}. (monitor: {:?})", state_guard.owner, ctx.thread.meta, state_guard.associate)))
         }
 
         if state_guard.counter > 1 {
@@ -145,12 +145,12 @@ impl MonitorHandler {
         } else {
             #[cfg(feature = "debug")]
             ctx.thread.debug_helper.monitor_logger.push_event(associate, format!("Exit out (at: {:?})", std::time::Instant::now()));
-            self.release_monitor(state_guard);
+            Self::release_monitor(state_guard);
         }
         Ok(())
     }
 
-    fn release_monitor(&self, mut state_guard: MutexGuard<RawMutex, MonitorState>) {
+    fn release_monitor(mut state_guard: MutexGuard<RawMutex, MonitorState>) {
         // pass the ownership to next thread blocked on this, if any
         if let Some(to_wake) = state_guard.entry_list.pop_front() {
             state_guard.owner = Some(to_wake.clone());
@@ -192,7 +192,7 @@ impl MonitorHandler {
 
             // release the ownership so it can get notified
             let counter = monitor_guard.counter;
-            self.release_monitor(monitor_guard);
+            Self::release_monitor(monitor_guard);
             counter
         };
 

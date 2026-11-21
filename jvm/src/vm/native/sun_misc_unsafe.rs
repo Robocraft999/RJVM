@@ -98,7 +98,7 @@ gen_delegate!(delegate_address_size, |_ctx, _obj_ref, _args| {
 
 gen_delegate!(delegate_object_field_offset, |ctx, _obj_ref, args| {
     //FIXME calc real offset
-    debug!("delegate_object_field_offset: '{:?}'", args);
+    debug!("delegate_object_field_offset: '{args:?}'");
     if let Some(Value::Reference(field_id)) = args.get(0){
         let field_ref = ctx.vm.resolve_object_by_id(*field_id)?;
         let Value::Reference(class_ref_id) = field_ref.get_field(FIELD_clazz_INDEX) else { return invalidation!("Expected a reference") };
@@ -122,7 +122,7 @@ gen_delegate!(delegate_static_field_offset, |ctx, obj_ref, args| {
 });
 
 gen_delegate!(delegate_put_object_volatile, |ctx, _obj_ref, args| {
-    debug!("put_object_volatile args: {:?}", args);
+    debug!("put_object_volatile args: {args:?}");
     if let (Some(Value::Reference(o_id)), Some(Value::Long(index)), Some(Value::Reference(x_id))) = (args.get(0), args.get(1), args.get(3)){
         let o = ctx.vm.resolve_object_by_id(*o_id)?;
         // FIXME verify if null or correct field type
@@ -143,7 +143,7 @@ gen_delegate!(delegate_put_object_volatile, |ctx, _obj_ref, args| {
 });
 
 gen_delegate!(delegate_get_object_volatile, |ctx, _obj_ref, args| {
-    debug!("get_object_volatile args: {:?}", args);
+    debug!("get_object_volatile args: {args:?}");
     if let (Some(Value::Reference(o_id)), Some(Value::Long(index))) = (args.get(0), args.get(1)) {
         let o = ctx.vm.resolve_object_by_id(*o_id)?;
         if o.is_array(){
@@ -172,7 +172,7 @@ gen_delegate!(delegate_get_object_volatile, |ctx, _obj_ref, args| {
 });
 
 gen_delegate!(delegate_put_int_volatile, |ctx, _obj_ref, args| {
-    debug!("put_int_volatile args: {:?}", args);
+    debug!("put_int_volatile args: {args:?}");
     if let (Some(Value::Reference(o_id)), Some(Value::Long(index)), Some(Value::Integer(val))) = (args.get(0), args.get(1), args.get(3)){
         let o = ctx.vm.resolve_object_by_id(*o_id)?;
         // FIXME verify if null or correct field type
@@ -188,7 +188,7 @@ gen_delegate!(delegate_put_int_volatile, |ctx, _obj_ref, args| {
 });
 
 gen_delegate!(delegate_get_int_volatile, |ctx, _obj_ref, args| {
-    debug!("get_int_volatile args: {:?}", args);
+    debug!("get_int_volatile args: {args:?}");
     if let (Some(Value::Reference(o_id)), Some(Value::Long(index))) = (args.get(0), args.get(1)) {
         let o = ctx.vm.resolve_object_by_id(*o_id)?;
         if o.is_array(){
@@ -208,7 +208,7 @@ gen_delegate!(delegate_get_int_volatile, |ctx, _obj_ref, args| {
 });
 
 gen_delegate!(delegate_put_long_volatile, |ctx, _obj_ref, args| {
-    debug!("put_int_volatile args: {:?}", args);
+    debug!("put_int_volatile args: {args:?}");
     if let (Some(Value::Reference(o_id)), Some(Value::Long(index)), Some(Value::Long(val))) = (args.get(0), args.get(1), args.get(3)){
         let o = ctx.vm.resolve_object_by_id(*o_id)?;
         // FIXME verify if null or correct field type
@@ -224,7 +224,7 @@ gen_delegate!(delegate_put_long_volatile, |ctx, _obj_ref, args| {
 });
 
 gen_delegate!(delegate_get_long_volatile, |ctx, _obj_ref, args| {
-    debug!("get_long_volatile args: {:?}", args);
+    debug!("get_long_volatile args: {args:?}");
     if let (Some(Value::Reference(o_id)), Some(Value::Long(index))) = (args.get(0), args.get(1)) {
         let o = ctx.vm.resolve_object_by_id(*o_id)?;
         if o.is_array(){
@@ -246,7 +246,7 @@ gen_delegate!(delegate_get_long_volatile, |ctx, _obj_ref, args| {
 gen_delegate!(delegate_static_field_base, |ctx, _obj_ref, args| {
     if let Some(Value::Reference(field_ref_id)) = args.get(0){
         let field_object = ctx.vm.resolve_object_by_id(*field_ref_id)?;
-        trace!("staticFieldBase: on field: '{:?}'", field_object);
+        trace!("staticFieldBase: on field: '{field_object:?}'");
         let class_object = field_object.get_field(FIELD_clazz_INDEX);
         non_failing_some(class_object)
     } else {
@@ -515,7 +515,7 @@ gen_delegate!(delegate_put_double, |ctx, _obj_ref, args| {
 });
 
 gen_delegate!(delegate_put_ordered_object, |ctx, _obj_ref, args| {
-    debug!("put_ordered_object args: {:?}", args);
+    debug!("put_ordered_object args: {args:?}");
     if let (Some(Value::Reference(o_id)), Some(Value::Long(index)), Some(x)) = (args.get(0), args.get(1), args.get(3)) {
         let o = ctx.vm.resolve_object_by_id(*o_id)?;
         if o.is_array(){
@@ -610,7 +610,7 @@ gen_delegate!(delegate_allocate_instance, |ctx, _obj_ref, args| {
 gen_delegate!(delegate_should_be_initialized, |ctx, _obj_ref, args| {
     if let Some(Value::Reference(class_ref_id)) = args.get(0){
         let clazz = ctx.resolve_clazz_by_class_ref_id(*class_ref_id)?;
-        let initialized = ctx.vm.class_manager.expect_class_state(clazz.id, ClassLoadingState::INITIALIZED);
+        let initialized = ctx.vm.class_manager.expect_class_state(clazz.id, &ClassLoadingState::INITIALIZED);
         non_failing_some(Value::from(!initialized))
     } else {
         invalidation!("Expected a class reference but got: {:?}", args)
@@ -644,7 +644,7 @@ gen_delegate!(delegate_park, |ctx, _obj_ref, args| {
             park_timeout(Duration::from_millis(*time as u64));
             ctx.check_canceled();
         } else if *is_absolute == 1 {
-            let amount = Duration::from_millis(*time as u64) - SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap();
+            let amount = Duration::from_millis(*time as u64).checked_sub(SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap()).unwrap();
             park_timeout(amount);
             ctx.check_canceled();
         } else {
@@ -671,6 +671,6 @@ gen_delegate!(delegate_unpark, |ctx, _obj_ref, args| {
     } else {
         let mut unpark_count_lock = meta.unsafe_unpark_count.lock();
         *unpark_count_lock += 1;
-    };
+    }
     non_failing_none()
 });
